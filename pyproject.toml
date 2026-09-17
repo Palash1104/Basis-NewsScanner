@@ -1,0 +1,45 @@
+[project]
+name = "newsdesk"
+version = "0.1.0"
+description = "Personal news digest with plain-language summaries and market impact notes"
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "anthropic>=1.6.0",
+    "feedparser>=6.0.14",
+    "httpx>=0.28.1",
+    "pydantic>=2.13.5",
+    "python-dotenv>=1.2.3",
+    "pyyaml>=6.0.3",
+    "rapidfuzz>=3.14.6",
+    "sqlalchemy>=2.0.54",
+    "typer>=0.27.2",
+    "tzdata>=2026.4",
+]
+
+[project.scripts]
+newsdesk = "app.cli:app"
+
+[build-system]
+requires = ["uv_build>=0.10.8,<0.11.0"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-name = "app"
+module-root = ""
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "ruff>=0.16.7",
+]

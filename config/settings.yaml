@@ -1,0 +1,66 @@
+timezone: Asia/Kolkata
+
+llm:
+  summary_model: claude-haiku-4-5 # cheap: summaries + event extraction
+  reasoning_model: claude-sonnet-5 # stronger: impact mapping, reranking
+  # Verified 2026-09-16 against Anthropic's model reference: both IDs are current
+  # and both support structured outputs.
+  # Temperature per model ID. Leave a model out if it rejects sampling params
+  # (claude-sonnet-5 returns HTTP 400 when temperature is sent).
+  temperature:
+    claude-haiku-4-5: 0.2
+  timeout_seconds: 60
+  max_retries: 3
+
+http:
+  timeout_seconds: 10
+  max_attempts: 3
+  backoff_base_seconds: 1.0
+  user_agent: "Mozilla/5.0 (compatible; Newsdesk/0.1; personal news reader)"
+
+pipeline:
+  lookback_hours: 12
+  story_attach_window_hours: 36
+  max_stories_per_run: 20
+  max_articles_per_story_for_llm: 5
+  snippet_max_chars: 500
+
+dedupe:
+  same_source_title_similarity: 90
+  same_source_window_hours: 24
+  syndication_title_similarity: 90
+
+grouping:
+  # Provisional until approved at the Phase 1 checkpoint. Compared on a 24h sample of 786
+  # articles with scripts/grouping_report.py: merges scoring ~62 were about half wrong; at 64,
+  # 10 of 12 borderline merges were the same story and 2 were loose topic matches. Near misses
+  # at 63-64 are mostly the same story (title-only matching's limit). The title+snippet blend
+  # and token_sort scorers did worse.
+  scorer: title_token_set
+  threshold: 64
+
+ranking:
+  w_sources: 1.0
+  w_region_diversity: 0.8
+  w_source_weight: 0.3
+  w_recency: 0.5
+  recency_half_life_hours: 12
+
+impacts:
+  max_impacts_per_story: 8
+
+scoring:
+  horizons_trading_days: [1, 5]
+  vol_lookback_days: 20
+  hit_threshold_vol_multiple: 0.5
+  min_samples_to_show_rate: 5
+
+delivery:
+  digest_times: ["07:30", "19:30"]
+  max_stories_per_digest: 15
+  breaking_alerts: false
+  breaking_importance_threshold: 5.0
+
+paths:
+  database: data/newsdesk.db
+  log_dir: data/logs

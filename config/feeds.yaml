@@ -1,0 +1,186 @@
+# News sources. Verified 2026-09-16 with scripts/verify_feeds.py: every enabled feed returned
+# HTTP 200, parsed, and had entries from the last 12 hours.
+#
+# Fields: name (outlet; feeds sharing a name are one outlet), url, region (US | IN | GLOBAL),
+# weight (1-3, prominence), optional category_hint, enabled, aliases (other spellings of the
+# outlet name, e.g. how Google News labels it).
+#
+# Weights are starting guesses; tune freely.
+
+feeds:
+  # --- Global ---
+  - name: BBC
+    url: https://feeds.bbci.co.uk/news/world/rss.xml
+    region: GLOBAL
+    weight: 3
+    aliases: [BBC News]
+
+  - name: Al Jazeera
+    url: https://www.aljazeera.com/xml/rss/all.xml
+    region: GLOBAL
+    weight: 2
+    aliases: [Al Jazeera English]
+
+  - name: NPR
+    url: https://feeds.npr.org/1004/rss.xml
+    region: GLOBAL
+    weight: 2
+
+  - name: The Guardian
+    url: https://www.theguardian.com/world/rss
+    region: GLOBAL
+    weight: 2
+
+  # --- US ---
+  - name: CNBC
+    url: https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=100003114
+    region: US
+    weight: 2
+
+  - name: CNBC
+    url: https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=20910258
+    region: US
+    weight: 2
+    category_hint: Economy & Markets
+
+  # Politico's main feed (politics-news.xml) had nothing newer than 18h at verification,
+  # and economy/defense/energy were 21h-10 days stale. congress and playbook were current.
+  - name: Politico
+    url: https://rss.politico.com/congress.xml
+    region: US
+    weight: 2
+    category_hint: Politics
+
+  - name: Politico
+    url: https://rss.politico.com/playbook.xml
+    region: US
+    weight: 2
+    category_hint: Politics
+
+  # Paywalled: headline + RSS description only.
+  - name: The New York Times
+    url: https://rss.nytimes.com/services/xml/rss/nyt/World.xml
+    region: US
+    weight: 3
+    aliases: [NYT, New York Times]
+
+  # --- India ---
+  - name: The Hindu
+    url: https://www.thehindu.com/news/national/feeder/default.rss
+    region: IN
+    weight: 3
+
+  - name: The Hindu
+    url: https://www.thehindu.com/news/international/feeder/default.rss
+    region: IN
+    weight: 3
+
+  - name: The Hindu
+    url: https://www.thehindu.com/business/feeder/default.rss
+    region: IN
+    weight: 3
+    category_hint: Economy & Markets
+
+  - name: The Indian Express
+    url: https://indianexpress.com/section/india/feed/
+    region: IN
+    weight: 3
+
+  - name: The Indian Express
+    url: https://indianexpress.com/section/world/feed/
+    region: IN
+    weight: 3
+
+  - name: The Indian Express
+    url: https://indianexpress.com/section/business/feed/
+    region: IN
+    weight: 3
+    category_hint: Economy & Markets
+
+  - name: Hindustan Times
+    url: https://www.hindustantimes.com/feeds/rss/india-news/rssfeed.xml
+    region: IN
+    weight: 2
+
+  - name: Hindustan Times
+    url: https://www.hindustantimes.com/feeds/rss/world-news/rssfeed.xml
+    region: IN
+    weight: 2
+
+  - name: Hindustan Times
+    url: https://www.hindustantimes.com/feeds/rss/business/rssfeed.xml
+    region: IN
+    weight: 2
+    category_hint: Economy & Markets
+
+  - name: Livemint
+    url: https://www.livemint.com/rss/news
+    region: IN
+    weight: 2
+    aliases: [Mint]
+
+  - name: Livemint
+    url: https://www.livemint.com/rss/markets
+    region: IN
+    weight: 2
+    aliases: [Mint]
+    category_hint: Economy & Markets
+
+  - name: Livemint
+    url: https://www.livemint.com/rss/economy
+    region: IN
+    weight: 2
+    aliases: [Mint]
+    category_hint: Economy & Markets
+
+  # URLs from the outlet's RSS index: https://economictimes.indiatimes.com/rss.cms
+  - name: The Economic Times
+    url: https://economictimes.indiatimes.com/rssfeedstopstories.cms
+    region: IN
+    weight: 2
+
+  - name: The Economic Times
+    url: https://economictimes.indiatimes.com/news/economy/rssfeeds/1373380680.cms
+    region: IN
+    weight: 2
+    category_hint: Economy & Markets
+
+  - name: The Economic Times
+    url: https://economictimes.indiatimes.com/markets/rssfeeds/1977021501.cms
+    region: IN
+    weight: 2
+    category_hint: Economy & Markets
+
+  # --- Google News top stories (links are Google redirect URLs; outlet comes from the entry) ---
+  - name: Google News US
+    url: https://news.google.com/rss?hl=en-US&gl=US&ceid=US:en
+    region: US
+    weight: 1
+
+  - name: Google News India
+    url: https://news.google.com/rss?hl=en-IN&gl=IN&ceid=IN:en
+    region: IN
+    weight: 1
+
+  # --- Unofficial stand-ins via Google News search (off by default) ---
+  # Reuters and AP publish no official RSS. These returned 100 entries/day at verification.
+  - name: Reuters
+    url: https://news.google.com/rss/search?q=site:reuters.com+when:1d&hl=en-US&gl=US&ceid=US:en
+    region: GLOBAL
+    weight: 3
+    enabled: false
+
+  - name: AP News
+    url: https://news.google.com/rss/search?q=site:apnews.com+when:1d&hl=en-US&gl=US&ceid=US:en
+    region: GLOBAL
+    weight: 3
+    aliases: [Associated Press, AP]
+    enabled: false
+
+  # Moneycontrol's official feeds (moneycontrol.com/rss/*.xml) have not updated in 2+ years and
+  # its RSS index page returns 410 Gone. This unofficial search is the only working option.
+  - name: Moneycontrol
+    url: https://news.google.com/rss/search?q=site:moneycontrol.com+when:1d&hl=en-IN&gl=IN&ceid=IN:en
+    region: IN
+    weight: 2
+    enabled: false
