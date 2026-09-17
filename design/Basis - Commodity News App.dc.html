@@ -1,0 +1,489 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="_ds/modernist-3dfd6d1f-f6ac-418e-8f3e-37cf9f987647/styles.css">
+<script src="_ds/modernist-3dfd6d1f-f6ac-418e-8f3e-37cf9f987647/_ds_bundle.js"></script>
+<style>
+body{margin:0;background:#dedbd8;font-family:"Archivo",system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+a{color:#ae1800}a:hover{color:#dd2b0f}
+</style>
+</helmet>
+<div style="min-height:100vh;display:flex;flex-direction:column;align-items:center;gap:20px;padding:40px 24px 64px">
+<div style="display:flex;align-items:baseline;gap:12px;width:1280px;max-width:100%">
+<span style="font-size:11px;font-weight:800;letter-spacing:.14em;text-transform:uppercase;color:#ae1800">Basis</span>
+<span style="font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:rgba(32,30,29,.7)">Commodity news for ordinary investors — laptop mockups</span>
+</div>
+<x-import component-from-global-scope="ChromeWindow" from="./browser-window.jsx" width="{{ w }}" height="{{ h }}" url="{{ url }}" tabs="{{ tabs }}" hint-size="1280px,820px">
+
+<div style="background:#f3f2f2;color:#201e1d;min-height:100%">
+
+<div style="display:flex;align-items:center;gap:28px;padding:16px 40px;border-bottom:2px solid rgba(32,30,29,.4);background:#f3f2f2;position:sticky;top:0;z-index:5">
+  <span style="font-family:Archivo;font-weight:800;font-size:22px;letter-spacing:-.02em;margin-right:8px">BASIS</span>
+  <span style="width:1px;height:22px;background:rgba(32,30,29,.25)"></span>
+  <a href="#" onClick="{{ goFeed }}" style="font-size:13px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;text-decoration:none;color:{{ feedTint }}">Today</a>
+  <a href="#" onClick="{{ goWatch }}" style="font-size:13px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;text-decoration:none;color:{{ watchTint }}">Watchlist</a>
+  <span style="font-size:13px;letter-spacing:.04em;text-transform:uppercase;color:rgba(32,30,29,.7)">Commodities</span>
+  <span style="font-size:13px;letter-spacing:.04em;text-transform:uppercase;color:rgba(32,30,29,.7)">Learn</span>
+  <div style="margin-left:auto;display:flex;align-items:center;gap:12px">
+    <input class="input" placeholder="Search a story or a commodity" style="width:260px;background:#eae9e9"/>
+    <button class="btn btn-primary" style="padding:8px 14px">Get the brief</button>
+    <span style="width:32px;height:32px;background:#201e1d;color:#f3f2f2;display:grid;place-items:center;font-size:12px;font-weight:800">RK</span>
+  </div>
+</div>
+
+<div style="display:flex;align-items:stretch;border-bottom:2px solid rgba(32,30,29,.4);background:#eae9e9">
+  <div style="padding:10px 16px 10px 40px;font-size:10px;font-weight:800;letter-spacing:.12em;text-transform:uppercase;color:#ae1800;border-right:1px solid rgba(32,30,29,.25);display:flex;align-items:center;white-space:nowrap">Moving now</div>
+  <sc-for list="{{ ticker }}" as="t" hint-placeholder-count="7">
+    <div style="display:flex;align-items:center;gap:8px;padding:10px 18px;border-right:1px solid rgba(32,30,29,.15)">
+      <span style="font-size:11px;font-weight:800;letter-spacing:.08em">{{ t.code }}</span>
+      <span style="font-size:11px;color:{{ t.color }}">{{ t.change }}</span>
+    </div>
+  </sc-for>
+</div>
+
+<sc-if value="{{ isFeed }}" hint-placeholder-val="{{ true }}">
+<div style="display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:0;align-items:start">
+
+  <div style="padding:40px 40px 64px;min-width:0">
+    <div style="display:flex;align-items:baseline;justify-content:space-between;gap:24px;padding-bottom:20px;border-bottom:2px solid rgba(32,30,29,.4)">
+      <div>
+        <h1 style="font-size:44px;margin:0 0 6px">What moved, and why</h1>
+        <p style="margin:0;font-size:14px;color:rgba(32,30,29,.7)">Wednesday 16 September 2026 · six stories · read time 9 min</p>
+      </div>
+      <div class="seg" style="flex:none">
+        <label class="seg-opt"><input type="radio" name="span" checked=""/>1D</label>
+        <label class="seg-opt"><input type="radio" name="span"/>1W</label>
+        <label class="seg-opt"><input type="radio" name="span"/>1M</label>
+      </div>
+    </div>
+
+    <sc-for list="{{ stories }}" as="s" hint-placeholder-count="4">
+      <div onClick="{{ s.open }}" style="display:grid;grid-template-columns:104px minmax(0,1fr);gap:28px;padding:32px 0;border-bottom:1px solid rgba(32,30,29,.25);cursor:pointer">
+        <div style="display:flex;flex-direction:column;gap:6px">
+          <span style="font-size:10px;font-weight:800;letter-spacing:.12em;text-transform:uppercase;color:#ae1800">{{ s.sector }}</span>
+          <span style="font-size:11px;color:rgba(32,30,29,.7)">{{ s.time }}</span>
+          <span style="font-size:11px;color:rgba(32,30,29,.7)">{{ s.source }}</span>
+        </div>
+        <div style="min-width:0">
+          <h2 style="font-size:27px;margin:0 0 10px;max-width:30ch;text-wrap:pretty">{{ s.headline }}</h2>
+          <sc-if value="{{ showPlain }}" hint-placeholder-val="{{ true }}">
+            <div style="display:flex;gap:12px;max-width:62ch;margin-bottom:20px">
+              <span style="flex:none;width:2px;background:#201e1d"></span>
+              <p style="margin:0;font-size:15px;line-height:1.6;color:rgba(32,30,29,.85);text-wrap:pretty">{{ s.plain }}</p>
+            </div>
+          </sc-if>
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+            <span style="font-size:10px;font-weight:800;letter-spacing:.12em;text-transform:uppercase;color:rgba(32,30,29,.7)">Commodities affected</span>
+            <span style="flex:1;height:1px;background:rgba(32,30,29,.2)"></span>
+          </div>
+          <div style="display:flex;flex-wrap:wrap;gap:10px">
+            <sc-for list="{{ s.commodities }}" as="c" hint-placeholder-count="3">
+              <div style="display:flex;align-items:center;gap:12px;padding:8px 12px;background:#eae9e9;min-width:196px">
+                <div style="display:flex;flex-direction:column;gap:1px;min-width:0">
+                  <span style="font-size:13px;font-weight:800;letter-spacing:-.01em">{{ c.name }}</span>
+                  <span style="font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:rgba(32,30,29,.7)">{{ c.unit }}</span>
+                </div>
+                <svg viewBox="0 0 68 22" width="68" height="22" style="margin-left:auto;flex:none;overflow:visible">
+                  <polyline points="{{ c.sm }}" fill="none" stroke="{{ c.color }}" stroke-width="1.6" stroke-linejoin="round"></polyline>
+                </svg>
+                <span style="font-size:13px;font-weight:800;flex:none;color:{{ c.color }}">{{ c.change }}</span>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+      </div>
+    </sc-for>
+
+    <div style="display:flex;align-items:center;gap:16px;padding-top:28px">
+      <button class="btn btn-secondary">Earlier stories</button>
+      <span style="font-size:12px;color:rgba(32,30,29,.7)">Updated 07:40 · next brief 17:00</span>
+    </div>
+  </div>
+
+  <sc-if value="{{ showRail }}" hint-placeholder-val="{{ true }}">
+  <div style="padding:40px 40px 64px 28px;border-left:2px solid rgba(32,30,29,.4);min-height:900px">
+    <h6 style="margin:0 0 14px;font-size:11px">Your watchlist</h6>
+    <sc-for list="{{ watch }}" as="c" hint-placeholder-count="4">
+      <div style="display:flex;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid rgba(32,30,29,.2)">
+        <div style="min-width:0;flex:1">
+          <div style="font-size:14px;font-weight:800">{{ c.name }}</div>
+          <div style="font-size:11px;color:rgba(32,30,29,.7)">{{ c.price }}</div>
+        </div>
+        <svg viewBox="0 0 68 22" width="68" height="22" style="flex:none;overflow:visible">
+          <polyline points="{{ c.sm }}" fill="none" stroke="{{ c.color }}" stroke-width="1.6" stroke-linejoin="round"></polyline>
+        </svg>
+        <span style="font-size:13px;font-weight:800;color:{{ c.color }}">{{ c.change }}</span>
+      </div>
+    </sc-for>
+    <button class="btn btn-ghost" style="margin-top:14px">Edit watchlist</button>
+
+    <hr class="hr" style="margin:28px 0"/>
+
+    <h6 style="margin:0 0 14px;font-size:11px">In plain english</h6>
+    <p style="font-size:13px;line-height:1.6;color:rgba(32,30,29,.8);margin:0 0 12px">A commodity is a raw material — metal, grain, fuel — priced on a global market. When news changes how much of it exists or how much people need, the price moves.</p>
+    <a href="#" style="font-size:13px;font-weight:600">How to read a sparkline →</a>
+
+    <hr class="hr" style="margin:28px 0"/>
+
+    <h6 style="margin:0 0 14px;font-size:11px">Biggest movers · 24h</h6>
+    <sc-for list="{{ movers }}" as="m" hint-placeholder-count="4">
+      <div style="display:flex;align-items:baseline;gap:10px;padding:8px 0">
+        <span style="font-size:13px;flex:1">{{ m.name }}</span>
+        <span style="font-size:13px;font-weight:800;color:{{ m.color }}">{{ m.change }}</span>
+      </div>
+    </sc-for>
+  </div>
+  </sc-if>
+
+</div>
+</sc-if>
+
+<sc-if value="{{ isStory }}" hint-placeholder-val="{{ false }}">
+<div style="padding:32px 40px 72px">
+  <a href="#" onClick="{{ goFeed }}" style="font-size:12px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;text-decoration:none">← Today</a>
+  <div style="display:grid;grid-template-columns:minmax(0,1fr) 360px;gap:48px;align-items:start;margin-top:24px">
+
+    <div style="min-width:0">
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px">
+        <span class="tag tag-accent" style="font-weight:800;letter-spacing:.1em;text-transform:uppercase">{{ story.sector }}</span>
+        <span style="font-size:12px;color:rgba(32,30,29,.7)">{{ story.source }} · {{ story.time }}</span>
+      </div>
+      <h1 style="font-size:52px;line-height:1.04;margin:0 0 18px;max-width:24ch;text-wrap:pretty">{{ story.headline }}</h1>
+      <p style="font-size:19px;line-height:1.55;max-width:56ch;color:rgba(32,30,29,.8);margin:0 0 24px;text-wrap:pretty">{{ story.dek }}</p>
+      <hr class="hr" style="margin:0 0 28px"/>
+
+      <div style="max-width:58ch">
+        <h6 style="color:#ae1800;margin:0 0 10px">What happened</h6>
+        <p style="font-size:16px;line-height:1.7;margin:0 0 28px">{{ story.happened }}</p>
+        <h6 style="color:#ae1800;margin:0 0 10px">Why it matters</h6>
+        <p style="font-size:16px;line-height:1.7;margin:0 0 28px">{{ story.why }}</p>
+      </div>
+
+      <div style="background:#eae9e9;border-top:2px solid #ec3013;padding:24px;max-width:58ch">
+        <h6 style="margin:0 0 10px">If you own nothing exotic</h6>
+        <p style="font-size:15px;line-height:1.65;margin:0">{{ story.plain }}</p>
+      </div>
+
+      <hr class="hr" style="margin:32px 0 20px"/>
+      <h6 style="margin:0 0 16px">Related</h6>
+      <sc-for list="{{ related }}" as="r" hint-placeholder-count="3">
+        <div onClick="{{ r.open }}" style="display:flex;align-items:baseline;gap:16px;padding:14px 0;border-bottom:1px solid rgba(32,30,29,.2);cursor:pointer;max-width:58ch">
+          <span style="font-size:10px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;color:rgba(32,30,29,.7);width:88px;flex:none">{{ r.sector }}</span>
+          <span style="font-size:16px;font-weight:800;line-height:1.3">{{ r.headline }}</span>
+        </div>
+      </sc-for>
+    </div>
+
+    <div style="border-left:2px solid rgba(32,30,29,.4);padding-left:28px">
+      <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:6px">
+        <h6 style="margin:0">Commodities affected</h6>
+        <span style="font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:rgba(32,30,29,.7)">7 days</span>
+      </div>
+      <p style="font-size:12px;line-height:1.5;color:rgba(32,30,29,.7);margin:0 0 20px">Prices that respond to this story, most exposed first.</p>
+      <sc-for list="{{ story.commodities }}" as="c" hint-placeholder-count="3">
+        <div style="padding:18px 0;border-top:1px solid rgba(32,30,29,.25)">
+          <div style="display:flex;align-items:baseline;gap:10px;margin-bottom:2px">
+            <span style="font-size:17px;font-weight:800;letter-spacing:-.01em">{{ c.name }}</span>
+            <span style="font-size:17px;font-weight:800;margin-left:auto;color:{{ c.color }}">{{ c.change }}</span>
+          </div>
+          <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:10px">
+            <span style="font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:rgba(32,30,29,.7)">{{ c.unit }}</span>
+            <span style="font-size:11px;color:rgba(32,30,29,.7)">{{ c.price }}</span>
+          </div>
+          <svg viewBox="0 0 300 64" width="100%" height="64" preserveAspectRatio="none" style="display:block;background:#eae9e9">
+            <polyline points="{{ c.lg }}" fill="none" stroke="{{ c.color }}" stroke-width="2" stroke-linejoin="round" vector-effect="non-scaling-stroke"></polyline>
+          </svg>
+          <p style="font-size:13px;line-height:1.6;margin:10px 0 0;color:rgba(32,30,29,.85)">{{ c.note }}</p>
+        </div>
+      </sc-for>
+      <button class="btn btn-secondary btn-block" style="margin-top:20px">Add these to watchlist</button>
+    </div>
+
+  </div>
+</div>
+</sc-if>
+
+<sc-if value="{{ isWatch }}" hint-placeholder-val="{{ false }}">
+<div style="padding:40px 40px 72px">
+  <div style="display:flex;align-items:baseline;justify-content:space-between;gap:24px;padding-bottom:20px;border-bottom:2px solid rgba(32,30,29,.4)">
+    <div>
+      <h1 style="font-size:44px;margin:0 0 6px">Watchlist</h1>
+      <p style="margin:0;font-size:14px;color:rgba(32,30,29,.7)">Four commodities · 11 stories touched them this week</p>
+    </div>
+    <button class="btn btn-primary">Add a commodity</button>
+  </div>
+
+  <div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));border-bottom:2px solid rgba(32,30,29,.4)">
+    <sc-for list="{{ watch }}" as="c" hint-placeholder-count="4">
+      <div style="padding:28px 24px 28px 0;border-right:1px solid rgba(32,30,29,.2)">
+        <div style="font-size:10px;font-weight:800;letter-spacing:.12em;text-transform:uppercase;color:rgba(32,30,29,.7);margin-bottom:8px">{{ c.unit }}</div>
+        <div style="font-size:24px;font-weight:800;letter-spacing:-.015em;margin-bottom:2px">{{ c.name }}</div>
+        <div style="display:flex;align-items:baseline;gap:10px;margin-bottom:16px">
+          <span style="font-size:16px">{{ c.price }}</span>
+          <span style="font-size:16px;font-weight:800;color:{{ c.color }}">{{ c.change }}</span>
+        </div>
+        <svg viewBox="0 0 300 72" width="100%" height="72" preserveAspectRatio="none" style="display:block;background:#eae9e9">
+          <polyline points="{{ c.lgWatch }}" fill="none" stroke="{{ c.color }}" stroke-width="2" stroke-linejoin="round" vector-effect="non-scaling-stroke"></polyline>
+        </svg>
+        <div style="font-size:12px;color:rgba(32,30,29,.7);margin-top:10px">{{ c.driver }}</div>
+      </div>
+    </sc-for>
+  </div>
+
+  <div style="display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:48px;padding-top:36px;align-items:start">
+    <div>
+      <h6 style="margin:0 0 4px">News touching your watchlist</h6>
+      <p style="font-size:13px;color:rgba(32,30,29,.7);margin:0 0 8px">Newest first. The commodity in bold is the one you follow.</p>
+      <sc-for list="{{ stories }}" as="s" hint-placeholder-count="4">
+        <div onClick="{{ s.open }}" style="display:grid;grid-template-columns:120px minmax(0,1fr) 150px;gap:24px;align-items:center;padding:20px 0;border-top:1px solid rgba(32,30,29,.25);cursor:pointer">
+          <span style="font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:rgba(32,30,29,.7)">{{ s.time }}</span>
+          <div style="min-width:0">
+            <div style="font-size:17px;font-weight:800;line-height:1.3;margin-bottom:4px">{{ s.headline }}</div>
+            <div style="font-size:13px;color:rgba(32,30,29,.7)">{{ s.hit }}</div>
+          </div>
+          <div style="display:flex;align-items:center;gap:10px;justify-content:flex-end">
+            <svg viewBox="0 0 68 22" width="68" height="22" style="flex:none;overflow:visible">
+              <polyline points="{{ s.leadSm }}" fill="none" stroke="{{ s.leadColor }}" stroke-width="1.6" stroke-linejoin="round"></polyline>
+            </svg>
+            <span style="font-size:14px;font-weight:800;color:{{ s.leadColor }}">{{ s.leadChange }}</span>
+          </div>
+        </div>
+      </sc-for>
+    </div>
+    <div style="border-left:2px solid rgba(32,30,29,.4);padding-left:28px">
+      <h6 style="margin:0 0 12px">Exposure</h6>
+      <p style="font-size:13px;line-height:1.6;color:rgba(32,30,29,.8);margin:0 0 20px">Two of your four holdings move on the same driver — Indonesian export policy. That is one bet, not two.</p>
+      <table class="table">
+        <thead><tr><th>Driver</th><th style="text-align:right">Yours</th></tr></thead>
+        <tbody>
+          <tr><td>Export policy</td><td style="text-align:right">2</td></tr>
+          <tr><td>Mine supply</td><td style="text-align:right">1</td></tr>
+          <tr><td>Weather</td><td style="text-align:right">1</td></tr>
+          <tr><td>Freight</td><td style="text-align:right">0</td></tr>
+        </tbody>
+      </table>
+      <button class="btn btn-ghost" style="margin-top:16px">See how exposure is scored</button>
+    </div>
+  </div>
+</div>
+</sc-if>
+
+</div>
+</x-import>
+<div style="width:1280px;max-width:100%;font-size:12px;line-height:1.6;color:rgba(32,30,29,.7)">
+Clickable: any story row opens the detail view; <strong style="font-weight:800">Today</strong> and <strong style="font-weight:800">Watchlist</strong> in the header switch screens. Prices and stories are sample data.
+</div>
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;showPlainEnglish&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Feed&quot;},&quot;showRail&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Feed&quot;}}">
+const UP = '#201e1d', DOWN = '#ae1800';
+
+const S = {
+  nickel: [100,101,100.4,102,103.1,102.6,104,105.2,104.8,106.4,107.9,107.2,109,110.6,112.1,111.4],
+  copper: [100,99.4,100.2,101,100.6,101.4,102.2,101.8,102.6,103.4,103,104.1,104.8,104.4,105.6,106.2],
+  cobalt: [100,100.6,101.2,100.8,101.6,102.1,101.7,102.4,102,102.8,103.3,103,103.6,104.2,103.9,104.6],
+  corn: [100,99.6,98.9,99.4,98.2,97.6,98.1,96.9,96.2,96.8,95.4,94.7,95.1,94.2,93.6,93.1],
+  soy: [100,99.8,100.2,99.3,98.7,99.1,98.2,97.6,98,97.1,96.6,96.9,96.1,95.6,96,95.2],
+  wheat: [100,100.4,99.8,100.1,99.4,99.8,99.1,98.6,99,98.4,98.8,98.2,97.8,98.1,97.6,97.9],
+  brent: [100,100.8,101.4,101,102.1,102.8,102.4,103.6,104.2,103.8,104.9,105.4,105,106.1,106.8,107.2],
+  diesel: [100,100.5,101.1,100.7,101.6,102.2,101.8,102.7,103.2,102.9,103.8,104.3,104,104.8,105.4,105.1],
+  gas: [100,101.2,100.4,99.6,100.8,101.6,100.9,99.8,100.6,101.4,100.7,101.5,102.3,101.6,102.4,103.1],
+  alu: [100,100.3,100.9,100.5,101.2,101.8,101.4,102,102.6,102.2,102.9,103.5,103.1,103.8,104.4,104.1],
+  steel: [100,100.2,99.8,100.4,100.9,100.5,101.1,101.6,101.2,101.8,102.2,101.9,102.4,102.8,102.5,103],
+  carbon: [100,100.9,101.7,101.2,102.3,103.1,102.6,103.7,104.5,104,105.1,105.9,105.4,106.4,107.2,107.8],
+  lithium: [100,101.4,102.8,102.1,103.9,105.2,104.6,106.4,107.9,107.2,109.1,110.8,110.1,112.2,113.9,114.6],
+  freight: [100,99.2,98.4,99,97.8,96.9,97.4,96.1,95.2,95.8,94.4,93.5,94,92.8,91.9,92.4],
+  lng: [100,100.6,101.3,100.8,101.7,102.4,101.9,102.8,103.5,103,103.9,104.6,104.1,105,105.7,105.2]
+};
+
+function poly(series, w, h, pad) {
+  const lo = Math.min(...series), hi = Math.max(...series), span = (hi - lo) || 1;
+  const p = pad == null ? 2 : pad;
+  return series.map((v, i) => {
+    const x = (i / (series.length - 1)) * w;
+    const y = h - p - ((v - lo) / span) * (h - p * 2);
+    return x.toFixed(1) + ',' + y.toFixed(1);
+  }).join(' ');
+}
+
+const C = {
+  nickel:  { name: 'Nickel',       unit: 'LME 3M · $/t',   price: '$18,240', key: 'nickel' },
+  copper:  { name: 'Copper',       unit: 'LME 3M · $/t',   price: '$9,610',  key: 'copper' },
+  cobalt:  { name: 'Cobalt',       unit: 'Standard · $/lb', price: '$14.80', key: 'cobalt' },
+  corn:    { name: 'Corn',         unit: 'CBOT · ¢/bu',    price: '412¢',    key: 'corn' },
+  soy:     { name: 'Soybeans',     unit: 'CBOT · ¢/bu',    price: '1,046¢',  key: 'soy' },
+  wheat:   { name: 'Wheat',        unit: 'CBOT · ¢/bu',    price: '558¢',    key: 'wheat' },
+  brent:   { name: 'Brent crude',  unit: 'ICE · $/bbl',    price: '$71.40',  key: 'brent' },
+  diesel:  { name: 'Diesel',       unit: 'NWE · $/t',      price: '$684',    key: 'diesel' },
+  gas:     { name: 'Natural gas',  unit: 'TTF · €/MWh',    price: '€31.20',  key: 'gas' },
+  alu:     { name: 'Aluminium',    unit: 'LME 3M · $/t',   price: '$2,545',  key: 'alu' },
+  steel:   { name: 'Steel HRC',    unit: 'N. Europe · €/t', price: '€612',   key: 'steel' },
+  carbon:  { name: 'EU carbon',    unit: 'EUA · €/t',      price: '€78.60',  key: 'carbon' },
+  lithium: { name: 'Lithium',      unit: 'Carbonate · $/t', price: '$14,900', key: 'lithium' },
+  freight: { name: 'Dry freight',  unit: 'Baltic index',   price: '1,842',   key: 'freight' },
+  lng:     { name: 'LNG',          unit: 'JKM · $/MMBtu',  price: '$11.85',  key: 'lng' }
+};
+
+const STORIES = [
+  {
+    id: 'nickel', sector: 'Metals', time: '06:20 BST', source: 'Jakarta',
+    headline: 'Indonesia tightens nickel ore export quotas for 2027',
+    dek: 'The mining ministry cut next year’s ore quota by a fifth, pushing more processing onshore. Indonesia supplies over half the world’s mined nickel.',
+    happened: 'Indonesia’s mining ministry published 2027 ore quotas 21% below this year’s, and said approvals for new smelters would be prioritised over export permits. Producers were told allocations will be reviewed quarterly rather than annually.',
+    why: 'When one country controls half of a market’s supply, its permit paperwork is a price signal. Buyers of refined nickel — mostly stainless steel mills and battery makers — now have to plan around a smaller, slower pipeline, so they bid up the metal that already exists.',
+    plain: 'You probably do not trade nickel. But it sits inside stainless steel appliances and most electric-car batteries, so the cost shows up later in manufacturers’ margins — and in any fund you hold that owns miners or carmakers.',
+    commodities: [
+      { c: 'nickel', change: '+4.2%', note: 'Most exposed: the quota applies directly to the ore that feeds refined supply.' },
+      { c: 'cobalt', change: '+1.1%', note: 'Mined alongside nickel in Indonesia, so the same permits limit it.' },
+      { c: 'steel', change: '+0.9%', note: 'Stainless mills pay more for their main alloying metal.' }
+    ]
+  },
+  {
+    id: 'lithium', sector: 'Batteries', time: '05:55 BST', source: 'Shanghai',
+    headline: 'China orders refined lithium output cuts at four provincial plants',
+    dek: 'Provincial regulators suspended operations on environmental grounds, removing an estimated 6% of global refining capacity for at least a quarter.',
+    happened: 'Four refineries in Jiangxi were told to halt while wastewater systems are rebuilt. Local officials gave no restart date; analysts put the affected volume near 40,000 tonnes of carbonate a year.',
+    why: 'Lithium refining is far more concentrated than lithium mining. Taking capacity offline turns raw material that exists into battery-grade chemical that does not, which is the part carmakers actually buy.',
+    plain: 'Battery costs had been falling for two years. A supply shock like this does not reverse that trend, but it slows it — which matters for how quickly electric cars get cheaper.',
+    commodities: [
+      { c: 'lithium', change: '+5.6%', note: 'Refining is the bottleneck; the cut hits battery-grade supply directly.' },
+      { c: 'cobalt', change: '+0.8%', note: 'Bought in the same cathode contracts, so buyers hedge across both.' },
+      { c: 'nickel', change: '+4.2%', note: 'Also a cathode input — tight batteries, tight nickel.' }
+    ]
+  },
+  {
+    id: 'weather', sector: 'Agriculture', time: '04:30 BST', source: 'Chicago',
+    headline: 'Midwest drought forecast eases through October',
+    dek: 'Updated models show above-average rainfall across Iowa and Illinois, lifting yield expectations just before harvest.',
+    happened: 'The monthly outlook moved the central corn belt out of the drought category for the first time since June, with 30–50mm of rain expected over the next fortnight.',
+    why: 'Grain prices carry a premium for the risk of a bad harvest. When that risk drops, the premium comes out of the price — often faster than it went in.',
+    plain: 'Cheaper grain eventually means slightly cheaper meat, bread and beer, because grain is what animals and breweries eat. The pass-through takes months, not days.',
+    commodities: [
+      { c: 'corn', change: '−2.4%', note: 'Directly rain-sensitive; the drought premium unwinds first here.' },
+      { c: 'soy', change: '−1.7%', note: 'Same fields, same rainfall, slightly later harvest window.' },
+      { c: 'wheat', change: '−0.8%', note: 'Moves in sympathy as a substitute in animal feed.' }
+    ]
+  },
+  {
+    id: 'opec', sector: 'Energy', time: 'Tue 21:10', source: 'Vienna',
+    headline: 'OPEC+ pushes its output increase back to the first quarter',
+    dek: 'The group held production flat for a third meeting, citing soft demand in Europe and rising non-member supply.',
+    happened: 'Eight members agreed to delay a planned 180,000 barrel-a-day increase until January, and said compliance with existing cuts would be reviewed in November.',
+    why: 'Oil price is set at the margin: a few hundred thousand barrels decides whether the market is short or long. Delaying the extra supply keeps it short for another quarter.',
+    plain: 'Crude feeds into petrol, diesel, plastics and air fares. A 2% move is not something you feel at the pump next week, but sustained strength shows up in headline inflation.',
+    commodities: [
+      { c: 'brent', change: '+2.2%', note: 'The barrel being withheld is priced here.' },
+      { c: 'diesel', change: '+1.9%', note: 'Refined from the same crude; European stocks already thin.' },
+      { c: 'gas', change: '+0.4%', note: 'Partly substitutable in power generation and industry.' }
+    ]
+  },
+  {
+    id: 'carbon', sector: 'Policy', time: 'Tue 16:45', source: 'Brussels',
+    headline: 'EU confirms phase two of the carbon border levy',
+    dek: 'Importers of steel, aluminium and cement will pay the full permit price from January 2028, with no free allocation.',
+    happened: 'Parliament voted through the timetable unchanged. Free allowances for covered sectors taper from 2026 and end entirely in 2028, and the levy widens to cover some downstream goods.',
+    why: 'The levy makes imported metal carry the same carbon cost as European metal. That raises the floor under European prices and puts a new cost on anyone shipping metal into the bloc.',
+    plain: 'This is a tax on emissions embedded in things, not on fuel. It nudges up the price of construction and cars made with imported metal, and makes carbon permits themselves a traded asset worth watching.',
+    commodities: [
+      { c: 'carbon', change: '+2.6%', note: 'The permit is the instrument the levy is priced off.' },
+      { c: 'alu', change: '+1.8%', note: 'Energy-intensive to produce, so heavily covered by the levy.' },
+      { c: 'steel', change: '+0.9%', note: 'European mills gain pricing power against imports.' }
+    ]
+  },
+  {
+    id: 'canal', sector: 'Freight', time: 'Tue 14:05', source: 'Panama City',
+    headline: 'Panama Canal restores full daily transit slots',
+    dek: 'Reservoir levels recovered enough for the authority to return to 36 crossings a day, ending two years of rationing.',
+    happened: 'The canal authority raised the daily slot count from 31 to 36 and cancelled the auction premium that had been added to booking fees.',
+    why: 'Shipping cost is a commodity input like any other. Cheaper, more predictable transit shortens routes for grain and gas cargoes and takes the scarcity premium out of freight rates.',
+    plain: 'Freight is the quiet line in almost every price you pay. When it falls, it slightly offsets rises elsewhere — one reason a headline about a canal belongs in a market brief.',
+    commodities: [
+      { c: 'freight', change: '−3.8%', note: 'Rationing premium removed from the affected routes.' },
+      { c: 'lng', change: '+1.3%', note: 'Cheaper US-to-Asia voyages widen the arbitrage and lift demand.' },
+      { c: 'soy', change: '−1.7%', note: 'Lower delivered cost for US cargoes heading to Asia.' }
+    ]
+  }
+];
+
+const WATCH = [
+  { c: 'nickel', change: '+4.2%', driver: 'Indonesian export policy' },
+  { c: 'brent',  change: '+2.2%', driver: 'OPEC+ supply decision' },
+  { c: 'corn',   change: '−2.4%', driver: 'Midwest rainfall outlook' },
+  { c: 'copper', change: '+1.4%', driver: 'Chilean mine supply' }
+];
+
+const TICKER = [
+  ['NICKEL', '+4.2%'], ['LITHIUM', '+5.6%'], ['BRENT', '+2.2%'], ['EUA', '+2.6%'],
+  ['CORN', '−2.4%'], ['BDI', '−3.8%'], ['COPPER', '+1.4%'], ['LNG', '+1.3%']
+];
+
+class Component extends DCLogic {
+  state = { view: 'feed', storyId: 'nickel' };
+
+  cmdty(entry, extra) {
+    const base = C[entry.c], series = S[base.key];
+    const down = entry.change.indexOf('−') === 0;
+    return Object.assign({}, base, {
+      change: entry.change,
+      note: entry.note,
+      color: down ? DOWN : UP,
+      sm: poly(series, 68, 22, 2),
+      lg: poly(series, 300, 64, 6),
+      lgWatch: poly(series, 300, 72, 7)
+    }, extra || {});
+  }
+
+  renderVals() {
+    const open = id => e => { if (e) e.preventDefault(); this.setState({ view: 'story', storyId: id }); };
+    const showPlain = this.props.showPlainEnglish ?? true;
+    const showRail = this.props.showRail ?? true;
+    const view = this.state.view;
+
+    const stories = STORIES.map(s => {
+      const lead = this.cmdty(s.commodities[0]);
+      return Object.assign({}, s, {
+        open: open(s.id),
+        commodities: s.commodities.map(c => this.cmdty(c)),
+        hit: 'Moves ' + s.commodities.map(c => C[c.c].name).join(', '),
+        leadSm: lead.sm, leadChange: lead.change, leadColor: lead.color
+      });
+    });
+
+    const active = STORIES.find(s => s.id === this.state.storyId) || STORIES[0];
+    const story = Object.assign({}, active, { commodities: active.commodities.map(c => this.cmdty(c)) });
+
+    return {
+      w: 1280, h: 820,
+      tabs: [{ title: 'Basis — Today' }, { title: 'Nickel · LME' }],
+      url: view === 'story' ? 'basis.news/story/' + active.id : view === 'watch' ? 'basis.news/watchlist' : 'basis.news/today',
+      isFeed: view === 'feed', isStory: view === 'story', isWatch: view === 'watch',
+      feedTint: view === 'feed' ? '#ae1800' : '#201e1d',
+      watchTint: view === 'watch' ? '#ae1800' : '#201e1d',
+      goFeed: e => { e.preventDefault(); this.setState({ view: 'feed' }); },
+      goWatch: e => { e.preventDefault(); this.setState({ view: 'watch' }); },
+      showPlain, showRail,
+      stories, story,
+      related: STORIES.filter(s => s.id !== active.id).slice(0, 3).map(s => ({ sector: s.sector, headline: s.headline, open: open(s.id) })),
+      watch: WATCH.map(w => this.cmdty(w)),
+      movers: [
+        { name: 'Lithium', change: '+5.6%', color: UP },
+        { name: 'Nickel', change: '+4.2%', color: UP },
+        { name: 'Dry freight', change: '−3.8%', color: DOWN },
+        { name: 'EU carbon', change: '+2.6%', color: UP }
+      ],
+      ticker: TICKER.map(t => ({ code: t[0], change: t[1], color: t[1].indexOf('−') === 0 ? DOWN : UP }))
+    };
+  }
+}
+
+</script>
+</body>
+</html>

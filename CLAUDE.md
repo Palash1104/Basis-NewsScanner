@@ -29,6 +29,8 @@ uv run python scripts/grouping_report.py [--refresh --lookback-hours 24] [--deta
 - `app/pipeline/dedupe.py` URL/title/source normalization, dedupe, independent-source count
 - `app/pipeline/cluster.py` incremental `Grouper` + `assign_to_stories`
 - `scripts/` one-off tools · `tests/fixtures/` synthetic feeds · `data/` DB, logs, reports (gitignored)
+- `design/` Claude Design export for the Phase 6 web UI (reference only) · `design/NOTES.md` maps
+  its screens to SPEC pages and data, and lists gaps and design tokens
 
 ## Conventions
 
@@ -43,6 +45,16 @@ uv run python scripts/grouping_report.py [--refresh --lookback-hours 24] [--deta
 - Tests use `httpx.MockTransport` and `asyncio.run` (no pytest-asyncio/respx).
 - Scripts call `sys.stdout.reconfigure(encoding="utf-8")`: the Windows console codepage can't
   print ₹ and similar characters.
+
+## Web UI (Phase 6)
+
+- The web UI must follow the visual design in `design/` and the decisions in `design/NOTES.md`,
+  implemented in the spec's stack: FastAPI + Jinja2 + HTMX + plain CSS, no React, no JS build
+  step (SPEC §11).
+- Primary mockup: `design/Basis - Commodity News App.dc.html`. Tokens:
+  `design/_ds/modernist-3dfd6d1f-f6ac-418e-8f3e-37cf9f987647/styles.css`.
+- `design/support.js` and `design/browser-window.jsx` only preview the mockup; don't use them in
+  the app.
 
 ## Decisions worth knowing
 

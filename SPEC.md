@@ -586,6 +586,8 @@ If you think a rule is badly specified or a condition can't be expressed cleanly
 
 FastAPI + Jinja2 + HTMX, plain CSS, light/dark mode, binds to localhost only, no auth.
 
+**Visual design:** the Phase 6 web UI must follow the visual design in `design/` and the decisions in `design/NOTES.md`, implemented in this spec's stack: FastAPI + Jinja2 + HTMX + plain CSS, no React, no JS build step. The primary mockup is `design/Basis - Commodity News App.dc.html`; design tokens are in `design/_ds/modernist-3dfd6d1f-f6ac-418e-8f3e-37cf9f987647/styles.css`. The mockup's own runtime (`design/support.js`, `design/browser-window.jsx`) exists only to preview the design and is not part of the app.
+
 - `/`: today's stories as cards (same content as the digest), filters for region and category
 - `/story/{id}`: all source articles, the event JSON, all impacts with their scores as they come in, any rule disagreements
 - `/track-record`: tables by rule, event type, origin, confidence, horizon, prompt version
