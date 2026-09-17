@@ -160,12 +160,14 @@ llm:
   # For provider: anthropic use claude-haiku-4-5 and claude-sonnet-5.
   temperature: {} # per model ID; unset models use their default (Gemini 3: keep 1.0)
   max_retries: 3
-  rate_limits: # per model ID; required for Gemini models, from AI Studio (section 14)
-    # gemini-3.5-flash-lite:
-    #   requests_per_minute: <RPM>
-    #   input_tokens_per_minute: <TPM>
-    #   requests_per_day: <RPD>
-  rate_limit_day_timezone: America/Los_Angeles # daily quotas reset at midnight Pacific
+  rate_limits: # per model ID; required for Gemini models, values from AI Studio (section 14)
+    gemini-3.5-flash-lite:
+      requests_per_minute: 15
+      input_tokens_per_minute: 250000
+      requests_per_day: 500 # the project's quota
+      requests_per_day_budget: 350 # 70% for new work; the rest is kept for retries
+  # Daily quotas reset at midnight Pacific: 12:30 IST (US daylight time) or 13:30 IST.
+  rate_limit_day_timezone: America/Los_Angeles
 pipeline:
   lookback_hours: 12
   story_attach_window_hours: 36
@@ -184,6 +186,8 @@ scoring:
   vol_lookback_days: 20
   hit_threshold_vol_multiple: 0.5
   min_samples_to_show_rate: 5
+schedule:
+  pipeline_every_hours: 1 # must divide 24; runs line up with the digest hours
 delivery:
   digest_times: ["07:30", "19:30"]
   breaking_alerts: false
@@ -617,7 +621,7 @@ newsdesk run                  # one full pipeline pass (fetch → impacts → pr
 newsdesk digest [--send|--dry-run]
 newsdesk score                # score all due impacts (idempotent)
 newsdesk validate-tickers
-newsdesk scheduler            # APScheduler: run hourly, digests at configured times, score daily
+newsdesk scheduler            # APScheduler: run every schedule.pipeline_every_hours, digests at configured times, score daily (Phase 4)
 newsdesk serve                # Phase 6 web UI
 ```
 
@@ -681,8 +685,22 @@ Done when all pages in section 11 work against real data.
 - **Transient errors.** Timeouts, 429 and 5xx are retried with exponential backoff (at most `llm.max_retries` times, waits capped at 60s).
 - **Rate limits.** A client-side limiter keeps every run inside the provider's quotas: requests per minute, input tokens per minute, and requests per day.
   - Limits are configured per model in `llm.rate_limits`, and are required for Gemini models. Google's docs no longer publish free-tier numbers, so copy them from AI Studio (https://aistudio.google.com/rate-limit).
-  - Daily request counts are stored in the database so they hold across runs, and reset at midnight Pacific time.
-  - When a daily limit is reached, or the API is still rate limiting after retries, stop LLM calls for the rest of the run and leave the remaining stories for the next run.
+  - Current values for `gemini-3.5-flash-lite`: 15 RPM, 250,000 input TPM, 500 RPD.
+  - **Daily budget.** `requests_per_day_budget` (350, 70% of the quota) caps new work. Retries of work already started (transient retries and the validation retry) may use the remaining quota up to `requests_per_day`.
+  - **Daily reset.** Daily counts are stored in the database so they hold across runs. They are tracked per *Pacific* day (`rate_limit_day_timezone`), because the quota resets at midnight Pacific time: 12:30 IST during US daylight time, 13:30 IST otherwise. It does not reset at midnight IST. `newsdesk run` prints the day's usage and the next reset in IST.
+- **When the quota runs out mid-run** (budget reached, or the API still rate limiting after retries):
+  - Skip the remaining LLM calls for that run, but still fetch, dedupe, group and rank, and finish the run cleanly. Record the skipped story IDs in `runs.errors`.
+  - Mark the skipped stories `summary_pending`. The next run summarizes pending stories that are still inside the lookback window first, even if they're no longer in the top `max_stories_per_run`.
+- **Schedule.** `schedule.pipeline_every_hours` is set from the daily budget.
+  - A replay of real fetched news (2026-09-16/17) gave these summary calls per day:
+
+    | Schedule | Phase 1, typical / busy | With Phase 2 event extraction (about 2×), typical / busy |
+    |---|---|---|
+    | Hourly | 157 / 264 | 314 / 528 |
+    | Every 2 hours | 128 / 192 | 257 / 384 |
+    | Every 3 hours | 109 / 152 | 219 / 304 |
+
+  - Hourly is set for Phase 1. Revisit the schedule when Phase 2 adds event extraction.
 - **Temperature.** Use a low temperature only where the provider recommends it (e.g. `claude-haiku-4-5`). Google recommends keeping Gemini 3 models at their default of 1.0, because lower values can cause looping.
 - Every stored LLM output records `model` and `prompt_version`. Bump `PROMPT_VERSION` whenever prompt text changes.
 - **Token logging.** Log input and output tokens per call and total per run, from the provider's usage data:

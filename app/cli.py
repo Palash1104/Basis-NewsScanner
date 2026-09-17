@@ -1,9 +1,10 @@
-"""Newsdesk command line (SPEC 12). Phase 1: `newsdesk run` and `newsdesk digest`."""
+"""Newsdesk command line (SPEC 12). Phase 1: `newsdesk run`, `newsdesk digest` and
+`newsdesk scheduler`."""
 
 import asyncio
 import logging
 import sys
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from logging.handlers import RotatingFileHandler
@@ -11,6 +12,8 @@ from typing import Annotated, Any
 
 import httpx
 import typer
+from apscheduler.schedulers.blocking import BlockingScheduler
+from apscheduler.triggers.cron import CronTrigger
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -24,7 +27,7 @@ from app.net import make_client
 from app.pipeline.cluster import assign_to_stories
 from app.pipeline.dedupe import dedupe_articles
 from app.pipeline.fetch import FeedResult, SourceResolver, fetch_all, filter_recent
-from app.pipeline.rank import rank_stories
+from app.pipeline.rank import pending_stories, rank_stories
 from app.pipeline.summarize import summarize_stories
 
 log = logging.getLogger("newsdesk")
@@ -57,6 +60,8 @@ class PipelineReport:
     skipped_unchanged: int = 0
     failed: int = 0
     llm_call_errors: int = 0
+    pending_carried: int = 0  # stories skipped for quota on an earlier run, done first this run
+    skipped_quota: int = 0  # stories left pending because the quota ran out this run
     llm_calls: int = 0
     input_tokens: int = 0
     output_tokens: int = 0
@@ -160,6 +165,10 @@ def run_pipeline(
             stage = "rank"
             top = rank_stories(session, settings, now)
             report.stories_ranked = len(top)
+            # Summaries skipped for quota on an earlier run go first, even if no longer top-N.
+            pending = pending_stories(session, settings, now)
+            report.pending_carried = len(pending)
+            candidates = pending + [story for story in top if story not in pending]
             session.commit()
 
             stage = "summarize"
@@ -167,7 +176,8 @@ def run_pipeline(
                 reason = llm_unavailable or "no LLM client configured"
                 report.errors.append({"stage": "summarize", "error": f"skipped: {reason}"})
             else:
-                summary = summarize_stories(session, top, llm, settings, now)
+                summary = summarize_stories(session, candidates, llm, settings, now)
+                report.skipped_quota = len(summary.skipped_quota)
                 report.summarized = len(summary.summarized)
                 report.skipped_unchanged = summary.skipped_unchanged
                 report.failed = len(summary.failed)
@@ -187,7 +197,11 @@ def run_pipeline(
                     )
                 if summary.stopped:
                     report.errors.append(
-                        {"stage": "summarize", "error": f"stopped early: {summary.stopped}"}
+                        {
+                            "stage": "summarize",
+                            "error": f"stopped early: {summary.stopped}",
+                            "left_for_next_run": summary.skipped_quota,
+                        }
                     )
         except Exception as exc:
             session.rollback()
@@ -314,37 +328,54 @@ def _bootstrap() -> tuple[Settings, sessionmaker[Session]]:
     return settings, make_session_factory(engine)
 
 
+def _llm_client(
+    settings: Settings, session_factory: sessionmaker[Session]
+) -> tuple[LLMClient | None, str | None]:
+    try:
+        return make_llm_client(settings.llm, session_factory, settings.tz), None
+    except LLMConfigError as exc:
+        return None, str(exc)
+
+
+def run_once(settings: Settings, session_factory: sessionmaker[Session]) -> list[str]:
+    """One pipeline pass with the configured LLM client; returns the summary lines to show."""
+    llm, llm_unavailable = _llm_client(settings, session_factory)
+    feeds = load_feeds(include_disabled=True)
+    report = run_pipeline(session_factory, settings, feeds, llm, llm_unavailable=llm_unavailable)
+
+    pending = (
+        f" + {report.pending_carried} pending from earlier runs" if report.pending_carried else ""
+    )
+    left = f", left for next run {report.skipped_quota}" if report.skipped_quota else ""
+    lines = [
+        f"run {report.run_id}: feeds {report.feeds_ok} ok / {report.feeds_failed} failed · "
+        f"articles fetched {report.articles_fetched}, in last "
+        f"{settings.pipeline.lookback_hours}h {report.articles_recent}, "
+        f"new {report.articles_new} ({report.duplicates_dropped} duplicates dropped)",
+        f"stories: {report.stories_created} new, {report.articles_attached} articles attached "
+        f"to existing · top {report.stories_ranked} ranked{pending} · summarized "
+        f"{report.summarized}, unchanged {report.skipped_unchanged}, failed {report.failed}, "
+        f"LLM errors {report.llm_call_errors}{left}",
+        f"LLM ({settings.llm.provider}, {settings.llm.summary_model}): {report.llm_calls} calls, "
+        f"tokens {report.input_tokens} input, {report.output_tokens} output",
+    ]
+    if llm is not None and llm.limiter is not None:
+        quota = llm.limiter.status(settings.llm.summary_model)
+        if quota is not None:
+            lines.append(
+                f"quota: {quota.used}/{quota.limit} requests used on quota day {quota.day} "
+                f"(budget {quota.budget}), resets {llm.limiter.format_reset()}"
+            )
+    lines += [f"  error: {error}" for error in report.errors]
+    return lines
+
+
 @app.command()
 def run() -> None:
     """One full pipeline pass: fetch, dedupe, group, rank, summarize."""
     settings, session_factory = _bootstrap()
-    feeds = load_feeds(include_disabled=True)
-    llm: LLMClient | None = None
-    llm_unavailable: str | None = None
-    try:
-        llm = make_llm_client(settings.llm, session_factory)
-    except LLMConfigError as exc:
-        llm_unavailable = str(exc)
-    report = run_pipeline(session_factory, settings, feeds, llm, llm_unavailable=llm_unavailable)
-
-    typer.echo(
-        f"run {report.run_id}: feeds {report.feeds_ok} ok / {report.feeds_failed} failed · "
-        f"articles fetched {report.articles_fetched}, in last "
-        f"{settings.pipeline.lookback_hours}h {report.articles_recent}, "
-        f"new {report.articles_new} ({report.duplicates_dropped} duplicates dropped)"
-    )
-    typer.echo(
-        f"stories: {report.stories_created} new, {report.articles_attached} articles attached "
-        f"to existing · top {report.stories_ranked} ranked · summarized {report.summarized}, "
-        f"unchanged {report.skipped_unchanged}, failed {report.failed}, "
-        f"LLM errors {report.llm_call_errors}"
-    )
-    typer.echo(
-        f"LLM ({settings.llm.provider}, {settings.llm.summary_model}): {report.llm_calls} calls, "
-        f"tokens {report.input_tokens} input, {report.output_tokens} output"
-    )
-    for error in report.errors:
-        typer.echo(f"  error: {error}")
+    for line in run_once(settings, session_factory):
+        typer.echo(line)
 
 
 @app.command()
@@ -383,3 +414,81 @@ def digest(
             f"({telegram_length(message)} chars, since {since}) -----"
         )
         typer.echo(message)
+
+
+# ---------------------------------------------------------------- scheduler
+
+
+def pipeline_hours(every_hours: int, digest_times: Sequence[str]) -> list[int]:
+    """Hours (local time) to run the pipeline: every `every_hours`, lined up with the first
+    digest's hour so a run starts in the same hour as the digest."""
+    anchor = int(digest_times[0].split(":")[0]) % every_hours if digest_times else 0
+    return list(range(anchor, 24, every_hours))
+
+
+def build_scheduler(
+    settings: Settings,
+    pipeline_job: Callable[[], None],
+    digest_job: Callable[[], None],
+) -> BlockingScheduler:
+    tz = settings.tz
+    scheduler = BlockingScheduler(timezone=tz)
+    hours = pipeline_hours(settings.schedule.pipeline_every_hours, settings.delivery.digest_times)
+    scheduler.add_job(
+        pipeline_job,
+        CronTrigger(hour=",".join(str(hour) for hour in hours), minute=0, timezone=tz),
+        id="pipeline",
+        name="pipeline run",
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=15 * 60,
+    )
+    for time_text in settings.delivery.digest_times:
+        hour, minute = (int(part) for part in time_text.split(":"))
+        scheduler.add_job(
+            digest_job,
+            CronTrigger(hour=hour, minute=minute, timezone=tz),
+            id=f"digest-{time_text}",
+            name=f"digest {time_text}",
+            max_instances=1,
+            coalesce=True,
+            misfire_grace_time=30 * 60,
+        )
+    return scheduler
+
+
+@app.command()
+def scheduler() -> None:
+    """Run the pipeline every schedule.pipeline_every_hours and send digests at
+    delivery.digest_times (both in settings.timezone). Stop with Ctrl+C."""
+    settings, session_factory = _bootstrap()
+
+    def pipeline_job() -> None:
+        try:
+            for line in run_once(settings, session_factory):
+                log.info(line)
+        except Exception:
+            log.exception("scheduled pipeline run failed")
+
+    def digest_job() -> None:
+        try:
+            report = run_digest(
+                session_factory,
+                settings,
+                send=True,
+                token=get_secret("TELEGRAM_BOT_TOKEN"),
+                chat_id=get_secret("TELEGRAM_CHAT_ID"),
+            )
+            log.info("scheduled digest: %d stories, sent=%s", report.stories, report.sent)
+        except Exception:
+            log.exception("scheduled digest failed")
+
+    jobs = build_scheduler(settings, pipeline_job, digest_job)
+    now = datetime.now(settings.tz)
+    for job in jobs.get_jobs():
+        next_fire = job.trigger.get_next_fire_time(None, now)
+        typer.echo(f"{job.name}: {job.trigger} · next {next_fire:%d %b %H:%M %Z}")
+    try:
+        jobs.start()
+    except (KeyboardInterrupt, SystemExit):
+        typer.echo("scheduler stopped")

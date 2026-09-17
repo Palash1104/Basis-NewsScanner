@@ -161,3 +161,11 @@ def test_quota_error_stops_remaining_stories(session: Session, settings: Setting
     assert len(fake.calls) == 2  # both attempts for the first story, none for the second
     assert first.status == "new" and second.status == "new"
     assert result.summarized == [] and result.call_errors == []
+    assert result.skipped_quota == [first.id, second.id]
+    assert first.summary_pending and second.summary_pending
+
+    # Next run with quota available: both summarized and no longer pending.
+    fake.responses = [provider_response(summary_json()), provider_response(summary_json())]
+    again = summarize_stories(session, [first, second], _llm(settings, fake), settings, NOW)
+    assert again.summarized == [first.id, second.id]
+    assert not first.summary_pending and not second.summary_pending

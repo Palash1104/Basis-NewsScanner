@@ -15,10 +15,18 @@ between phases.
 
 Phase 2 has not started; wait for the user.
 
+Since then (2026-09-17):
+- Real rate limits for `gemini-3.5-flash-lite` are set (15 RPM, 250k input TPM, 500 RPD), with
+  a daily budget of 350 for new work.
+- Stories skipped for quota carry over to the next run.
+- `newsdesk scheduler` exists and runs the pipeline hourly.
+- A test of `gemini-3.1-pro-preview` was cancelled: the key's project is on the free tier, where
+  Pro has a limit of 0. Nothing from that test is stored.
+
 Open follow-ups (not Phase 1 criteria):
-- `llm.rate_limits` holds TEMPORARY conservative values (5 RPM, 100k input TPM, 30 RPD), not
-  AI Studio's. At 30 RPD, hourly runs (~7 calls each, 20 on a cold start) don't fit. Replace
-  them with the project's real limits before scheduling runs.
+- When Phase 2 adds event extraction (about 2× summary-model calls), revisit
+  `schedule.pipeline_every_hours`. Hourly is estimated at 314/day typical and 528 busy, over
+  the 350 budget; every 2 hours at 257 / 384; every 3 hours at 219 / 304.
 - Title matching mis-groups short headlines. "Two arrested on charges of rape" joined an ICE
   arrest story (score 78), "What are all the sanctions Iran is under?" joined the Russia
   sanctions bill story (78.3), and that bill story also split in two. A threshold change won't
@@ -31,6 +39,7 @@ Open follow-ups (not Phase 1 criteria):
 uv sync                                        # install deps (Python 3.12 via uv)
 uv run newsdesk run                            # one pipeline pass
 uv run newsdesk digest [--dry-run | --send]    # dry run is the default
+uv run newsdesk scheduler                      # hourly runs + digests at delivery.digest_times
 uv run pytest -q                               # tests (network and LLM always mocked)
 uv run python scripts/smoke_test.py [--send-test-message]   # live: feeds, 1 LLM call, Telegram
 uv run ruff check . && uv run ruff format .    # lint + format
@@ -55,7 +64,8 @@ uv run python scripts/grouping_report.py [--refresh --lookback-hours 24] [--deta
 - `app/llm/ratelimit.py` per-model RPM / input TPM / RPD limiter; daily counts in
   `llm_daily_usage` · `prompts.py` prompt text + `*_PROMPT_VERSION` · `schemas.py` output models
 - `app/delivery/format.py` Telegram HTML digest + splitting · `telegram.py` Bot API calls
-- `app/cli.py` typer commands plus `run_pipeline` / `run_digest` (tested directly)
+- `app/cli.py` typer commands plus `run_pipeline` / `run_digest` / `run_once` /
+  `build_scheduler` (tested directly)
 - `scripts/` one-off tools · `tests/fixtures/` synthetic feeds · `data/` DB, logs, reports (gitignored)
 - `design/` Claude Design export for the Phase 6 web UI (reference only) · `design/NOTES.md` maps
   its screens to SPEC pages and data, and lists gaps and design tokens
@@ -125,10 +135,30 @@ uv run python scripts/grouping_report.py [--refresh --lookback-hours 24] [--deta
   removed `temperature`, so it goes via `extra_body`.
 - The validation retry is a single user turn (original prompt + rejected answer + errors), so it
   works the same for every provider. Every attempt, including retries, goes through the limiter.
-- Rate limits: RPM and input TPM use a sliding 60s window and wait; RPD is counted per quota day
-  (midnight Pacific) in `llm_daily_usage` (extra table, not in SPEC §6) and raises
-  `LLMQuotaError` when used up. A 429 that persists through retries also raises it.
-  `summarize_stories` stops on `LLMQuotaError`, leaving the remaining stories `new`.
+- Rate limits:
+  - RPM and input TPM use a sliding 60s window and wait for room.
+  - Daily requests are counted per *Pacific* quota day in `llm_daily_usage` (an extra table,
+    not in SPEC §6). The quota resets at midnight Pacific, which is 12:30/13:30 IST, never
+    midnight IST.
+  - The first attempt of new work stops at `requests_per_day_budget` (350). Retries (transient
+    or validation) may go up to `requests_per_day` (500).
+  - Hitting either limit raises `LLMQuotaError`, as does a 429 that persists through retries.
+- Quota exhaustion mid-run:
+  - `summarize_stories` stops, and every remaining story that still needs a summary gets
+    `stories.summary_pending = True` (an extra column).
+  - The run itself finishes normally.
+  - `run_pipeline` puts `pending_stories()` (still in the lookback window) ahead of the top-N
+    on the next run.
+  - Pending is cleared on success, failure, or when a story no longer needs a summary.
+- Schema additions to existing databases go through `db.ADDED_COLUMNS` (`ALTER TABLE` in
+  `init_db`); `create_all` alone doesn't add columns. Don't add indexes there, since a
+  migrated DB wouldn't get them.
+- Scheduler:
+  - APScheduler 3.x `BlockingScheduler`, in `settings.timezone`.
+  - The pipeline cron hours are `pipeline_hours()`, aligned to the first digest's hour.
+  - Jobs have `max_instances=1` and `coalesce`, and catch their own exceptions.
+  - Settings load once at start, so restart the scheduler after editing `settings.yaml`
+    (`feeds.yaml` reloads every run).
 - Summary failures: API/network errors leave the story's status unchanged (retried next run);
   a quota error stops the whole summarize step for the run;
   refused, truncated or still-invalid output marks it `failed` and records the processed

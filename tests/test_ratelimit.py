@@ -36,6 +36,7 @@ def _limiter(
     rpm: int = 100,
     tpm: int = 1_000_000,
     rpd: int = 1000,
+    budget: int | None = None,
     store=None,
     clock: FakeClock | None = None,
     now=lambda: datetime(2026, 9, 17, 12, 0, tzinfo=UTC),
@@ -43,7 +44,10 @@ def _limiter(
     clock = clock or FakeClock()
     limits = {
         MODEL: RateLimitSettings(
-            requests_per_minute=rpm, input_tokens_per_minute=tpm, requests_per_day=rpd
+            requests_per_minute=rpm,
+            input_tokens_per_minute=tpm,
+            requests_per_day=rpd,
+            requests_per_day_budget=budget,
         )
     }
     limiter = RateLimiter(
@@ -54,6 +58,7 @@ def _limiter(
         clock=clock,
         sleep=clock.sleep,
         now=now,
+        display_timezone=ZoneInfo("Asia/Kolkata"),
     )
     return limiter, clock
 
@@ -90,7 +95,7 @@ def test_daily_limit_raises_and_holds_across_limiter_instances() -> None:
     limiter, _ = _limiter(rpd=2, store=store)
     limiter.acquire(MODEL, 10)
     limiter.acquire(MODEL, 10)
-    with pytest.raises(DailyLimitReached, match="2/2 requests on 2026-09-17"):
+    with pytest.raises(DailyLimitReached, match="2/2 requests on quota day 2026-09-17"):
         limiter.acquire(MODEL, 10)
     next_run, _ = _limiter(rpd=2, store=store)
     with pytest.raises(DailyLimitReached):
@@ -133,3 +138,41 @@ def test_sql_store_persists_counts(tmp_path: Path) -> None:
 
 def test_estimate_is_conservative() -> None:
     assert estimate_input_tokens("a" * 300, "b" * 300) == 201
+
+
+def test_budget_stops_new_work_but_retries_may_use_the_quota() -> None:
+    limiter, _ = _limiter(rpd=5, budget=3)
+    for _ in range(3):
+        limiter.acquire(MODEL, 10)
+    with pytest.raises(DailyLimitReached, match="daily budget reached"):
+        limiter.acquire(MODEL, 10)
+    limiter.acquire(MODEL, 10, retry=True)
+    limiter.acquire(MODEL, 10, retry=True)
+    with pytest.raises(DailyLimitReached, match="daily quota reached"):
+        limiter.acquire(MODEL, 10, retry=True)
+
+
+@pytest.mark.parametrize(
+    ("now", "day", "reset"),
+    [
+        # US daylight time: midnight Pacific is 12:30 in India.
+        (datetime(2026, 9, 17, 17, 0, tzinfo=UTC), "2026-09-17", "18 Sep 12:30 IST"),
+        # Before midnight Pacific but already the next day in India: still the old quota day.
+        (datetime(2026, 9, 17, 6, 30, tzinfo=UTC), "2026-09-16", "17 Sep 12:30 IST"),
+        # US standard time: midnight Pacific is 13:30 in India.
+        (datetime(2026, 11, 20, 17, 0, tzinfo=UTC), "2026-11-20", "21 Nov 13:30 IST"),
+    ],
+)
+def test_quota_day_and_reset_follow_pacific_time(now: datetime, day: str, reset: str) -> None:
+    limiter, _ = _limiter(now=lambda: now)
+    assert limiter.quota_day() == day
+    assert limiter.format_reset() == reset
+
+
+def test_status_reports_usage_budget_and_quota() -> None:
+    limiter, _ = _limiter(rpd=500, budget=350)
+    limiter.acquire(MODEL, 10)
+    status = limiter.status(MODEL)
+    assert status is not None
+    assert (status.used, status.budget, status.limit, status.day) == (1, 350, 500, "2026-09-17")
+    assert limiter.status("unknown-model") is None

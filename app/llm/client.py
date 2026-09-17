@@ -383,7 +383,9 @@ class LLMClient:
         input_tokens = output_tokens = 0
         error_text = ""
         for attempt in (1, 2):
-            response = self._generate(model, system, prompt, schema, max_tokens, purpose)
+            response = self._generate(
+                model, system, prompt, schema, max_tokens, purpose, is_retry=attempt > 1
+            )
             input_tokens += response.input_tokens
             output_tokens += response.output_tokens
             if response.finish == "blocked":
@@ -410,15 +412,21 @@ class LLMClient:
         schema: type[BaseModel],
         max_tokens: int,
         purpose: str,
+        is_retry: bool = False,
     ) -> ProviderResponse:
-        """One logical request: rate-limited, with retries for transient errors."""
+        """One logical request: rate-limited, with retries for transient errors. Only the first
+        attempt of new work counts against the daily budget; retries may use the full quota."""
         attempts = self.settings.max_retries + 1
         temperature = self.settings.temperature_for(model)
         for attempt in range(1, attempts + 1):
             reservation = None
             if self.limiter is not None:
                 try:
-                    reservation = self.limiter.acquire(model, estimate_input_tokens(system, prompt))
+                    reservation = self.limiter.acquire(
+                        model,
+                        estimate_input_tokens(system, prompt),
+                        retry=is_retry or attempt > 1,
+                    )
                 except DailyLimitReached as exc:
                     raise LLMQuotaError(f"{purpose}: {exc}") from None
                 except MissingRateLimit as exc:
@@ -478,6 +486,7 @@ class LLMClient:
 def make_llm_client(
     settings: LLMSettings,
     session_factory: sessionmaker[Session] | None = None,
+    display_timezone: ZoneInfo | None = None,
 ) -> LLMClient:
     """Build the client for `settings.provider`.
 
@@ -512,5 +521,6 @@ def make_llm_client(
         store,
         ZoneInfo(settings.rate_limit_day_timezone),
         require_limits=settings.provider == "gemini",
+        display_timezone=display_timezone,
     )
     return LLMClient(settings, provider, limiter)

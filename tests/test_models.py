@@ -4,6 +4,7 @@ import pytest
 from sqlalchemy.exc import IntegrityError, StatementError
 from sqlalchemy.orm import Session
 
+from app.db import init_db, make_engine
 from app.models import Article
 from tests.conftest import NOW
 
@@ -42,3 +43,17 @@ def test_normalized_url_is_unique(session: Session) -> None:
     session.add_all([_article("https://example.com/a"), _article("https://example.com/a")])
     with pytest.raises(IntegrityError):
         session.commit()
+
+
+def test_init_db_adds_columns_missing_from_an_older_database(tmp_path) -> None:
+    engine = make_engine(tmp_path / "old.db")
+    with engine.begin() as connection:
+        connection.exec_driver_sql(
+            "CREATE TABLE stories (id INTEGER PRIMARY KEY, first_seen_at DATETIME, "
+            "updated_at DATETIME, headline TEXT)"
+        )
+    init_db(engine)
+    with engine.connect() as connection:
+        columns = {row[1] for row in connection.exec_driver_sql("PRAGMA table_info(stories)")}
+    assert {"model", "summary_pending"} <= columns
+    init_db(engine)  # running again is a no-op

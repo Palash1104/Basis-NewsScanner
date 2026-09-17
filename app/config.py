@@ -38,8 +38,22 @@ class RateLimitSettings(_Strict):
     """A model's quota. For Gemini, copy these from https://aistudio.google.com/rate-limit."""
 
     requests_per_minute: int = Field(gt=0)
-    input_tokens_per_minute: int = Field(gt=0)
-    requests_per_day: int = Field(gt=0)
+    input_tokens_per_minute: int = Field(gt=0)  # AI Studio's TPM counts input tokens
+    requests_per_day: int = Field(gt=0)  # the hard quota
+    # New work stops here; retries of requests already started may use the rest of the quota.
+    requests_per_day_budget: int | None = Field(default=None, gt=0)
+
+    @model_validator(mode="after")
+    def _budget_within_quota(self) -> "RateLimitSettings":
+        if self.requests_per_day_budget is not None and (
+            self.requests_per_day_budget > self.requests_per_day
+        ):
+            raise ValueError("requests_per_day_budget can't exceed requests_per_day")
+        return self
+
+    @property
+    def daily_budget(self) -> int:
+        return self.requests_per_day_budget or self.requests_per_day
 
 
 class LLMSettings(_Strict):
@@ -135,6 +149,20 @@ class DeliverySettings(_Strict):
         return value
 
 
+class ScheduleSettings(_Strict):
+    """For `newsdesk scheduler`: run the pipeline every N hours, on the hour, aligned so a run
+    starts in the same hour as each digest time."""
+
+    pipeline_every_hours: int
+
+    @field_validator("pipeline_every_hours")
+    @classmethod
+    def _divides_day(cls, value: int) -> int:
+        if value <= 0 or 24 % value:
+            raise ValueError("pipeline_every_hours must divide 24 (1, 2, 3, 4, 6, 8, 12 or 24)")
+        return value
+
+
 class PathSettings(_Strict):
     database: str = "data/newsdesk.db"
     log_dir: str = "data/logs"
@@ -151,6 +179,7 @@ class Settings(_Strict):
     impacts: ImpactSettings
     scoring: ScoringSettings
     delivery: DeliverySettings
+    schedule: ScheduleSettings
     paths: PathSettings = Field(default_factory=PathSettings)
 
     @field_validator("timezone")

@@ -29,8 +29,24 @@ def make_engine(db_path: Path | str) -> Engine:
     return engine
 
 
+# Columns added after their table was first created. create_all() only creates missing tables,
+# so these are added with ALTER TABLE when an existing database lacks them.
+ADDED_COLUMNS: dict[str, dict[str, str]] = {
+    "stories": {
+        "model": "VARCHAR(64)",
+        "summary_pending": "BOOLEAN NOT NULL DEFAULT 0",
+    },
+}
+
+
 def init_db(engine: Engine) -> None:
     Base.metadata.create_all(engine)
+    with engine.begin() as connection:
+        for table, columns in ADDED_COLUMNS.items():
+            existing = {row[1] for row in connection.exec_driver_sql(f"PRAGMA table_info({table})")}
+            for name, ddl in columns.items():
+                if name not in existing:
+                    connection.exec_driver_sql(f"ALTER TABLE {table} ADD COLUMN {name} {ddl}")
 
 
 def make_session_factory(engine: Engine) -> sessionmaker[Session]:

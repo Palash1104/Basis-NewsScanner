@@ -71,3 +71,19 @@ def rank_stories(session: Session, settings: Settings, now: datetime) -> list[St
 
     ranked.sort(key=lambda item: (item[0], item[1]), reverse=True)
     return [story for _, _, story in ranked[: settings.pipeline.max_stories_per_run]]
+
+
+def pending_stories(session: Session, settings: Settings, now: datetime) -> list[Story]:
+    """Stories whose summary was skipped for quota on an earlier run and that still have an
+    article inside the lookback window, most important first."""
+    cutoff = now - timedelta(hours=settings.pipeline.lookback_hours)
+    recent_story_ids = select(Article.story_id).where(
+        Article.story_id.is_not(None), Article.published_at >= cutoff
+    )
+    return list(
+        session.scalars(
+            select(Story)
+            .where(Story.summary_pending.is_(True), Story.id.in_(recent_story_ids))
+            .order_by(Story.importance_score.desc())
+        )
+    )

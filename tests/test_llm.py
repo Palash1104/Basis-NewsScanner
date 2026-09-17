@@ -404,7 +404,7 @@ def test_client_uses_limiter_for_every_attempt(settings: Settings) -> None:
     (row,) = store.rows.values()
     assert row == [2, 120 + 500, 60 + 60]
 
-    with pytest.raises(LLMQuotaError, match="daily limit reached"):
+    with pytest.raises(LLMQuotaError, match="daily budget reached"):
         _structured(client)
     assert len(provider.calls) == 2  # the third request was never sent
 
@@ -458,3 +458,24 @@ def test_factory_builds_anthropic_client_without_limits(
     )
     client = make_llm_client(llm)
     assert isinstance(client.provider, AnthropicProvider)
+
+
+def test_client_validation_retry_may_go_past_the_budget(settings: Settings) -> None:
+    limits = {
+        "gemini-3.5-flash-lite": RateLimitSettings(
+            requests_per_minute=100,
+            input_tokens_per_minute=100_000,
+            requests_per_day=3,
+            requests_per_day_budget=1,
+        )
+    }
+    limiter = RateLimiter(
+        limits, MemoryDailyUsageStore(), ZoneInfo("America/Los_Angeles"), require_limits=True
+    )
+    provider = FakeProvider([provider_response("{bad"), provider_response(summary_json())])
+    client, _ = _client(settings, provider, limiter)
+
+    _structured(client)  # new work (1/1 budget), then its validation retry beyond the budget
+    assert len(provider.calls) == 2
+    with pytest.raises(LLMQuotaError, match="daily budget reached"):
+        _structured(client)  # new work: budget used up

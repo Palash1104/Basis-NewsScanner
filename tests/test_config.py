@@ -3,7 +3,15 @@ from collections import defaultdict
 import pytest
 from pydantic import ValidationError
 
-from app.config import DeliverySettings, FeedsFile, LLMSettings, Settings, load_feeds
+from app.config import (
+    DeliverySettings,
+    FeedsFile,
+    LLMSettings,
+    RateLimitSettings,
+    ScheduleSettings,
+    Settings,
+    load_feeds,
+)
 
 
 def test_settings_file_loads(settings: Settings) -> None:
@@ -82,3 +90,30 @@ def test_model_ids_must_match_provider() -> None:
         provider="anthropic", summary_model="claude-haiku-4-5", reasoning_model="claude-sonnet-5"
     )
     assert anthropic.api_key_env == "ANTHROPIC_API_KEY"
+
+
+def test_budget_cannot_exceed_quota() -> None:
+    with pytest.raises(ValidationError, match="can't exceed"):
+        RateLimitSettings(
+            requests_per_minute=15,
+            input_tokens_per_minute=250_000,
+            requests_per_day=500,
+            requests_per_day_budget=600,
+        )
+    assert (
+        RateLimitSettings(
+            requests_per_minute=1, input_tokens_per_minute=1, requests_per_day=9
+        ).daily_budget
+        == 9
+    )
+
+
+def test_schedule_interval_must_divide_the_day() -> None:
+    with pytest.raises(ValidationError, match="must divide 24"):
+        ScheduleSettings(pipeline_every_hours=5)
+    assert ScheduleSettings(pipeline_every_hours=3).pipeline_every_hours == 3
+
+
+def test_configured_limits_budget_within_quota(settings: Settings) -> None:
+    for limits in settings.llm.rate_limits.values():
+        assert limits.daily_budget <= limits.requests_per_day

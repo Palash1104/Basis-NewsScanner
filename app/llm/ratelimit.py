@@ -3,8 +3,12 @@
 Three limits per model, matching how the Gemini API measures quota: requests per minute,
 input tokens per minute, and requests per day. Minute limits use a sliding 60-second window
 and wait for room. The daily count is stored in the database so it holds across runs, and
-resets at midnight in the configured time zone (Pacific time for Gemini). When the daily
-limit is reached, `acquire` raises instead of waiting.
+resets at midnight in the configured time zone (Pacific time for Gemini; that is early
+afternoon in India). When the daily limit is reached, `acquire` raises instead of waiting.
+
+Two daily numbers: the quota (`requests_per_day`) and an optional budget
+(`requests_per_day_budget`). New work stops at the budget; retries of work already started may
+continue up to the quota.
 """
 
 import logging
@@ -12,7 +16,8 @@ import time
 from collections import defaultdict, deque
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
+from datetime import time as dt_time
 from typing import Protocol
 from zoneinfo import ZoneInfo
 
@@ -106,6 +111,16 @@ class SqlDailyUsageStore:
             session.commit()
 
 
+@dataclass(frozen=True)
+class QuotaStatus:
+    model: str
+    day: str  # quota day (YYYY-MM-DD in the quota time zone)
+    used: int
+    budget: int
+    limit: int
+    resets_at: datetime  # next midnight in the quota time zone, timezone-aware
+
+
 @dataclass
 class Reservation:
     model: str
@@ -123,6 +138,7 @@ class RateLimiter:
         clock: Callable[[], float] = time.monotonic,
         sleep: Callable[[float], None] = time.sleep,
         now: Callable[[], datetime] = lambda: datetime.now(UTC),
+        display_timezone: ZoneInfo | None = None,
     ) -> None:
         self._limits = limits
         self._store = store
@@ -131,16 +147,43 @@ class RateLimiter:
         self._clock = clock
         self._sleep = sleep
         self._now = now
+        self._display_tz = display_timezone or day_timezone
         self._events: dict[str, deque[list[float]]] = defaultdict(deque)
 
     def quota_day(self) -> str:
         return self._now().astimezone(self._tz).date().isoformat()
 
-    def acquire(self, model: str, estimated_input_tokens: int) -> Reservation | None:
+    def next_reset(self) -> datetime:
+        """The next midnight in the quota time zone."""
+        local = self._now().astimezone(self._tz)
+        tomorrow = local.date() + timedelta(days=1)
+        return datetime.combine(tomorrow, dt_time(0, 0), tzinfo=self._tz)
+
+    def format_reset(self) -> str:
+        return self.next_reset().astimezone(self._display_tz).strftime("%d %b %H:%M %Z")
+
+    def status(self, model: str) -> QuotaStatus | None:
+        limits = self._limits.get(model)
+        if limits is None:
+            return None
+        day = self.quota_day()
+        return QuotaStatus(
+            model=model,
+            day=day,
+            used=self._store.requests(day, model),
+            budget=limits.daily_budget,
+            limit=limits.requests_per_day,
+            resets_at=self.next_reset(),
+        )
+
+    def acquire(
+        self, model: str, estimated_input_tokens: int, retry: bool = False
+    ) -> Reservation | None:
         """Block until a request to `model` fits the minute limits, then reserve it.
 
-        Raises DailyLimitReached when today's requests are used up, and MissingRateLimit if
-        limits are required but not configured for the model.
+        `retry` marks a retry of work already started: it may use the quota beyond the budget.
+        Raises DailyLimitReached when the day's budget (or, for retries, the quota) is used up,
+        and MissingRateLimit if limits are required but not configured for the model.
         """
         limits = self._limits.get(model)
         if limits is None:
@@ -150,10 +193,15 @@ class RateLimiter:
 
         day = self.quota_day()
         used_today = self._store.requests(day, model)
-        if used_today >= limits.requests_per_day:
+        cap, label = (
+            (limits.requests_per_day, "daily quota")
+            if retry
+            else (limits.daily_budget, "daily budget")
+        )
+        if used_today >= cap:
             raise DailyLimitReached(
-                f"{model}: daily limit reached ({used_today}/{limits.requests_per_day} requests "
-                f"on {day}, resets at midnight {self._tz.key})"
+                f"{model}: {label} reached ({used_today}/{cap} requests on quota day {day}; "
+                f"resets {self.format_reset()})"
             )
 
         tokens = float(min(max(estimated_input_tokens, 1), limits.input_tokens_per_minute))

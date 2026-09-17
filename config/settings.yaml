@@ -17,17 +17,18 @@ llm:
   timeout_seconds: 60
   max_retries: 3 # retries for timeouts, 429 and 5xx, with exponential backoff (max 60s wait)
   # Client-side limits per model ID, so runs never exceed the quota. Required for Gemini
-  # models the pipeline calls. Google's docs no longer publish free-tier numbers: copy your
-  # project's values from https://aistudio.google.com/rate-limit. Limits are per Google Cloud
-  # project (shared by all keys and apps in it); daily requests reset at midnight Pacific.
+  # models the pipeline calls. Values come from https://aistudio.google.com/rate-limit (Google's
+  # docs don't publish them). Limits are per Google Cloud project, shared by all keys in it.
+  # Daily requests reset at midnight Pacific time: 12:30 IST during US daylight time,
+  # 13:30 IST otherwise. The daily count is tracked per Pacific day, not per IST day.
   rate_limits:
-    # TEMPORARY conservative values chosen on 2026-09-17 for the Phase 1 check. They are NOT
-    # Google's numbers, just set low enough to stay under any free tier. Replace them with the
-    # values AI Studio shows for your project.
-    gemini-3.5-flash-lite:
-      requests_per_minute: 5
-      input_tokens_per_minute: 100000
-      requests_per_day: 30
+    gemini-3.5-flash-lite: # the user's project limits, provided 2026-09-17
+      requests_per_minute: 15
+      input_tokens_per_minute: 250000
+      requests_per_day: 500
+      # 70% of the quota for new work; the remaining 150 are kept for retries. When the budget
+      # is used up, the rest of the run's summaries are skipped and done on a later run.
+      requests_per_day_budget: 350
   rate_limit_day_timezone: America/Los_Angeles
 
 http:
@@ -74,6 +75,14 @@ scoring:
   vol_lookback_days: 20
   hit_threshold_vol_multiple: 0.5
   min_samples_to_show_rate: 5
+
+schedule:
+  # `newsdesk scheduler` runs the pipeline every N hours, on the hour. Runs line up with the
+  # digest hours, so each digest goes out 30 minutes after a run. Chosen 2026-09-17: hourly is
+  # the most frequent schedule that stays under the 350/day budget. Replaying real news gave
+  # about 160 summary calls/day typical and about 260 busy. Phase 2 roughly doubles that (one
+  # event extraction per summary), so revisit this then.
+  pipeline_every_hours: 1
 
 delivery:
   digest_times: ["07:30", "19:30"]

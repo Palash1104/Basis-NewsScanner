@@ -26,14 +26,12 @@ impact notes start in Phase 2.
    - `TELEGRAM_CHAT_ID`: send any message to your new bot, then open
      `https://api.telegram.org/bot<TOKEN>/getUpdates` in a browser and copy
      `result[].message.chat.id`.
-4. Enter your Gemini rate limits. Google doesn't publish free-tier limits in its docs; they
-   are shown per project at https://aistudio.google.com/rate-limit. Copy the summary model's
-   requests per minute, input tokens per minute and requests per day into `llm.rate_limits` in
-   `config/settings.yaml`. Newsdesk won't call Gemini without limits, and never exceeds them.
-   **The file currently has temporary conservative values** (5 requests/min, 100,000 input
-   tokens/min, 30 requests/day), which are not Google's numbers. At 30 requests a day, hourly
-   runs won't fit (see Cost and limits), so replace them with your project's values before
-   scheduling runs.
+4. Check your Gemini rate limits. Google doesn't publish them in its docs; they're shown per
+   project at https://aistudio.google.com/rate-limit. `llm.rate_limits` in
+   `config/settings.yaml` holds this project's values for `gemini-3.5-flash-lite`: 15
+   requests/min, 250,000 input tokens/min and 500 requests/day, plus a daily budget of 350.
+   Newsdesk won't call Gemini without limits and never exceeds them. If your project's limits
+   change, update them there.
 5. Check everything works (a few feeds, one small LLM call, and the bot):
    ```
    uv run python scripts/smoke_test.py
@@ -50,6 +48,7 @@ but skips summaries and records why. The digest only includes summarized stories
 | `uv run newsdesk run` | One pipeline pass: fetch feeds, drop duplicates, group into stories, rank, summarize the top stories that are new or changed. Prints article, story and token counts. |
 | `uv run newsdesk digest --dry-run` | Print the digest of stories summarized since the last sent digest. Doesn't count as a send. This is the default. |
 | `uv run newsdesk digest --send` | Send that digest to Telegram. |
+| `uv run newsdesk scheduler` | Keep running: a pipeline pass every `schedule.pipeline_every_hours` (hourly), and a digest at each `delivery.digest_times` (07:30 and 19:30 IST). Stop with Ctrl+C; restart it after editing `settings.yaml`. |
 | `uv run python scripts/verify_feeds.py [--include-disabled]` | Check every feed responds and has recent entries. |
 | `uv run python scripts/grouping_report.py --refresh` | Compare grouping thresholds on a fresh sample (writes `data/grouping_report.md`). |
 | `uv run pytest -q` | Run the tests (network and LLM calls are mocked). |
@@ -60,12 +59,13 @@ errors and token counts.
 
 ## Scheduling
 
-A built-in scheduler (`newsdesk scheduler`) comes in a later phase. Until then, use cron. Run
-the pipeline hourly and send digests at the times in `config/settings.yaml` (07:30 and 19:30 IST):
+The simplest option is to leave `uv run newsdesk scheduler` running. It runs the pipeline every
+hour on the hour and sends digests at 07:30 and 19:30 IST. To use cron instead, the equivalent
+lines are:
 
 ```
 CRON_TZ=Asia/Kolkata
-0 * * * *     cd /path/to/newsdesk && uv run newsdesk run >> data/logs/cron.log 2>&1
+0 * * * *     cd /path/to/newsdesk && uv run newsdesk run >> data/logs/cron.log 2>&1   # hourly
 30 7,19 * * * cd /path/to/newsdesk && uv run newsdesk digest --send >> data/logs/cron.log 2>&1
 ```
 
@@ -92,18 +92,34 @@ free tier. To use Anthropic instead, set `llm.provider: anthropic`, change the m
 
 ## Cost and limits
 
-Each story summary is one LLM call (two if the first answer fails validation), roughly 1,000
-input tokens. Replaying real fetched news hour by hour gave:
+Each story summary is one call to `gemini-3.5-flash-lite` (two if the first answer fails
+validation, which hadn't happened in 24 live calls), about 450 input tokens each.
 
-- **First run** (empty database): 20 calls, one per top story.
-- **Hourly runs after that:** about 7 calls on average, at most 10 in the replay, since only new
-  stories and stories that gained 2+ articles or a new region are summarized again.
-- **Per day with hourly runs:** about 170 calls typically, about 240 on a busy day. With
-  validation retries on every story it could reach twice that, which is unlikely.
+**Limits** (per Google Cloud project, from AI Studio): 15 requests/min, 250,000 input
+tokens/min, 500 requests/day.
+- New work stops at **350 requests a day**. The other 150 are kept for retries.
+- The daily quota resets at **midnight Pacific time**: 12:30 IST during US daylight time, and
+  13:30 IST otherwise. It does not reset at midnight IST.
+- `newsdesk run` prints the day's usage and the next reset, e.g.
+  `quota: 24/500 requests used on quota day 2026-09-17 (budget 350), resets 18 Sep 12:30 IST`.
 
-Compare that with the requests-per-day limit AI Studio shows for your project. The limiter stops
-LLM calls for the rest of a run once the daily limit is reached, and those stories are picked
-up on the next run after the quota resets (midnight Pacific).
+**If the quota runs out mid-run,** the run skips the remaining summaries but still fetches,
+groups and ranks, and finishes normally. The skipped stories are marked pending and are
+summarized first on the next run once quota is available, even if newer stories have pushed
+them out of the top 20.
+
+**Calls per day.** From replaying real fetched news hour by hour; "busy" assumes every run is as
+busy as the busiest one seen:
+
+| Schedule | Now: typical / busy | After Phase 2 adds event extraction (about 2×) |
+|---|---|---|
+| Hourly (current) | 157 / 264 | 314 / 528 |
+| Every 2 hours | 128 / 192 | 257 / 384 |
+| Every 3 hours | 109 / 152 | 219 / 304 |
+
+Hourly is the most frequent schedule that stays under the 350 budget today, so it's set. After
+Phase 2, hourly would go over on busy days (the extra stories would be deferred, not lost), so
+the schedule should be revisited then. A first run on an empty database makes about 20 calls.
 
 On Gemini's free tier, calls cost nothing, but Google's pricing page says free-tier content is
 used to improve Google's products. On Anthropic, `claude-haiku-4-5` costs a few cents for a

@@ -3,6 +3,7 @@
 import json
 from datetime import timedelta
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import httpx
 import pytest
@@ -10,10 +11,11 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.cli import run_digest, run_pipeline
-from app.config import FeedConfig, Settings
+from app.config import FeedConfig, RateLimitSettings, Settings
 from app.db import init_db, make_engine, make_session_factory
 from app.delivery.telegram import TelegramError
 from app.llm.client import LLMClient
+from app.llm.ratelimit import MemoryDailyUsageStore, RateLimiter
 from app.models import Run, Story
 from tests.conftest import NOW, make_feed
 from tests.fakes import FakeProvider, echo_summary_responder, rss
@@ -200,3 +202,48 @@ def test_failed_send_does_not_move_digest_window(
     with db() as session:
         failed = session.scalars(select(Run).where(Run.kind == "digest")).one()
         assert failed.errors and failed.stories_processed == 0
+
+
+def _budget_limited_llm(settings: Settings, budget: int) -> tuple[LLMClient, FakeProvider]:
+    limits = {
+        settings.llm.summary_model: RateLimitSettings(
+            requests_per_minute=100,
+            input_tokens_per_minute=1_000_000,
+            requests_per_day=100,
+            requests_per_day_budget=budget,
+        )
+    }
+    limiter = RateLimiter(
+        limits, MemoryDailyUsageStore(), ZoneInfo("America/Los_Angeles"), require_limits=True
+    )
+    fake = FakeProvider(responder=echo_summary_responder)
+    return LLMClient(settings.llm, fake, limiter=limiter, sleep=lambda seconds: None), fake
+
+
+def test_quota_runs_out_mid_run_and_next_run_catches_up(
+    db: sessionmaker[Session], settings: Settings
+) -> None:
+    server = FeedServer()
+    llm, fake = _budget_limited_llm(settings, budget=1)
+    first = run_pipeline(db, settings, FEEDS, llm, now=NOW, transport=server.transport)
+
+    # Fetching and grouping finished; one summary fit the budget, two were left for later.
+    assert first.articles_new == 4 and first.stories_created == 3
+    assert first.summarized == 1 and first.skipped_quota == 2 and len(fake.calls) == 1
+    stop = next(e for e in first.errors if "stopped early" in e["error"])
+    assert "daily budget reached" in stop["error"] and len(stop["left_for_next_run"]) == 2
+    with db() as session:
+        run = session.scalars(select(Run)).one()
+        assert run.finished_at is not None and run.stories_processed == 1
+        pending = session.scalars(select(Story).where(Story.summary_pending.is_(True))).all()
+        assert len(pending) == 2 and all(story.status == "new" for story in pending)
+
+    # Next run (quota available again, and only 1 top story): the 2 pending stories go first.
+    settings.pipeline.max_stories_per_run = 1
+    llm, fake = _budget_limited_llm(settings, budget=10)
+    second = run_pipeline(db, settings, FEEDS, llm, now=NOW, transport=server.transport)
+    assert second.pending_carried == 2
+    assert second.summarized == 2 and second.skipped_quota == 0 and len(fake.calls) == 2
+    with db() as session:
+        assert session.scalars(select(Story).where(Story.summary_pending.is_(True))).all() == []
+        assert len(session.scalars(select(Story).where(Story.status == "summarized")).all()) == 3

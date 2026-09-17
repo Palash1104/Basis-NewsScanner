@@ -35,6 +35,9 @@ class SummarizeResult:
     call_errors: list[tuple[int, str]] = field(default_factory=list)  # status unchanged
     # Set when a quota ran out or config is missing; remaining stories were left for later.
     stopped: str | None = None
+    # Stories that still need a summary but were skipped because of `stopped`. They are marked
+    # summary_pending so the next run does them first.
+    skipped_quota: list[int] = field(default_factory=list)
 
 
 def source_regions(articles: Sequence[Article]) -> list[str]:
@@ -88,19 +91,23 @@ def summarize_stories(
     now: datetime,
 ) -> SummarizeResult:
     """Summarize each story that needs it. Commits after every story, so progress survives a
-    later failure. One failing story never stops the others; a used-up quota stops the loop
-    and leaves the remaining stories for a later run."""
+    later failure. One failing story never stops the others. A used-up quota stops the loop:
+    that story and every later one that still needs a summary are marked summary_pending."""
     result = SummarizeResult()
     model = settings.llm.summary_model
-    for story in stories:
+    for index, story in enumerate(stories):
         articles = list(story.articles)
         reason = resummarize_reason(story, articles)
         if reason is None:
             result.skipped_unchanged += 1
+            story.summary_pending = False
             continue
 
         chosen = select_articles(articles, settings.pipeline.max_articles_per_story_for_llm)
-        log.info("summarizing story %d (%s) from %d articles", story.id, reason, len(chosen))
+        carried = ", carried over from an earlier run" if story.summary_pending else ""
+        log.info(
+            "summarizing story %d (%s%s) from %d articles", story.id, reason, carried, len(chosen)
+        )
         try:
             output = llm.structured(
                 model=model,
@@ -111,8 +118,17 @@ def summarize_stories(
                 purpose=f"summarize story {story.id}",
             )
         except (LLMQuotaError, LLMConfigError) as exc:
-            log.warning("stopping summaries for this run: %s", exc)
             result.stopped = str(exc)
+            for waiting in stories[index:]:
+                if resummarize_reason(waiting, list(waiting.articles)) is not None:
+                    waiting.summary_pending = True
+                    result.skipped_quota.append(waiting.id)
+            session.commit()
+            log.warning(
+                "stopping summaries for this run (%d stories left for the next run): %s",
+                len(result.skipped_quota),
+                exc,
+            )
             break
         except LLMCallError as exc:
             log.warning("story %d: %s", story.id, exc)
@@ -121,6 +137,7 @@ def summarize_stories(
         except LLMOutputError as exc:
             log.warning("story %d marked failed: %s", story.id, exc)
             story.status = "failed"
+            story.summary_pending = False
             _record_processed(story, articles, model)
             session.commit()
             result.failed.append((story.id, str(exc)))
@@ -134,6 +151,7 @@ def summarize_stories(
         story.sources_disagree = summary.sources_disagree
         story.disagreement_note = summary.disagreement_note
         story.status = "summarized"
+        story.summary_pending = False
         story.updated_at = now
         _record_processed(story, articles, model)
         session.commit()

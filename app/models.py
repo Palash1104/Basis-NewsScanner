@@ -60,6 +60,9 @@ class Story(Base):
     prompt_version: Mapped[str | None] = mapped_column(String(32))
     # Not in SPEC section 6, but section 14 requires every stored LLM output to record its model.
     model: Mapped[str | None] = mapped_column(String(64))
+    # Not in SPEC section 6: set when a summary was skipped because the LLM quota ran out, so the
+    # next run summarizes it first even if it has dropped out of the top stories.
+    summary_pending: Mapped[bool] = mapped_column(default=False)
 
     articles: Mapped[list["Article"]] = relationship(back_populates="story")
 
