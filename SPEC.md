@@ -71,7 +71,9 @@ Sources: BBC · The Hindu · Al Jazeera
 - Python 3.12, managed with `uv`
 - `httpx` (async fetching), `feedparser`, `pydantic` v2, `PyYAML`
 - SQLite via `SQLAlchemy` 2.0
-- `anthropic` (official SDK)
+- LLM provider, configurable with `llm.provider` (section 14):
+  - **Gemini API (default)**, called over REST with `httpx` (`models.generateContent`), no extra SDK
+  - **Anthropic** (optional), via `anthropic` (official SDK)
 - `yfinance` + `pandas` for prices
 - `rapidfuzz` for title similarity (Phase 1 grouping)
 - `sentence-transformers` + `scikit-learn` for embedding-based clustering (Phase 5 only)
@@ -139,7 +141,8 @@ newsdesk/
 `.env`:
 
 ```
-ANTHROPIC_API_KEY=
+GEMINI_API_KEY=        # required when llm.provider is gemini (the default)
+ANTHROPIC_API_KEY=     # optional; only needed when llm.provider is anthropic
 TELEGRAM_BOT_TOKEN=
 TELEGRAM_CHAT_ID=
 ```
@@ -149,9 +152,20 @@ TELEGRAM_CHAT_ID=
 ```yaml
 timezone: Asia/Kolkata
 llm:
-  summary_model: claude-haiku-4-5 # cheap: summaries + event extraction
-  reasoning_model: claude-sonnet-5 # stronger: impact mapping, reranking
-  # Verify these model IDs against Anthropic's current docs before first run.
+  provider: gemini # gemini | anthropic
+  summary_model: gemini-3.5-flash-lite # cheap: summaries + event extraction
+  reasoning_model: gemini-3.8-flash # stronger: impact mapping, reranking
+  # Verify model IDs against the provider's current docs before first run. The Gemini IDs
+  # above were checked on 2026-09-17: both are stable and on the free tier.
+  # For provider: anthropic use claude-haiku-4-5 and claude-sonnet-5.
+  temperature: {} # per model ID; unset models use their default (Gemini 3: keep 1.0)
+  max_retries: 3
+  rate_limits: # per model ID; required for Gemini models, from AI Studio (section 14)
+    # gemini-3.5-flash-lite:
+    #   requests_per_minute: <RPM>
+    #   input_tokens_per_minute: <TPM>
+    #   requests_per_day: <RPD>
+  rate_limit_day_timezone: America/Los_Angeles # daily quotas reset at midnight Pacific
 pipeline:
   lookback_hours: 12
   story_attach_window_hours: 36
@@ -659,9 +673,20 @@ Done when all pages in section 11 work against real data.
 
 ## 14. LLM call rules (apply everywhere)
 
-- Every LLM output is JSON validated by a pydantic model. Use tool use with a JSON schema and a forced `tool_choice`, or the API's structured output feature if you confirm in Anthropic's docs that it's supported for the chosen model.
-- On validation failure: retry once, including the validation error in the retry. If it still fails, mark the story `failed`, log it, and continue.
-- Low temperature where supported.
+- **Provider.** The LLM provider is configurable (`llm.provider`): `gemini` (default) or `anthropic`. The pipeline calls one provider-agnostic interface (`app/llm/client.py`); only the provider implementations know API details. The API key comes from `.env`: `GEMINI_API_KEY` for Gemini, `ANTHROPIC_API_KEY` for Anthropic.
+- **Structured output.** Every LLM output is JSON validated by a pydantic model, using the provider's structured output with a schema:
+  - Gemini: `generationConfig.responseMimeType: application/json` plus `responseJsonSchema`.
+  - Anthropic: `output_config.format` with a `json_schema`.
+- **Validation failures.** Retry once, including the rejected output and the validation error in the retry. If it still fails, mark the story `failed`, log it, and continue.
+- **Transient errors.** Timeouts, 429 and 5xx are retried with exponential backoff (at most `llm.max_retries` times, waits capped at 60s).
+- **Rate limits.** A client-side limiter keeps every run inside the provider's quotas: requests per minute, input tokens per minute, and requests per day.
+  - Limits are configured per model in `llm.rate_limits`, and are required for Gemini models. Google's docs no longer publish free-tier numbers, so copy them from AI Studio (https://aistudio.google.com/rate-limit).
+  - Daily request counts are stored in the database so they hold across runs, and reset at midnight Pacific time.
+  - When a daily limit is reached, or the API is still rate limiting after retries, stop LLM calls for the rest of the run and leave the remaining stories for the next run.
+- **Temperature.** Use a low temperature only where the provider recommends it (e.g. `claude-haiku-4-5`). Google recommends keeping Gemini 3 models at their default of 1.0, because lower values can cause looping.
 - Every stored LLM output records `model` and `prompt_version`. Bump `PROMPT_VERSION` whenever prompt text changes.
-- Log input and output tokens per call and total per run.
+- **Token logging.** Log input and output tokens per call and total per run, from the provider's usage data:
+  - Gemini: `usageMetadata.promptTokenCount` is input; `candidatesTokenCount + thoughtsTokenCount` is output.
+  - Anthropic: `usage.input_tokens` / `usage.output_tokens`.
 - Model IDs come only from `settings.yaml`, never hardcoded.
+- **Prompt caching** (the stable system-prompt block in section 7.7) is Anthropic-specific. Apply it only when `llm.provider` is `anthropic`, and skip it for Gemini.

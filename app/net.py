@@ -27,7 +27,7 @@ def make_client(settings: HttpSettings, **kwargs: Any) -> httpx.AsyncClient:
     )
 
 
-def _retry_after_seconds(response: httpx.Response) -> float | None:
+def retry_after_seconds(response: httpx.Response) -> float | None:
     value = response.headers.get("Retry-After")
     if value is None:
         return None
@@ -37,7 +37,7 @@ def _retry_after_seconds(response: httpx.Response) -> float | None:
         return None  # HTTP-date form; fall back to normal backoff
 
 
-def _backoff_seconds(attempt: int, base: float) -> float:
+def backoff_seconds(attempt: int, base: float) -> float:
     return base * 2 ** (attempt - 1) + random.uniform(0, base)
 
 
@@ -49,26 +49,30 @@ async def request_with_retries(
     max_attempts: int,
     backoff_base: float,
     sleep: Sleep = asyncio.sleep,
+    log_label: str | None = None,
     **kwargs: Any,
 ) -> httpx.Response:
     """Send a request, retrying timeouts, connection errors, 429 and 5xx.
 
     Returns the final response (which may still be an error status: callers decide).
     Raises the last transport error if every attempt failed to get a response.
+    `log_label` replaces the URL in log lines (use it when the URL contains a secret).
     """
+    label = log_label or url
     for attempt in range(1, max_attempts + 1):
         try:
             response = await client.request(method, url, **kwargs)
         except httpx.TransportError as exc:
             if attempt == max_attempts:
                 raise
-            delay = _backoff_seconds(attempt, backoff_base)
+            delay = backoff_seconds(attempt, backoff_base)
+            # With a label the URL may be secret, and exception text can repeat the URL.
+            detail = type(exc).__name__ if log_label else f"{type(exc).__name__}: {exc}"
             log.warning(
-                "%s %s failed (%s: %s), attempt %d/%d, retrying in %.1fs",
+                "%s %s failed (%s), attempt %d/%d, retrying in %.1fs",
                 method,
-                url,
-                type(exc).__name__,
-                exc,
+                label,
+                detail,
                 attempt,
                 max_attempts,
                 delay,
@@ -76,11 +80,11 @@ async def request_with_retries(
         else:
             if response.status_code not in RETRYABLE_STATUS or attempt == max_attempts:
                 return response
-            delay = _retry_after_seconds(response) or _backoff_seconds(attempt, backoff_base)
+            delay = retry_after_seconds(response) or backoff_seconds(attempt, backoff_base)
             log.warning(
                 "%s %s returned %d, attempt %d/%d, retrying in %.1fs",
                 method,
-                url,
+                label,
                 response.status_code,
                 attempt,
                 max_attempts,

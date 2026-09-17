@@ -1,16 +1,34 @@
 timezone: Asia/Kolkata
 
 llm:
-  summary_model: claude-haiku-4-5 # cheap: summaries + event extraction
-  reasoning_model: claude-sonnet-5 # stronger: impact mapping, reranking
-  # Verified 2026-09-16 against Anthropic's model reference: both IDs are current
-  # and both support structured outputs.
-  # Temperature per model ID. Leave a model out if it rejects sampling params
-  # (claude-sonnet-5 returns HTTP 400 when temperature is sent).
-  temperature:
-    claude-haiku-4-5: 0.2
+  provider: gemini # gemini | anthropic; the API key comes from GEMINI_API_KEY / ANTHROPIC_API_KEY
+  # Gemini model IDs, checked 2026-09-17 against ai.google.dev/gemini-api/docs/models and
+  # /pricing: both are stable models whose standard tier lists input and output as
+  # "Free of charge" on the free tier. Free-tier content is used to improve Google's products.
+  summary_model: gemini-3.5-flash-lite # cheap: summaries + event extraction
+  reasoning_model: gemini-3.8-flash # stronger: impact mapping, reranking (Phase 5)
+  # To use Anthropic instead: provider: anthropic, summary_model: claude-haiku-4-5,
+  # reasoning_model: claude-sonnet-5, temperature: {claude-haiku-4-5: 0.2}, and set
+  # ANTHROPIC_API_KEY. (claude-sonnet-5 rejects temperature, so leave it out.)
+  #
+  # Temperature per model ID; models not listed use their default. Google recommends keeping
+  # Gemini 3 models at their default of 1.0 (lower values can cause looping), so none is set.
+  temperature: {}
   timeout_seconds: 60
-  max_retries: 3
+  max_retries: 3 # retries for timeouts, 429 and 5xx, with exponential backoff (max 60s wait)
+  # Client-side limits per model ID, so runs never exceed the quota. Required for Gemini
+  # models the pipeline calls. Google's docs no longer publish free-tier numbers: copy your
+  # project's values from https://aistudio.google.com/rate-limit. Limits are per Google Cloud
+  # project (shared by all keys and apps in it); daily requests reset at midnight Pacific.
+  rate_limits:
+    # TEMPORARY conservative values chosen on 2026-09-17 for the Phase 1 check. They are NOT
+    # Google's numbers, just set low enough to stay under any free tier. Replace them with the
+    # values AI Studio shows for your project.
+    gemini-3.5-flash-lite:
+      requests_per_minute: 5
+      input_tokens_per_minute: 100000
+      requests_per_day: 30
+  rate_limit_day_timezone: America/Los_Angeles
 
 http:
   timeout_seconds: 10
@@ -31,11 +49,13 @@ dedupe:
   syndication_title_similarity: 90
 
 grouping:
-  # Provisional until approved at the Phase 1 checkpoint. Compared on a 24h sample of 786
+  # Approved 2026-09-17 after reviewing sample groupings. Compared on a 24h sample of 786
   # articles with scripts/grouping_report.py: merges scoring ~62 were about half wrong; at 64,
   # 10 of 12 borderline merges were the same story and 2 were loose topic matches. Near misses
   # at 63-64 are mostly the same story (title-only matching's limit). The title+snippet blend
-  # and token_sort scorers did worse.
+  # and token_sort scorers did worse. A 2026-09-17 sample of 15 real pairs scoring 58-72: 6 of 8
+  # at >=64 were the same event (the other 2 were roundup/newsletter articles), 6 of 7 below 64
+  # were the same event too. Raising the threshold wouldn't stop the roundups.
   scorer: title_token_set
   threshold: 64
 

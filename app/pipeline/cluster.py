@@ -161,7 +161,6 @@ def assign_to_stories(
             created += 1
         else:
             story.first_seen_at = min(story.first_seen_at, article.published_at)
-            story.updated_at = now
             attached += 1
         article.story = story
         grouper.add(story, article.title, article.snippet, article.published_at)

@@ -3,7 +3,7 @@
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import JSON, DateTime, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import JSON, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.engine import Dialect
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 from sqlalchemy.types import TypeDecorator
@@ -42,7 +42,8 @@ class Story(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     first_seen_at: Mapped[datetime] = mapped_column(UTCDateTime, index=True)
-    # Wall-clock time the story last changed (article attached or summary written).
+    # Wall-clock time the story was created or its summary was last written. Attaching an
+    # article does not change it, so digests only re-send stories whose summary changed.
     updated_at: Mapped[datetime] = mapped_column(UTCDateTime, index=True)
     headline: Mapped[str] = mapped_column(Text)
     summary: Mapped[str | None] = mapped_column(Text)
@@ -57,6 +58,8 @@ class Story(Base):
     processed_article_count: Mapped[int] = mapped_column(Integer, default=0)
     processed_source_regions: Mapped[list[str]] = mapped_column(JSON, default=list)
     prompt_version: Mapped[str | None] = mapped_column(String(32))
+    # Not in SPEC section 6, but section 14 requires every stored LLM output to record its model.
+    model: Mapped[str | None] = mapped_column(String(64))
 
     articles: Mapped[list["Article"]] = relationship(back_populates="story")
 
@@ -90,3 +93,19 @@ class Run(Base):
     input_tokens: Mapped[int] = mapped_column(Integer, default=0)
     output_tokens: Mapped[int] = mapped_column(Integer, default=0)
     errors: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
+
+
+class LLMDailyUsage(Base):
+    """Requests and tokens per provider/model per quota day, so daily limits hold across runs.
+    Not in SPEC section 6; added for the LLM rate limiter."""
+
+    __tablename__ = "llm_daily_usage"
+    __table_args__ = (UniqueConstraint("day", "provider", "model"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    day: Mapped[str] = mapped_column(String(10))  # YYYY-MM-DD in the quota time zone
+    provider: Mapped[str] = mapped_column(String(16))
+    model: Mapped[str] = mapped_column(String(64))
+    requests: Mapped[int] = mapped_column(Integer, default=0)
+    input_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    output_tokens: Mapped[int] = mapped_column(Integer, default=0)

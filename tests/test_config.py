@@ -3,7 +3,7 @@ from collections import defaultdict
 import pytest
 from pydantic import ValidationError
 
-from app.config import DeliverySettings, FeedsFile, Settings, load_feeds
+from app.config import DeliverySettings, FeedsFile, LLMSettings, Settings, load_feeds
 
 
 def test_settings_file_loads(settings: Settings) -> None:
@@ -67,3 +67,18 @@ def test_google_news_detection() -> None:
         }
     ).feeds
     assert [feed.is_google_news for feed in feeds] == [True, False]
+
+
+def test_llm_defaults_to_gemini(settings: Settings) -> None:
+    assert settings.llm.provider == "gemini"
+    assert settings.llm.api_key_env == "GEMINI_API_KEY"
+    assert settings.llm.summary_model.startswith("gemini-")
+
+
+def test_model_ids_must_match_provider() -> None:
+    with pytest.raises(ValidationError, match="doesn't look like a gemini model"):
+        LLMSettings(summary_model="claude-haiku-4-5", reasoning_model="gemini-3.8-flash")
+    anthropic = LLMSettings(
+        provider="anthropic", summary_model="claude-haiku-4-5", reasoning_model="claude-sonnet-5"
+    )
+    assert anthropic.api_key_env == "ANTHROPIC_API_KEY"

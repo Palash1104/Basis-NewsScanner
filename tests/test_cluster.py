@@ -99,7 +99,7 @@ def test_assign_to_stories_attaches_to_existing_and_creates_new(
     eu_story = first_batch[0].story
     assert eu_story is not None and second_batch[0].story is eu_story
     assert eu_story.first_seen_at == NOW - timedelta(hours=6)  # earliest article
-    assert eu_story.updated_at == later
+    assert eu_story.updated_at == NOW - timedelta(hours=3)  # attaching doesn't bump it
     assert eu_story.status == "new"
     assert session.query(Story).count() == 3
 

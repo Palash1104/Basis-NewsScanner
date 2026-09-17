@@ -24,15 +24,54 @@ class _Strict(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+LLMProviderName = Literal["gemini", "anthropic"]
+
+# Environment variable holding each provider's API key.
+PROVIDER_KEY_ENV: dict[str, str] = {"gemini": "GEMINI_API_KEY", "anthropic": "ANTHROPIC_API_KEY"}
+_PROVIDER_MODEL_PREFIXES: dict[str, tuple[str, ...]] = {
+    "gemini": ("gemini-", "gemma-"),
+    "anthropic": ("claude-",),
+}
+
+
+class RateLimitSettings(_Strict):
+    """A model's quota. For Gemini, copy these from https://aistudio.google.com/rate-limit."""
+
+    requests_per_minute: int = Field(gt=0)
+    input_tokens_per_minute: int = Field(gt=0)
+    requests_per_day: int = Field(gt=0)
+
+
 class LLMSettings(_Strict):
+    provider: LLMProviderName = "gemini"
     summary_model: str
     reasoning_model: str
     temperature: dict[str, float] = Field(default_factory=dict)
     timeout_seconds: float = 60
-    max_retries: int = 3
+    max_retries: int = Field(default=3, ge=0)
+    rate_limits: dict[str, RateLimitSettings] = Field(default_factory=dict)
+    # Daily request quotas reset at midnight in this time zone (Pacific time for Gemini).
+    rate_limit_day_timezone: str = "America/Los_Angeles"
+
+    @model_validator(mode="after")
+    def _models_match_provider(self) -> "LLMSettings":
+        prefixes = _PROVIDER_MODEL_PREFIXES[self.provider]
+        for field_name in ("summary_model", "reasoning_model"):
+            model = getattr(self, field_name)
+            if not model.startswith(prefixes):
+                raise ValueError(
+                    f"llm.{field_name} {model!r} doesn't look like a {self.provider} model "
+                    f"(expected a name starting with {' or '.join(prefixes)})"
+                )
+        ZoneInfo(self.rate_limit_day_timezone)
+        return self
+
+    @property
+    def api_key_env(self) -> str:
+        return PROVIDER_KEY_ENV[self.provider]
 
     def temperature_for(self, model: str) -> float | None:
-        """Temperature to send for `model`, or None if it must not be sent."""
+        """Temperature to send for `model`, or None to use the model's default."""
         return self.temperature.get(model)
 
 
