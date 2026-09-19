@@ -103,11 +103,13 @@ scoring:
 
 schedule:
   # `newsdesk scheduler` runs the pipeline every N hours, on the hour. Runs line up with the
-  # digest hours, so each digest goes out 30 minutes after a run. Chosen 2026-09-17: hourly is
-  # the most frequent schedule that stays under the 350/day budget. Replaying real news gave
-  # about 160 summary calls/day typical and about 260 busy. Phase 2 roughly doubles that (one
-  # event extraction per summary), so revisit this then.
-  pipeline_every_hours: 1
+  # digest hours, so each digest goes out 30 minutes after a run (every 3 hours: 01, 04, 07,
+  # 10, 13, 16, 19, 22 IST). Chosen 2026-09-19 for Phase 2, where every summary is followed by
+  # an event-extraction call. Replaying real news with the current grouping gave these
+  # summary-model calls/day (summaries + extractions), typical / busy: hourly 253 / 480,
+  # every 2 hours 218 / 336, every 3 hours 206 / 272, against the 350 budget. Digests are
+  # just as fresh: a run still happens 30 minutes before each one.
+  pipeline_every_hours: 3
 
 delivery:
   digest_times: ["07:30", "19:30"]

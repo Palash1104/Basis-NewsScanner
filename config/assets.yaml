@@ -1,0 +1,138 @@
+# Asset universe (SPEC §8): every symbol the playbook (and, in Phase 5, the LLM impact layer)
+# may use. Symbols are Yahoo Finance tickers, all from the SPEC §8 starter list.
+#
+# Every symbol must pass `uv run newsdesk validate-tickers` (5 days of daily prices from Yahoo).
+# Failures are shown to the user; never replace a failing symbol with a guessed one.
+#
+# Fields:
+#   symbol, name, display_name
+#   type:    commodity | fx | rate | index | stock | etf
+#   country: where the asset is listed or based ("Global" for commodities)
+#   sector:  exactly one of Energy, Metals, Agriculture, Financials, Technology, Pharma,
+#            Consumer, Industrials, Utilities, Real Estate, Telecom, Transport, Defence, Macro
+#   tags:    exposure labels (from the SPEC §8 groupings)
+#   exchange, currency: Yahoo's exchange code and currency, copied from the validate-tickers
+#            report (verified, never guessed). validate-tickers flags any later mismatch. The
+#            scoring benchmark is chosen by exchange (SPEC 7.9).
+#   up_means: optional plain-words meaning of "up", where an arrow is easy to misread.
+#   approved_yahoo_names: Yahoo names the user confirmed are this asset, when Yahoo's wording
+#            is too different for the automatic name check (validate-tickers stops flagging).
+assets:
+  # Commodities
+  - {symbol: BZ=F, name: Brent crude oil futures, display_name: Brent crude, type: commodity, country: Global, sector: Energy, exchange: NYM, currency: USD, tags: [oil, crude]}
+  - {symbol: CL=F, name: WTI crude oil futures, display_name: WTI crude, type: commodity, country: Global, sector: Energy, exchange: NYM, currency: USD, tags: [oil, crude]}
+  - {symbol: NG=F, name: Natural gas futures, display_name: Natural gas (US), type: commodity, country: Global, sector: Energy, exchange: NYM, currency: USD, tags: [natural-gas]}
+  - {symbol: GC=F, name: Gold futures, display_name: Gold, type: commodity, country: Global, sector: Metals, exchange: CMX, currency: USD, tags: [gold, precious-metals]}
+  - {symbol: SI=F, name: Silver futures, display_name: Silver, type: commodity, country: Global, sector: Metals, exchange: CMX, currency: USD, tags: [silver, precious-metals]}
+  - {symbol: HG=F, name: Copper futures, display_name: Copper, type: commodity, country: Global, sector: Metals, exchange: CMX, currency: USD, tags: [copper, base-metals]}
+  - {symbol: ZW=F, name: Wheat futures, display_name: Wheat, type: commodity, country: Global, sector: Agriculture, exchange: CBT, currency: USX, tags: [grains]}
+  - {symbol: ZC=F, name: Corn futures, display_name: Corn, type: commodity, country: Global, sector: Agriculture, exchange: CBT, currency: USX, tags: [grains]}
+  - {symbol: ZS=F, name: Soybean futures, display_name: Soybeans, type: commodity, country: Global, sector: Agriculture, exchange: CBT, currency: USX, tags: [oilseeds]}
+
+  # FX and rates
+  - {symbol: INR=X, name: US dollar / Indian rupee, display_name: USD/INR, type: fx, country: India, sector: Macro, exchange: CCY, currency: INR, tags: [rupee, currency], up_means: rupee weaker}
+  - {symbol: DX-Y.NYB, name: US Dollar Index, display_name: US dollar index, type: fx, country: United States, sector: Macro, exchange: NYB, currency: USD, tags: [dollar, currency]}
+  - {symbol: ^TNX, name: US 10-year Treasury yield, display_name: US 10-year yield, type: rate, country: United States, sector: Macro, exchange: CGI, currency: USD, tags: [rates, treasury], approved_yahoo_names: ["CBOE Interest Rate 10 Year T No"]}
+
+  # India indices
+  - {symbol: ^NSEI, name: Nifty 50, display_name: Nifty 50, type: index, country: India, sector: Macro, exchange: NSI, currency: INR, tags: [broad-market]}
+  - {symbol: ^NSEBANK, name: Nifty Bank, display_name: Bank Nifty, type: index, country: India, sector: Financials, exchange: NSI, currency: INR, tags: [banks]}
+  - {symbol: ^CNXIT, name: Nifty IT, display_name: Nifty IT, type: index, country: India, sector: Technology, exchange: NSI, currency: INR, tags: [it-services]}
+  - {symbol: ^CNXPHARMA, name: Nifty Pharma, display_name: Nifty Pharma, type: index, country: India, sector: Pharma, exchange: NSI, currency: INR, tags: [pharma]}
+  - {symbol: ^CNXAUTO, name: Nifty Auto, display_name: Nifty Auto, type: index, country: India, sector: Consumer, exchange: NSI, currency: INR, tags: [autos]}
+  - {symbol: ^CNXFMCG, name: Nifty FMCG, display_name: Nifty FMCG, type: index, country: India, sector: Consumer, exchange: NSI, currency: INR, tags: [fmcg]}
+  - {symbol: ^CNXMETAL, name: Nifty Metal, display_name: Nifty Metal, type: index, country: India, sector: Metals, exchange: NSI, currency: INR, tags: [metals]}
+  - {symbol: ^CNXENERGY, name: Nifty Energy, display_name: Nifty Energy, type: index, country: India, sector: Energy, exchange: NSI, currency: INR, tags: [energy]}
+  - {symbol: ^CNXREALTY, name: Nifty Realty, display_name: Nifty Realty, type: index, country: India, sector: Real Estate, exchange: NSI, currency: INR, tags: [real-estate]}
+  - {symbol: ^INDIAVIX, name: India VIX, display_name: India VIX, type: index, country: India, sector: Macro, exchange: NSI, currency: INR, tags: [volatility]}
+
+  # US indices
+  - {symbol: ^GSPC, name: "S&P 500", display_name: "S&P 500", type: index, country: United States, sector: Macro, exchange: SNP, currency: USD, tags: [broad-market]}
+  - {symbol: ^IXIC, name: Nasdaq Composite, display_name: Nasdaq, type: index, country: United States, sector: Macro, exchange: NIM, currency: USD, tags: [broad-market, tech-heavy]}
+  - {symbol: ^DJI, name: Dow Jones Industrial Average, display_name: Dow Jones, type: index, country: United States, sector: Macro, exchange: DJI, currency: USD, tags: [broad-market]}
+  - {symbol: ^VIX, name: CBOE Volatility Index, display_name: VIX, type: index, country: United States, sector: Macro, exchange: CXI, currency: USD, tags: [volatility]}
+
+  # India stocks, by exposure
+  # Oil upstream
+  - {symbol: ONGC.NS, name: Oil and Natural Gas Corporation, display_name: ONGC, type: stock, country: India, sector: Energy, exchange: NSI, currency: INR, tags: [oil-upstream]}
+  - {symbol: OIL.NS, name: Oil India, display_name: Oil India, type: stock, country: India, sector: Energy, exchange: NSI, currency: INR, tags: [oil-upstream]}
+  # Oil marketing
+  - {symbol: BPCL.NS, name: Bharat Petroleum Corporation, display_name: BPCL, type: stock, country: India, sector: Energy, exchange: NSI, currency: INR, tags: [oil-marketing]}
+  - {symbol: HINDPETRO.NS, name: Hindustan Petroleum Corporation, display_name: HPCL, type: stock, country: India, sector: Energy, exchange: NSI, currency: INR, tags: [oil-marketing]}
+  - {symbol: IOC.NS, name: Indian Oil Corporation, display_name: IOC, type: stock, country: India, sector: Energy, exchange: NSI, currency: INR, tags: [oil-marketing]}
+  # Refining / conglomerate
+  - {symbol: RELIANCE.NS, name: Reliance Industries, display_name: Reliance, type: stock, country: India, sector: Energy, exchange: NSI, currency: INR, tags: [refining, conglomerate]}
+  # Aviation (jet fuel)
+  - {symbol: INDIGO.NS, name: InterGlobe Aviation, display_name: IndiGo, type: stock, country: India, sector: Transport, exchange: NSI, currency: INR, tags: [aviation, jet-fuel]}
+  # Paints (crude-derived inputs)
+  - {symbol: ASIANPAINT.NS, name: Asian Paints, display_name: Asian Paints, type: stock, country: India, sector: Consumer, exchange: NSI, currency: INR, tags: [paints, crude-inputs]}
+  # Banks / NBFCs (rates)
+  - {symbol: HDFCBANK.NS, name: HDFC Bank, display_name: HDFC Bank, type: stock, country: India, sector: Financials, exchange: NSI, currency: INR, tags: [banks, rate-sensitive]}
+  - {symbol: ICICIBANK.NS, name: ICICI Bank, display_name: ICICI Bank, type: stock, country: India, sector: Financials, exchange: NSI, currency: INR, tags: [banks, rate-sensitive]}
+  - {symbol: SBIN.NS, name: State Bank of India, display_name: SBI, type: stock, country: India, sector: Financials, exchange: NSI, currency: INR, tags: [banks, rate-sensitive]}
+  - {symbol: BAJFINANCE.NS, name: Bajaj Finance, display_name: Bajaj Finance, type: stock, country: India, sector: Financials, exchange: NSI, currency: INR, tags: [nbfc, rate-sensitive]}
+  # IT exporters (USD revenue, US demand)
+  - {symbol: TCS.NS, name: Tata Consultancy Services, display_name: TCS, type: stock, country: India, sector: Technology, exchange: NSI, currency: INR, tags: [it-services, usd-revenue]}
+  - {symbol: INFY.NS, name: Infosys, display_name: Infosys, type: stock, country: India, sector: Technology, exchange: NSI, currency: INR, tags: [it-services, usd-revenue]}
+  - {symbol: HCLTECH.NS, name: HCL Technologies, display_name: HCLTech, type: stock, country: India, sector: Technology, exchange: NSI, currency: INR, tags: [it-services, usd-revenue]}
+  - {symbol: WIPRO.NS, name: Wipro, display_name: Wipro, type: stock, country: India, sector: Technology, exchange: NSI, currency: INR, tags: [it-services, usd-revenue]}
+  # Metals
+  - {symbol: TATASTEEL.NS, name: Tata Steel, display_name: Tata Steel, type: stock, country: India, sector: Metals, exchange: NSI, currency: INR, tags: [steel]}
+  - {symbol: JSWSTEEL.NS, name: JSW Steel, display_name: JSW Steel, type: stock, country: India, sector: Metals, exchange: NSI, currency: INR, tags: [steel]}
+  - {symbol: HINDALCO.NS, name: Hindalco Industries, display_name: Hindalco, type: stock, country: India, sector: Metals, exchange: NSI, currency: INR, tags: [aluminium, copper]}
+  - {symbol: VEDL.NS, name: Vedanta, display_name: Vedanta, type: stock, country: India, sector: Metals, exchange: NSI, currency: INR, tags: [base-metals, mining]}
+  # Defence
+  - {symbol: HAL.NS, name: Hindustan Aeronautics, display_name: HAL, type: stock, country: India, sector: Defence, exchange: NSI, currency: INR, tags: [defence]}
+  - {symbol: BEL.NS, name: Bharat Electronics, display_name: BEL, type: stock, country: India, sector: Defence, exchange: NSI, currency: INR, tags: [defence]}
+  # Pharma (US generics exposure)
+  - {symbol: SUNPHARMA.NS, name: Sun Pharmaceutical Industries, display_name: Sun Pharma, type: stock, country: India, sector: Pharma, exchange: NSI, currency: INR, tags: [pharma, us-generics]}
+  - {symbol: DRREDDY.NS, name: "Dr. Reddy's Laboratories", display_name: "Dr Reddy's", type: stock, country: India, sector: Pharma, exchange: NSI, currency: INR, tags: [pharma, us-generics]}
+  - {symbol: CIPLA.NS, name: Cipla, display_name: Cipla, type: stock, country: India, sector: Pharma, exchange: NSI, currency: INR, tags: [pharma, us-generics]}
+  # Autos / rural demand
+  - {symbol: MARUTI.NS, name: Maruti Suzuki India, display_name: Maruti Suzuki, type: stock, country: India, sector: Consumer, exchange: NSI, currency: INR, tags: [autos]}
+  - {symbol: M&M.NS, name: "Mahindra & Mahindra", display_name: "M&M", type: stock, country: India, sector: Consumer, exchange: NSI, currency: INR, tags: [autos, rural-demand]}
+  # FMCG
+  - {symbol: HINDUNILVR.NS, name: Hindustan Unilever, display_name: HUL, type: stock, country: India, sector: Consumer, exchange: NSI, currency: INR, tags: [fmcg, rural-demand]}
+  - {symbol: ITC.NS, name: ITC, display_name: ITC, type: stock, country: India, sector: Consumer, exchange: NSI, currency: INR, tags: [fmcg]}
+  # Fertilisers
+  - {symbol: CHAMBLFERT.NS, name: Chambal Fertilisers and Chemicals, display_name: Chambal Fertilisers, type: stock, country: India, sector: Agriculture, exchange: NSI, currency: INR, tags: [fertilisers]}
+  - {symbol: COROMANDEL.NS, name: Coromandel International, display_name: Coromandel, type: stock, country: India, sector: Agriculture, exchange: NSI, currency: INR, tags: [fertilisers]}
+  # Power / coal
+  - {symbol: NTPC.NS, name: NTPC, display_name: NTPC, type: stock, country: India, sector: Utilities, exchange: NSI, currency: INR, tags: [power]}
+  - {symbol: COALINDIA.NS, name: Coal India, display_name: Coal India, type: stock, country: India, sector: Energy, exchange: NSI, currency: INR, tags: [coal]}
+  # Real estate
+  - {symbol: DLF.NS, name: DLF, display_name: DLF, type: stock, country: India, sector: Real Estate, exchange: NSI, currency: INR, tags: [real-estate, rate-sensitive]}
+  # Telecom
+  - {symbol: BHARTIARTL.NS, name: Bharti Airtel, display_name: Bharti Airtel, type: stock, country: India, sector: Telecom, exchange: NSI, currency: INR, tags: [telecom]}
+  # Ports
+  - {symbol: ADANIPORTS.NS, name: Adani Ports and Special Economic Zone, display_name: Adani Ports, type: stock, country: India, sector: Transport, exchange: NSI, currency: INR, tags: [ports, shipping]}
+  # Gold loans
+  - {symbol: MUTHOOTFIN.NS, name: Muthoot Finance, display_name: Muthoot Finance, type: stock, country: India, sector: Financials, exchange: NSI, currency: INR, tags: [gold-loans]}
+
+  # US stocks and ETFs
+  # Energy
+  - {symbol: XOM, name: Exxon Mobil, display_name: ExxonMobil, type: stock, country: United States, sector: Energy, exchange: NYQ, currency: USD, tags: [oil-major]}
+  - {symbol: CVX, name: Chevron, display_name: Chevron, type: stock, country: United States, sector: Energy, exchange: NYQ, currency: USD, tags: [oil-major]}
+  - {symbol: XLE, name: Energy Select Sector SPDR Fund, display_name: US energy ETF (XLE), type: etf, country: United States, sector: Energy, exchange: PCX, currency: USD, tags: [energy]}
+  # Defense
+  - {symbol: LMT, name: Lockheed Martin, display_name: Lockheed Martin, type: stock, country: United States, sector: Defence, exchange: NYQ, currency: USD, tags: [defence]}
+  - {symbol: RTX, name: RTX Corporation, display_name: RTX, type: stock, country: United States, sector: Defence, exchange: NYQ, currency: USD, tags: [defence]}
+  - {symbol: NOC, name: Northrop Grumman, display_name: Northrop Grumman, type: stock, country: United States, sector: Defence, exchange: NYQ, currency: USD, tags: [defence]}
+  # Semiconductors / AI
+  - {symbol: NVDA, name: NVIDIA, display_name: Nvidia, type: stock, country: United States, sector: Technology, exchange: NMS, currency: USD, tags: [semiconductors, ai]}
+  - {symbol: AMD, name: Advanced Micro Devices, display_name: AMD, type: stock, country: United States, sector: Technology, exchange: NMS, currency: USD, tags: [semiconductors, ai]}
+  - {symbol: TSM, name: Taiwan Semiconductor Manufacturing, display_name: TSMC, type: stock, country: Taiwan, sector: Technology, exchange: NYQ, currency: USD, tags: [semiconductors, foundry, adr]}
+  - {symbol: SMH, name: VanEck Semiconductor ETF, display_name: Chip ETF (SMH), type: etf, country: United States, sector: Technology, exchange: NGM, currency: USD, tags: [semiconductors]}
+  # Big tech
+  - {symbol: AAPL, name: Apple, display_name: Apple, type: stock, country: United States, sector: Technology, exchange: NMS, currency: USD, tags: [big-tech]}
+  - {symbol: MSFT, name: Microsoft, display_name: Microsoft, type: stock, country: United States, sector: Technology, exchange: NMS, currency: USD, tags: [big-tech]}
+  - {symbol: GOOGL, name: Alphabet, display_name: Alphabet, type: stock, country: United States, sector: Technology, exchange: NMS, currency: USD, tags: [big-tech]}
+  - {symbol: AMZN, name: Amazon.com, display_name: Amazon, type: stock, country: United States, sector: Technology, exchange: NMS, currency: USD, tags: [big-tech]}
+  - {symbol: META, name: Meta Platforms, display_name: Meta, type: stock, country: United States, sector: Technology, exchange: NMS, currency: USD, tags: [big-tech]}
+  # Airlines
+  - {symbol: DAL, name: Delta Air Lines, display_name: Delta, type: stock, country: United States, sector: Transport, exchange: NYQ, currency: USD, tags: [airlines, jet-fuel]}
+  - {symbol: UAL, name: United Airlines Holdings, display_name: United Airlines, type: stock, country: United States, sector: Transport, exchange: NMS, currency: USD, tags: [airlines, jet-fuel]}
+  # Banks
+  - {symbol: JPM, name: JPMorgan Chase, display_name: JPMorgan, type: stock, country: United States, sector: Financials, exchange: NYQ, currency: USD, tags: [banks]}
+  # Gold ETF
+  - {symbol: GLD, name: SPDR Gold Shares, display_name: Gold ETF (GLD), type: etf, country: United States, sector: Metals, exchange: PCX, currency: USD, tags: [gold]}

@@ -1,5 +1,5 @@
-"""Newsdesk command line (SPEC 12). Phase 1: `newsdesk run`, `newsdesk digest` and
-`newsdesk scheduler`."""
+"""Newsdesk command line (SPEC 12): `newsdesk run`, `digest`, `scheduler` and
+`validate-tickers`."""
 
 import asyncio
 import json
@@ -9,6 +9,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from logging.handlers import RotatingFileHandler
+from pathlib import Path
 from typing import Annotated, Any
 
 import httpx
@@ -18,7 +19,28 @@ from apscheduler.triggers.cron import CronTrigger
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
-from app.config import FeedConfig, Settings, get_secret, load_env, load_feeds, load_settings
+from app.assets import (
+    REPORT_HEADER,
+    Fetch,
+    TickerResult,
+    latest_checks,
+    markdown_report,
+    record_checks,
+    report_rows,
+    validate_assets,
+    validation_gaps,
+    validation_warning,
+    yahoo_fetch,
+)
+from app.config import (
+    FeedConfig,
+    Settings,
+    get_secret,
+    load_assets,
+    load_env,
+    load_feeds,
+    load_settings,
+)
 from app.db import init_db, make_engine, make_session_factory
 from app.delivery.format import digest_item, format_digest, telegram_length
 from app.delivery.telegram import TelegramError, send_messages
@@ -431,6 +453,20 @@ def _llm_client(
         return None, str(exc)
 
 
+def asset_warning(
+    session_factory: sessionmaker[Session], now: datetime | None = None
+) -> str | None:
+    """A warning line if any asset in config/assets.yaml isn't currently validated (never
+    checked, failed its last check, or last checked over 30 days ago), else None."""
+    try:
+        assets = load_assets()
+    except Exception as exc:  # a broken assets.yaml must not stop a run
+        return f"asset universe: config/assets.yaml can't be loaded ({exc})"
+    with session_factory() as session:
+        gaps = validation_gaps(session, assets, now or utcnow())
+    return validation_warning(gaps, len(assets))
+
+
 def run_once(settings: Settings, session_factory: sessionmaker[Session]) -> list[str]:
     """One pipeline pass with the configured LLM client; returns the summary lines to show."""
     llm, llm_unavailable = _llm_client(settings, session_factory)
@@ -489,6 +525,9 @@ def run_once(settings: Settings, session_factory: sessionmaker[Session]) -> list
                 else "left out (no matching story)"
             )
             lines.append(f"  [{entry['reason']}] {entry['title']} ({entry['source']}) → {where}")
+    warning = asset_warning(session_factory)
+    if warning:
+        lines.append(f"warning: {warning}")
     lines += [f"  error: {error}" for error in report.errors]
     return lines
 
@@ -537,6 +576,86 @@ def digest(
             f"({telegram_length(message)} chars, since {since}) -----"
         )
         typer.echo(message)
+
+
+# ---------------------------------------------------------------- tickers
+
+
+@dataclass
+class TickerValidation:
+    results: list[TickerResult]
+    checked_at: datetime
+    previous_check_at: datetime | None
+    report_path: str
+
+    @property
+    def failed(self) -> list[TickerResult]:
+        return [result for result in self.results if not result.ok]
+
+
+def run_ticker_validation(
+    settings: Settings,
+    session_factory: sessionmaker[Session],
+    fetch: Fetch | None = None,
+    now: datetime | None = None,
+    report_path: Path | None = None,
+) -> TickerValidation:
+    """Check every symbol in config/assets.yaml against Yahoo, store one ticker_checks row per
+    symbol, and write the report (default data/ticker_report.md)."""
+    assets = load_assets()
+    now = now or utcnow()
+    with session_factory() as session:
+        previous = max(
+            (check.checked_at for check in latest_checks(session).values()), default=None
+        )
+    results = validate_assets(assets, fetch or yahoo_fetch(settings.http.timeout_seconds), now)
+    with session_factory() as session:
+        record_checks(session, results, now)
+        session.commit()
+    path = report_path or settings.resolve_path("data/ticker_report.md")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(markdown_report(results, now), encoding="utf-8")
+    return TickerValidation(results, now, previous, str(path))
+
+
+def ticker_report_lines(validation: TickerValidation, settings: Settings) -> list[str]:
+    lines = []
+    if validation.previous_check_at is None:
+        lines.append("previous check: none")
+    else:
+        age = (validation.checked_at - validation.previous_check_at).days
+        when = validation.previous_check_at.astimezone(settings.tz).strftime("%d %b %Y %H:%M %Z")
+        stale = " (older than 30 days)" if age > 30 else ""
+        lines.append(f"previous check: {when}, {age} days ago{stale}")
+    widths = [14, 6, 10, 12, 42, 4, 8, 10]
+    lines.append("  ".join(h.ljust(w) for h, w in zip(REPORT_HEADER, widths, strict=False)))
+    for row in report_rows(validation.results):
+        cells = [cell[:w].ljust(w) for cell, w in zip(row, widths, strict=False)]
+        lines.append("  ".join([*cells, row[-1]]).rstrip())
+    failed = validation.failed
+    flagged = [r for r in validation.results if r.ok and r.flags]
+    lines.append(
+        f"{len(validation.results)} symbols: {len(validation.results) - len(failed)} ok, "
+        f"{len(failed)} failed, {len(flagged)} ok but flagged for review · report: "
+        f"{validation.report_path}"
+    )
+    if failed:
+        lines.append(
+            "Failed symbols are not replaced automatically. Fix or remove them in "
+            "config/assets.yaml only with a verified symbol."
+        )
+    return lines
+
+
+@app.command("validate-tickers")
+def validate_tickers() -> None:
+    """Check every symbol in config/assets.yaml has recent daily prices on Yahoo Finance."""
+    settings, session_factory = _bootstrap()
+    validation = run_ticker_validation(settings, session_factory)
+    for line in ticker_report_lines(validation, settings):
+        typer.echo(line)
+    if validation.failed:
+        raise typer.Exit(code=1)
 
 
 # ---------------------------------------------------------------- scheduler
@@ -607,6 +726,10 @@ def scheduler() -> None:
             log.exception("scheduled digest failed")
 
     jobs = build_scheduler(settings, pipeline_job, digest_job)
+    warning = asset_warning(session_factory)
+    if warning:
+        log.warning(warning)
+        typer.echo(f"warning: {warning}")
     now = datetime.now(settings.tz)
     for job in jobs.get_jobs():
         next_fire = job.trigger.get_next_fire_time(None, now)

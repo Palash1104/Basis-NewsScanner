@@ -140,3 +140,26 @@ class LLMRequest(Base):
     model: Mapped[str] = mapped_column(String(64))
     requested_at: Mapped[datetime] = mapped_column(UTCDateTime)
     input_tokens: Mapped[int] = mapped_column(Integer)  # estimate, replaced by the real count
+
+
+class TickerCheck(Base):
+    """One validate-tickers result per symbol per check (SPEC §8), so the app can warn about
+    symbols that were never validated, failed, or were last validated over 30 days ago.
+    Not in SPEC section 6 originally; added for ticker validation."""
+
+    __tablename__ = "ticker_checks"
+    __table_args__ = (Index("ix_ticker_checks_symbol_time", "symbol", "checked_at"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    symbol: Mapped[str] = mapped_column(String(32))
+    checked_at: Mapped[datetime] = mapped_column(UTCDateTime)
+    status: Mapped[str] = mapped_column(String(16))  # ok | empty | stale | error
+    rows: Mapped[int] = mapped_column(Integer, default=0)
+    last_bar_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    last_close: Mapped[float | None] = mapped_column(Float)
+    yahoo_name: Mapped[str | None] = mapped_column(Text)
+    currency: Mapped[str | None] = mapped_column(String(8))
+    exchange: Mapped[str | None] = mapped_column(String(16))
+    instrument_type: Mapped[str | None] = mapped_column(String(16))
+    error: Mapped[str | None] = mapped_column(Text)
+    flags: Mapped[list[str]] = mapped_column(JSON, default=list)  # review items, not failures

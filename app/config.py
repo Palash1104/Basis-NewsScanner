@@ -1,4 +1,4 @@
-"""Load and validate settings.yaml, feeds.yaml and secrets from .env."""
+"""Load and validate settings.yaml, feeds.yaml, assets.yaml and secrets from .env."""
 
 import os
 import re
@@ -238,6 +238,57 @@ class FeedsFile(_Strict):
         return self
 
 
+AssetType = Literal["commodity", "fx", "rate", "index", "stock", "etf"]
+# One sector per asset (approved list), so the web UI can group assets and label stories by
+# the sectors their impacts touch.
+Sector = Literal[
+    "Energy",
+    "Metals",
+    "Agriculture",
+    "Financials",
+    "Technology",
+    "Pharma",
+    "Consumer",
+    "Industrials",
+    "Utilities",
+    "Real Estate",
+    "Telecom",
+    "Transport",
+    "Defence",
+    "Macro",
+]
+
+
+class AssetConfig(_Strict):
+    """One asset in config/assets.yaml (SPEC §8). `symbol` is the Yahoo Finance ticker."""
+
+    symbol: str = Field(min_length=1)
+    name: str
+    display_name: str
+    type: AssetType
+    country: str
+    sector: Sector
+    tags: list[str] = Field(default_factory=list)
+    # Yahoo's exchange code (e.g. NSI) and currency, copied from the validate-tickers report.
+    exchange: str | None = None
+    currency: str | None = None
+    up_means: str | None = None  # e.g. "rupee weaker" for USD/INR
+    # Yahoo names a person confirmed are this asset, so the name check stops flagging them.
+    approved_yahoo_names: list[str] = Field(default_factory=list)
+
+
+class AssetsFile(_Strict):
+    assets: list[AssetConfig]
+
+    @model_validator(mode="after")
+    def _check_unique_symbols(self) -> "AssetsFile":
+        symbols = [asset.symbol for asset in self.assets]
+        duplicates = {symbol for symbol in symbols if symbols.count(symbol) > 1}
+        if duplicates:
+            raise ValueError(f"duplicate asset symbols: {sorted(duplicates)}")
+        return self
+
+
 def _read_yaml(path: Path) -> object:
     with path.open(encoding="utf-8") as handle:
         return yaml.safe_load(handle)
@@ -250,6 +301,10 @@ def load_settings(path: Path | None = None) -> Settings:
 def load_feeds(path: Path | None = None, include_disabled: bool = False) -> list[FeedConfig]:
     feeds = FeedsFile.model_validate(_read_yaml(path or CONFIG_DIR / "feeds.yaml")).feeds
     return feeds if include_disabled else [feed for feed in feeds if feed.enabled]
+
+
+def load_assets(path: Path | None = None) -> list[AssetConfig]:
+    return AssetsFile.model_validate(_read_yaml(path or CONFIG_DIR / "assets.yaml")).assets
 
 
 def load_env() -> None:

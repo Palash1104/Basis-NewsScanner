@@ -188,7 +188,7 @@ scoring:
   hit_threshold_vol_multiple: 0.5
   min_samples_to_show_rate: 5
 schedule:
-  pipeline_every_hours: 1 # must divide 24; runs line up with the digest hours
+  pipeline_every_hours: 3 # must divide 24; runs line up with the digest hours
 delivery:
   digest_times: ["07:30", "19:30"]
   breaking_alerts: false
@@ -212,6 +212,8 @@ delivery:
 **price_cache**: symbol, interval, ts, open, high, low, close. Unique on (symbol, interval, ts).
 
 **runs**: id, kind (`pipeline` | `digest` | `score`), started_at, finished_at, articles_fetched, stories_processed, input_tokens, output_tokens, errors (JSON).
+
+**ticker_checks** (added in Phase 2): id, symbol, checked_at, status (`ok` | `empty` | `stale` | `error`), rows, last_bar_at, last_close, yahoo_name, currency, exchange, instrument_type, error, flags (JSON: review notes, not failures). One row per symbol per `validate-tickers` run; the app warns about symbols never validated, failed, or last checked over 30 days ago.
 
 Use simple migrations (SQLAlchemy `create_all` is fine for now; add Alembic only if I ask).
 
@@ -442,6 +444,12 @@ Add a short note in the README that overlapping news on the same asset makes att
 ## 8. Asset universe (`config/assets.yaml`)
 
 Format per asset: `symbol` (yfinance), `name`, `display_name`, `type` (`commodity` | `fx` | `rate` | `index` | `stock` | `etf`), `country`, `sector`, `tags` (list).
+
+Added in Phase 2:
+- `sector` is exactly one of: Energy, Metals, Agriculture, Financials, Technology, Pharma, Consumer, Industrials, Utilities, Real Estate, Telecom, Transport, Defence, Macro (validated).
+- `exchange` and `currency`: Yahoo's exchange code and currency, copied from the validation report (verified, not guessed). The scoring benchmark (7.9) is chosen by exchange, not country: TSM is a Taiwanese company listed on the NYSE, so it benchmarks against `^GSPC`.
+- `up_means` (optional): what "up" means in plain words, e.g. "rupee weaker" for USD/INR.
+- `approved_yahoo_names` (optional): Yahoo names the user confirmed, so the validator's name check stops flagging them.
 
 Write `scripts/validate_tickers.py`: downloads 5 days of daily data for every symbol, reports any that fail or return empty data. **Run it and fix or remove failures before Phase 2 is done. Do not guess replacements; show me the failures.** The app should also warn at startup if the universe contains unvalidated symbols.
 
@@ -716,15 +724,15 @@ Done when all pages in section 11 work against real data.
   - Skip the remaining LLM calls for that run, but still fetch, dedupe, group and rank, and finish the run cleanly. Record the skipped story IDs in `runs.errors`.
   - Mark the skipped stories `summary_pending`. The next run summarizes pending stories that are still inside the lookback window first, even if they're no longer in the top `max_stories_per_run`.
 - **Schedule.** `schedule.pipeline_every_hours` is set from the daily budget.
-  - A replay of real fetched news (2026-09-16/17) gave these summary calls per day:
+  - A replay of 2,337 real articles (2026-09-16 to 19) with the current embedding grouping gave these summary-model calls per day. Phase 2 adds one event-extraction call per summary (summary and extraction stay separate calls):
 
-    | Schedule | Phase 1, typical / busy | With Phase 2 event extraction (about 2×), typical / busy |
+    | Schedule | Summaries only, typical / busy | Summaries + event extraction, typical / busy |
     |---|---|---|
-    | Hourly | 157 / 264 | 314 / 528 |
-    | Every 2 hours | 128 / 192 | 257 / 384 |
-    | Every 3 hours | 109 / 152 | 219 / 304 |
+    | Hourly | 126 / 240 | 253 / 480 |
+    | Every 2 hours | 109 / 168 | 218 / 336 |
+    | Every 3 hours | 103 / 136 | 206 / 272 |
 
-  - Hourly is set for Phase 1. Revisit the schedule when Phase 2 adds event extraction.
+  - Every 3 hours is set from Phase 2 (2026-09-19). Runs line up with the digest hours, so each digest still follows a run by 30 minutes.
 - **Temperature.** Use a low temperature only where the provider recommends it (e.g. `claude-haiku-4-5`). Google recommends keeping Gemini 3 models at their default of 1.0, because lower values can cause looping.
 - Every stored LLM output records `model` and `prompt_version`. Bump `PROMPT_VERSION` whenever prompt text changes.
 - **Token logging.** Log input and output tokens per call and total per run, from the provider's usage data:

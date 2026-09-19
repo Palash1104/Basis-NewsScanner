@@ -24,25 +24,36 @@ between phases.
 
 **Drift fix and shared limiter (2026-09-19):**
 - Grouping seed check at 0.45; 196 tests pass.
-- The seed check only affects new placements. The stored blob stories (110 IPO, 316 troop
-  deaths) stay until `scripts/regroup.py` is re-run.
+- The seed check only affects new placements. Decision (user, 2026-09-19): don't re-run
+  `scripts/regroup.py` for it. The stored blob stories (110 IPO, 316 troop deaths) are left
+  as they are and will age out of the digest window.
 - The minute window is shared across processes via `llm_requests`.
 - Run 9: 16 new articles, 1 call.
 
-Phase 2 has not started; wait for the user.
+**Phase 2 in progress** (event extraction, asset universe, playbook). Plan approved
+2026-09-19. Stops for user review: (1) ticker validation — done, all 82 symbols ok;
+(2) the filled-in playbook.yaml before its tests.
 
 Since then (2026-09-17):
 - Real rate limits for `gemini-3.5-flash-lite` are set (15 RPM, 250k input TPM, 500 RPD), with
   a daily budget of 350 for new work.
 - Stories skipped for quota carry over to the next run.
-- `newsdesk scheduler` exists and runs the pipeline hourly.
+- `newsdesk scheduler` exists. It ran the pipeline hourly in Phase 1; from Phase 2 it runs
+  every 3 hours (01, 04, 07 … 22 IST), because summaries plus event extraction would exceed
+  the 350/day budget hourly on busy days.
 - A test of `gemini-3.1-pro-preview` was cancelled: the key's project is on the free tier, where
   Pro has a limit of 0. Nothing from that test is stored.
 
 Open follow-ups (not Phase 1 criteria):
-- When Phase 2 adds event extraction (about 2× summary-model calls), revisit
-  `schedule.pipeline_every_hours`. Hourly is estimated at 314/day typical and 528 busy, over
-  the 350 budget; every 2 hours at 257 / 384; every 3 hours at 219 / 304.
+- Phase 3 inputs from Yahoo daily data (checked 2026-09-19):
+  - Daily bars are stamped at exchange-local midnight. Friday's NSE bar is 00:00 IST on 18 Sep,
+    which is 17 Sep 18:30 UTC. Take trading dates in the exchange's time zone, never after
+    converting to UTC. The Stop 1 report had this bug and showed every NSE bar a day early.
+  - Mon 14 Sep 2026 looks like an NSE holiday: no hourly bars, no `^NSEI` or `^BSESN` bar.
+    Yet `.NS` stocks (e.g. RELIANCE.NS, TCS.NS) have a filler daily bar that day with volume
+    0 and open = close = the previous close. Indices have no filler bar. The reference-bar
+    and trading-day logic must skip zero-volume filler bars, or holidays count as sessions.
+  - There was no Yahoo lag on `.NS`: Friday's bar was there when validation first ran.
 - Grouping drift: the seed check (0.45) splits the troop-deaths reports from the war-crimes
   story and keeps unrelated IPO pieces out of the NSE IPO story. It does not separate "Hero
   Motors, NSE…" or "Tata Sons IPO…" from NSE; 0.50+ would, but breaks case (a).
@@ -64,10 +75,11 @@ Open follow-ups (not Phase 1 criteria):
 uv sync                                        # install deps (Python 3.12 via uv)
 uv run newsdesk run                            # one pipeline pass
 uv run newsdesk digest [--dry-run | --send]    # dry run is the default
-uv run newsdesk scheduler                      # hourly runs + digests at delivery.digest_times
+uv run newsdesk scheduler                      # runs every 3h + digests at delivery.digest_times
 uv run pytest -q                               # tests (network and LLM always mocked)
 uv run python scripts/smoke_test.py [--send-test-message]   # live: feeds, 1 LLM call, Telegram
 uv run ruff check . && uv run ruff format .    # lint + format
+uv run newsdesk validate-tickers                # check assets.yaml symbols on Yahoo (= scripts/validate_tickers.py)
 uv run python scripts/verify_feeds.py [--include-disabled] [--file other.yaml]
 uv run python scripts/embedding_report.py [--refresh] [--candidate 0.55]   # embedding threshold tuning
 uv run python scripts/regroup.py [--dry-run]    # regroup all stored articles, no LLM calls
@@ -77,6 +89,9 @@ uv run python scripts/grouping_report.py [--refresh --lookback-hours 24] [--deta
 ## Layout
 
 - `config/settings.yaml` tunables · `config/feeds.yaml` verified feeds (see header comment)
+- `config/assets.yaml` asset universe (82 SPEC §8 starter symbols, all validated)
+- `app/assets.py` ticker validation (yfinance), stored checks, the unvalidated-symbol warning,
+  `benchmark_for` (by exchange)
 - `app/config.py` pydantic models for config, `.env` loading
 - `app/models.py` SQLAlchemy tables (`UTCDateTime` rejects naive datetimes) · `app/db.py` engine
 - `app/net.py` shared HTTP retry/backoff (feeds, Telegram)
@@ -237,3 +252,18 @@ uv run python scripts/grouping_report.py [--refresh --lookback-hours 24] [--deta
   - The model tags US/India/Global only by where the event happens or who it involves.
   - An empty list is valid, and the digest meta line then shows only the category.
 - `DESIGN.md` is the user's design-import notes (renamed from the misspelled `DEISGN.md`).
+- Asset universe (SPEC §8):
+  - One `sector` per asset from a fixed, validated list (see `app/config.py` `Sector`).
+  - `exchange` and `currency` are copied from Yahoo's metadata in the validation report.
+  - The scoring benchmark is chosen by exchange, not country: `NSI` → `^NSEI`, `NYQ`/`NMS` →
+    `^GSPC`, stocks only (TSM → `^GSPC`). A stock on another exchange gets no benchmark until
+    its code is seen in a report and added to `EXCHANGE_BENCHMARKS`.
+- Ticker validation (`newsdesk validate-tickers`):
+  - One yfinance `history(period="5d")` call per symbol. Yahoo's name, currency, exchange and
+    instrument type come from the same request's metadata.
+  - Failures (`empty`, `stale`, `error`) are never replaced automatically.
+  - Name, type, currency and exchange mismatches are review flags, not failures.
+    `approved_yahoo_names` in assets.yaml silences a confirmed name (e.g. `^TNX`).
+  - Every check is stored in `ticker_checks`. `run` and `scheduler` warn about symbols never
+    validated, failed, or last checked over 30 days ago.
+  - `yf.config.debug.hide_exceptions = False` replaces the deprecated `raise_errors`.

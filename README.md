@@ -48,7 +48,7 @@ but skips summaries and records why. The digest only includes summarized stories
 | `uv run newsdesk run` | One pipeline pass: fetch feeds, drop duplicates, group into stories, rank, summarize the top stories that are new or changed. Prints article, story and token counts. |
 | `uv run newsdesk digest --dry-run` | Print the digest of stories summarized since the last sent digest. Doesn't count as a send. This is the default. |
 | `uv run newsdesk digest --send` | Send that digest to Telegram. |
-| `uv run newsdesk scheduler` | Keep running: a pipeline pass every `schedule.pipeline_every_hours` (hourly), and a digest at each `delivery.digest_times` (07:30 and 19:30 IST). Stop with Ctrl+C; restart it after editing `settings.yaml`. |
+| `uv run newsdesk scheduler` | Keep running: a pipeline pass every `schedule.pipeline_every_hours` (every 3 hours), and a digest at each `delivery.digest_times` (07:30 and 19:30 IST). Stop with Ctrl+C; restart it after editing `settings.yaml`. |
 | `uv run python scripts/verify_feeds.py [--include-disabled]` | Check every feed responds and has recent entries. |
 | `uv run python scripts/embedding_report.py [--refresh]` | Compare embedding grouping thresholds on real samples and the regression fixtures (writes `data/embedding_report.md`). |
 | `uv run python scripts/regroup.py [--dry-run]` | Regroup every stored article with embeddings (no LLM calls). Changed stories that had a summary become `needs_resummary`. |
@@ -62,12 +62,12 @@ errors and token counts.
 ## Scheduling
 
 The simplest option is to leave `uv run newsdesk scheduler` running. It runs the pipeline every
-hour on the hour and sends digests at 07:30 and 19:30 IST. To use cron instead, the equivalent
-lines are:
+3 hours on the hour (01:00, 04:00, 07:00 … 22:00 IST, so a run always precedes a digest) and
+sends digests at 07:30 and 19:30 IST. To use cron instead, the equivalent lines are:
 
 ```
 CRON_TZ=Asia/Kolkata
-0 * * * *     cd /path/to/newsdesk && uv run newsdesk run >> data/logs/cron.log 2>&1   # hourly
+0 1-22/3 * * * cd /path/to/newsdesk && uv run newsdesk run >> data/logs/cron.log 2>&1   # every 3h
 30 7,19 * * * cd /path/to/newsdesk && uv run newsdesk digest --send >> data/logs/cron.log 2>&1
 ```
 
@@ -112,18 +112,19 @@ groups and ranks, and finishes normally. The skipped stories are marked pending 
 summarized first on the next run once quota is available, even if newer stories have pushed
 them out of the top 20.
 
-**Calls per day.** From replaying real fetched news hour by hour; "busy" assumes every run is as
-busy as the busiest one seen:
+**Calls per day.** From replaying 2,337 real articles run by run with the current grouping;
+"busy" assumes every run is as busy as the busiest one seen. Phase 2 makes one event-extraction
+call per summary:
 
-| Schedule | Now: typical / busy | After Phase 2 adds event extraction (about 2×) |
+| Schedule | Summaries only: typical / busy | Summaries + event extraction |
 |---|---|---|
-| Hourly (current) | 157 / 264 | 314 / 528 |
-| Every 2 hours | 128 / 192 | 257 / 384 |
-| Every 3 hours | 109 / 152 | 219 / 304 |
+| Hourly | 126 / 240 | 253 / 480 |
+| Every 2 hours | 109 / 168 | 218 / 336 |
+| Every 3 hours (current) | 103 / 136 | 206 / 272 |
 
-Hourly is the most frequent schedule that stays under the 350 budget today, so it's set. After
-Phase 2, hourly would go over on busy days (the extra stories would be deferred, not lost), so
-the schedule should be revisited then. A first run on an empty database makes about 20 calls.
+Every 3 hours is set: it stays under the 350 budget even on busy days, and each digest still
+has a run 30 minutes before it. A first run on an empty database makes about 40 calls (20
+summaries and 20 extractions).
 
 On Gemini's free tier, calls cost nothing, but Google's pricing page says free-tier content is
 used to improve Google's products. On Anthropic, `claude-haiku-4-5` costs a few cents for a

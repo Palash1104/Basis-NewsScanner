@@ -9,6 +9,7 @@ dependencies = [
     "apscheduler>=3.11.3",
     "feedparser>=6.0.14",
     "httpx>=0.28.1",
+    "pandas>=3.0.6",
     "pydantic>=2.13.5",
     "python-dotenv>=1.2.3",
     "pyyaml>=6.0.3",
@@ -17,6 +18,7 @@ dependencies = [
     "sqlalchemy>=2.0.54",
     "typer>=0.27.2",
     "tzdata>=2026.4",
+    "yfinance>=1.7.0",
 ]
 
 [project.scripts]
