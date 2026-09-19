@@ -129,7 +129,9 @@ def load_datasets(refresh: bool) -> dict[str, list[Item]]:
     return datasets
 
 
-def fixture_checks(embed, threshold: float, window: timedelta) -> dict[str, bool]:
+def fixture_checks(
+    embed, threshold: float, window: timedelta, seed_threshold: float | None = None
+) -> dict[str, bool]:
     """The regression cases, each grouped on its own (as the tests do)."""
     fixtures = json.loads(FIXTURES.read_text("utf-8"))
 
@@ -142,6 +144,7 @@ def fixture_checks(embed, threshold: float, window: timedelta) -> dict[str, bool
             [is_non_news(a["title"]) for a in articles],
             threshold,
             window,
+            seed_threshold,
         )
         return articles, decisions
 
@@ -214,6 +217,7 @@ def main() -> int:
                 [i.non_news for i in items],
                 threshold,
                 window,
+                settings.grouping.seed_threshold,
             )
             per_set[name] = decisions
             members: dict[int, list[Item]] = {}
@@ -229,14 +233,17 @@ def main() -> int:
             attached += sum(1 for d in decisions if items[d.index].non_news and d.group is not None)
             left_out += sum(1 for d in decisions if items[d.index].non_news and d.group is None)
         results[threshold] = per_set
-        checks = fixture_checks(embedder.embed, threshold, window)
+        checks = fixture_checks(embedder.embed, threshold, window, settings.grouping.seed_threshold)
         marks = " | ".join("✅" if ok else "❌" for ok in checks.values())
         rows.append(
             f"| {threshold:.2f} | {stories} | {multi} | {largest} | {attached} / {left_out} "
             f"| {marks} |"
         )
     lines += [header, *rows]
-    lines.append("\nChecks: " + "; ".join(fixture_checks(embedder.embed, 0.5, window)))
+    lines.append(
+        "\nChecks: "
+        + "; ".join(fixture_checks(embedder.embed, 0.5, window, settings.grouping.seed_threshold))
+    )
 
     if args.candidate is not None:
         threshold = args.candidate
@@ -247,6 +254,7 @@ def main() -> int:
                 [i.non_news for i in items],
                 threshold,
                 window,
+                settings.grouping.seed_threshold,
             )
             for name, items in datasets.items()
         }

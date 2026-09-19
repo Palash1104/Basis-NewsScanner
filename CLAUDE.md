@@ -22,6 +22,13 @@ between phases.
 - Fiji check (smoke test): regions `[]`.
 - Digest dry run: 15 stories.
 
+**Drift fix and shared limiter (2026-09-19):**
+- Grouping seed check at 0.45; 196 tests pass.
+- The seed check only affects new placements. The stored blob stories (110 IPO, 316 troop
+  deaths) stay until `scripts/regroup.py` is re-run.
+- The minute window is shared across processes via `llm_requests`.
+- Run 9: 16 new articles, 1 call.
+
 Phase 2 has not started; wait for the user.
 
 Since then (2026-09-17):
@@ -36,12 +43,20 @@ Open follow-ups (not Phase 1 criteria):
 - When Phase 2 adds event extraction (about 2× summary-model calls), revisit
   `schedule.pipeline_every_hours`. Hourly is estimated at 314/day typical and 528 busy, over
   the 350 budget; every 2 hours at 257 / 384; every 3 hours at 219 / 304.
-- Embedding grouping at 0.55 still forms some topic blobs. Examples: market movers, "India
-  IPOs" (NSE IPO + Hero Motors + Tata Sons), and "US troop deaths + Iran war-crimes report".
-  Retune from `data/logs/grouping_borderline.jsonl` once it has a few days of data. 0.60 fails
-  regression case (a); 0.45 fails (d).
-- The RPM limiter is per process. Calls made by another process (e.g. the smoke test) just
-  before a run aren't counted, so a 429 can occur. It's retried after the limiter waits.
+- Grouping drift: the seed check (0.45) splits the troop-deaths reports from the war-crimes
+  story and keeps unrelated IPO pieces out of the NSE IPO story. It does not separate "Hero
+  Motors, NSE…" or "Tata Sons IPO…" from NSE; 0.50+ would, but breaks case (a).
+- The seed check's cost: in the 717-article regroup it changes 17 of 440 stories. Most are
+  good blob splits, but the Tata Sons chairman row splits into three stories, because its seed
+  ("Tata Sons listing…") doesn't resemble the "Noel Tata / Trusts call it illegal" articles.
+  Retune both thresholds from `data/logs/grouping_borderline.jsonl` after a few days. The
+  centroid threshold bounds: 0.60 fails case (a); 0.45 fails (d).
+- Known limitation, left as is: a non-news live blog can attach to the wrong story. For example,
+  "US-Iran war LIVE Updates: … Riyadh" attached to the Russia sanctions bill story (2). This is
+  harmless for output, since non-news articles never feed summaries, source counts, ranking,
+  centroids or digest links, but it appears in that story's article list.
+- The shared minute window only sees calls made through this app's database. Calls made with
+  the same key elsewhere (AI Studio, another machine) can still cause a 429, which is retried.
 
 ## Commands
 
@@ -153,6 +168,13 @@ uv run python scripts/grouping_report.py [--refresh --lookback-hours 24] [--deta
   works the same for every provider. Every attempt, including retries, goes through the limiter.
 - Rate limits:
   - RPM and input TPM use a sliding 60s window and wait for room.
+  - The window is shared by every process on the database via the `llm_requests` table (an
+    extra table: one row per request, pruned after an hour).
+    - A caller reserves a row first, then counts the rows ahead of it in the window. The lower
+      id wins, so two processes can't both take the last slot. The loser deletes its row and
+      waits.
+    - The limiter clock is wall time (`time.time`), not monotonic, so it can be compared across
+      processes.
   - Daily requests are counted per *Pacific* quota day in `llm_daily_usage` (an extra table,
     not in SPEC §6). The quota resets at midnight Pacific, which is 12:30/13:30 IST, never
     midnight IST.
@@ -198,8 +220,15 @@ uv run python scripts/grouping_report.py [--refresh --lookback-hours 24] [--deta
   - They are excluded from source counts, ranking, summary input and digest source links.
   - Every one is listed in `newsdesk run` output.
   - Removed as too broad: "live coverage", "timeline", "what you need to know".
-- Borderline placements (score within `grouping.borderline_log_range`) are appended to
-  `{log_dir}/grouping_borderline.jsonl`.
+- Seed check (`grouping.seed_threshold`, 0.45, null disables):
+  - An article joins a story only if it clears the centroid threshold and scores at least
+    this against the story's seed, its earliest news article.
+  - Otherwise it goes to the next-best story passing both, or starts a new story.
+  - `assign_to_stories` loads every news article of the stories active in the window, oldest
+    first, so each seed is the real earliest article and centroids cover whole stories.
+  - Regression cases e and f (IPO drift, troop deaths) use `tests/fixtures/grouping_regressions.json`.
+- Borderline placements (score within `grouping.borderline_log_range`, or `seed_rejected`) are
+  appended to `{log_dir}/grouping_borderline.jsonl` with `score` and `seed_score`.
 - `needs_resummary` (set only by `regroup.py`) is a story status excluded from digests, since
   the digest selects `summarized`. The story is summarized again once it has more news
   articles than `processed_article_count`.

@@ -7,7 +7,9 @@ starts a new story.
 Two matchers:
 - `EmbeddingGrouper` (default): cosine similarity between the article's embedding (headline +
   snippet, all-MiniLM-L6-v2) and each story's centroid, the normalized mean of its news
-  articles' embeddings.
+  articles' embeddings. The article must also be similar enough to the story's seed (its
+  earliest news article), so a story can't drift, one loosely related article at a time, into
+  a topic blob.
 - `Grouper`: rapidfuzz title similarity. Only used if the embedding model can't load.
 
 Non-news articles (explainers, roundups; see classify.py) may attach to an existing story but
@@ -85,6 +87,8 @@ class Match[K]:
     key: K | None  # group to join, or None to start a new one
     best_score: float | None  # best score among eligible groups, even if below threshold
     best_ref: object | None  # member that produced best_score
+    seed_score: float | None = None  # similarity to the seed of the best-scoring group
+    seed_rejected: bool = False  # the best group cleared the centroid check but not the seed
 
 
 class Grouper[K: Hashable]:
@@ -136,17 +140,23 @@ class EmbeddingGrouper[K: Hashable]:
     """In-memory incremental grouper over embeddings. Keys identify groups (e.g. Story objects).
 
     Each group keeps the sum of its members' (normalized) vectors; its centroid is that sum
-    normalized, so cosine similarity to the centroid is a dot product.
+    normalized, so cosine similarity to the centroid is a dot product. It also keeps its seed,
+    the first vector added (callers add members oldest first). With `seed_threshold` set, an
+    article joins the best-scoring group that clears both the centroid and the seed threshold.
     """
 
-    def __init__(self, threshold: float, window: timedelta) -> None:
+    def __init__(
+        self, threshold: float, window: timedelta, seed_threshold: float | None = None
+    ) -> None:
         self.threshold = threshold
+        self.seed_threshold = seed_threshold
         self.window = window
         self._keys: list[K] = []
         self._index: dict[K, int] = {}
         self._refs: list[object] = []
         self._sums = np.zeros((0, 0), dtype=np.float32)
         self._centroids = np.zeros((0, 0), dtype=np.float32)
+        self._seeds = np.zeros((0, 0), dtype=np.float32)
         self._last = np.zeros(0, dtype=np.float64)
 
     def __len__(self) -> int:
@@ -162,14 +172,26 @@ class EmbeddingGrouper[K: Hashable]:
         scores = np.where(eligible, self._centroids[:count] @ vector, -np.inf)
         best = int(np.argmax(scores))
         score = float(scores[best])
-        key = self._keys[best] if score >= self.threshold else None
-        return Match(key, score, self._refs[best])
+        passes = scores >= self.threshold
+        if self.seed_threshold is None:
+            seed_score = None
+        else:
+            seed_scores = self._seeds[:count] @ vector
+            seed_score = float(seed_scores[best])
+            passes &= seed_scores >= self.seed_threshold
+        if not passes.any():
+            key = None
+        else:
+            key = self._keys[int(np.argmax(np.where(passes, scores, -np.inf)))]
+        seed_rejected = score >= self.threshold and not bool(passes[best])
+        return Match(key, score, self._refs[best], seed_score, seed_rejected)
 
     def add(self, key: K, vector: np.ndarray, published_at: datetime, ref: object = None) -> None:
         """Add a news article to group `key` (creating the group if needed)."""
         index = self._index.get(key)
         if index is None:
             index = self._grow(key, vector.shape[0], ref)
+            self._seeds[index] = vector
         self._sums[index] += vector
         norm = float(np.linalg.norm(self._sums[index]))
         self._centroids[index] = self._sums[index] / norm if norm else self._sums[index]
@@ -181,12 +203,14 @@ class EmbeddingGrouper[K: Hashable]:
             capacity = max(64, index * 2)
             sums = np.zeros((capacity, dimension), dtype=np.float32)
             centroids = np.zeros((capacity, dimension), dtype=np.float32)
+            seeds = np.zeros((capacity, dimension), dtype=np.float32)
             last = np.full(capacity, -np.inf, dtype=np.float64)
             if index:
                 sums[:index] = self._sums[:index]
                 centroids[:index] = self._centroids[:index]
+                seeds[:index] = self._seeds[:index]
                 last[:index] = self._last[:index]
-            self._sums, self._centroids, self._last = sums, centroids, last
+            self._sums, self._centroids, self._seeds, self._last = sums, centroids, seeds, last
         self._keys.append(key)
         self._index[key] = index
         self._refs.append(ref)
@@ -202,6 +226,7 @@ class Decision:
     created: bool
     best_group: int | None  # most similar eligible group before placement
     best_score: float | None
+    seed_rejected: bool = False
 
 
 def group_embeddings(
@@ -210,18 +235,21 @@ def group_embeddings(
     non_news: Sequence[bool],
     threshold: float,
     window: timedelta,
+    seed_threshold: float | None = None,
 ) -> list[Decision]:
     """Group items from scratch, oldest first, exactly as the pipeline does. Group ids are ints;
-    a group's first member is its representative. Returns one Decision per item, in input order.
+    a group's first member is its seed. Returns one Decision per item, in input order.
     """
-    grouper: EmbeddingGrouper[int] = EmbeddingGrouper(threshold, window)
+    grouper: EmbeddingGrouper[int] = EmbeddingGrouper(threshold, window, seed_threshold)
     decisions: dict[int, Decision] = {}
     next_group = 0
     for index in sorted(range(len(published)), key=lambda i: published[i]):
         match = grouper.match(vectors[index], published[index])
         best_group = match.best_ref if isinstance(match.best_ref, int) else None
         if non_news[index]:
-            decisions[index] = Decision(index, match.key, False, best_group, match.best_score)
+            decisions[index] = Decision(
+                index, match.key, False, best_group, match.best_score, match.seed_rejected
+            )
             continue
         if match.key is None:
             group, created = next_group, True
@@ -229,7 +257,9 @@ def group_embeddings(
         else:
             group, created = match.key, False
         grouper.add(group, vectors[index], published[index], ref=group)
-        decisions[index] = Decision(index, group, created, best_group, match.best_score)
+        decisions[index] = Decision(
+            index, group, created, best_group, match.best_score, match.seed_rejected
+        )
     return [decisions[index] for index in range(len(published))]
 
 
@@ -242,6 +272,8 @@ class Placement:
     best_story: Story | None  # most similar eligible story before placement
     score: float | None  # similarity to best_story (cosine, or 0-100 for the title matcher)
     decision: str  # "joined" | "new story" | "non-news attached" | "non-news left out"
+    seed_score: float | None = None  # similarity to best_story's seed (embedding grouping only)
+    seed_rejected: bool = False  # best_story cleared the centroid check but not the seed check
 
 
 @dataclass(frozen=True)
@@ -273,12 +305,19 @@ def assign_to_stories(
     window = timedelta(hours=settings.pipeline.story_attach_window_hours)
     earliest = min(article.published_at for article in articles)
     new_ids = {article.id for article in articles if article.id is not None}
+    # Every news article of each story still inside the attach window, oldest first, so that
+    # centroids cover whole stories and each story's first member is its seed.
+    recent_stories = (
+        select(Article.story_id)
+        .where(Article.story_id.is_not(None), Article.published_at >= earliest - window)
+        .distinct()
+    )
     existing = [
         article
         for article in session.scalars(
             select(Article)
-            .where(Article.story_id.is_not(None), Article.published_at >= earliest - window)
-            .order_by(Article.published_at)
+            .where(Article.story_id.in_(recent_stories))
+            .order_by(Article.published_at, Article.id)
         )
         if article.id not in new_ids and article.story is not None and not article.non_news
     ]
@@ -292,7 +331,7 @@ def assign_to_stories(
             [article_text(item.title, item.snippet) for item in [*existing, *ordered]]
         )
         grouper: EmbeddingGrouper[Story] = EmbeddingGrouper(
-            settings.grouping.embedding_threshold, window
+            settings.grouping.embedding_threshold, window, settings.grouping.seed_threshold
         )
         for item, vector in zip(existing, vectors, strict=False):
             grouper.add(item.story, vector, item.published_at, ref=item.story)  # type: ignore[arg-type]
@@ -324,6 +363,7 @@ def assign_to_stories(
         found = match(index, article)
         story = found.key
         best = found.best_ref if isinstance(found.best_ref, Story) else None
+        seed = {"seed_score": found.seed_score, "seed_rejected": found.seed_rejected}
         if article.non_news:
             article.story = story
             if story is None:
@@ -332,7 +372,7 @@ def assign_to_stories(
             else:
                 non_news_attached += 1
                 decision = "non-news attached"
-            placements.append(Placement(article, story, best, found.best_score, decision))
+            placements.append(Placement(article, story, best, found.best_score, decision, **seed))
             continue
         decision = "joined" if story is not None else "new story"
         if story is None:
@@ -349,7 +389,7 @@ def assign_to_stories(
             attached += 1
         article.story = story
         add(story, index, article)
-        placements.append(Placement(article, story, best, found.best_score, decision))
+        placements.append(Placement(article, story, best, found.best_score, decision, **seed))
     return GroupingResult(
         attached, created, non_news_attached, non_news_ungrouped, method, tuple(placements)
     )

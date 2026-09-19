@@ -270,15 +270,16 @@ def non_news_entries(grouping: GroupingResult) -> list[dict[str, Any]]:
 
 
 def log_borderline(grouping: GroupingResult, settings: Settings, run_id: int) -> int:
-    """Append every embedding match scoring inside grouping.borderline_log_range to
-    data/logs/grouping_borderline.jsonl, for retuning the threshold later."""
+    """Append every embedding match scoring inside grouping.borderline_log_range, and every
+    article the seed check kept out of its best story, to data/logs/grouping_borderline.jsonl,
+    for retuning the thresholds later."""
     if grouping.method != "embedding":
         return 0
     low, high = settings.grouping.borderline_log_range
     rows = []
     for placement in grouping.placements:
         score = placement.score
-        if score is None or not low <= score <= high:
+        if score is None or not (low <= score <= high or placement.seed_rejected):
             continue
         article, best = placement.article, placement.best_story
         rows.append(
@@ -286,7 +287,12 @@ def log_borderline(grouping: GroupingResult, settings: Settings, run_id: int) ->
                 "logged_at": utcnow().isoformat(),
                 "run_id": run_id,
                 "threshold": settings.grouping.embedding_threshold,
+                "seed_threshold": settings.grouping.seed_threshold,
                 "score": round(score, 4),
+                "seed_score": (
+                    None if placement.seed_score is None else round(placement.seed_score, 4)
+                ),
+                "seed_rejected": placement.seed_rejected,
                 "decision": placement.decision,
                 "article": {
                     "title": article.title,

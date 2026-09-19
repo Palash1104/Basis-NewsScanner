@@ -117,6 +117,9 @@ class GroupingSettings(_Strict):
     method: GroupingMethod = "embedding"
     embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
     embedding_threshold: float = Field(default=0.55, gt=0, lt=1)
+    # An article must also score at least this against the story's seed (earliest news
+    # article), so stories can't drift into topic blobs. None disables the check.
+    seed_threshold: float | None = Field(default=None, gt=0, lt=1)
     # Embedding matches scoring in this range are logged for later retuning.
     borderline_log_range: tuple[float, float] = (0.45, 0.65)
     # Title matcher settings (fallback).

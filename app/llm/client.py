@@ -23,10 +23,14 @@ from app.config import LLMSettings, get_secret
 from app.llm.prompts import validation_retry_prompt
 from app.llm.ratelimit import (
     DailyLimitReached,
+    DailyUsageStore,
     MemoryDailyUsageStore,
+    MemoryMinuteWindow,
+    MinuteWindow,
     MissingRateLimit,
     RateLimiter,
     SqlDailyUsageStore,
+    SqlMinuteWindow,
     estimate_input_tokens,
 )
 from app.net import backoff_seconds, retry_after_seconds
@@ -511,16 +515,20 @@ def make_llm_client(
     else:
         provider = AnthropicProvider(api_key, settings.timeout_seconds)
 
-    store = (
-        SqlDailyUsageStore(session_factory, provider.name)
-        if session_factory is not None
-        else MemoryDailyUsageStore()
-    )
+    # With a database, daily counts and the minute window are shared by every process.
+    store: DailyUsageStore
+    window: MinuteWindow
+    if session_factory is not None:
+        store = SqlDailyUsageStore(session_factory, provider.name)
+        window = SqlMinuteWindow(session_factory, provider.name)
+    else:
+        store, window = MemoryDailyUsageStore(), MemoryMinuteWindow()
     limiter = RateLimiter(
         settings.rate_limits,
         store,
         ZoneInfo(settings.rate_limit_day_timezone),
         require_limits=settings.provider == "gemini",
         display_timezone=display_timezone,
+        window=window,
     )
     return LLMClient(settings, provider, limiter)

@@ -246,14 +246,18 @@ Grouping is **incremental**: a new article attaches to an existing story (update
 - **Embeddings** (moved from Phase 5 to the Phase 1 fixes, because title matching mis-grouped short headlines):
   - Each article is embedded locally with `sentence-transformers/all-MiniLM-L6-v2` from its title plus snippet.
   - It is compared by cosine similarity with each eligible story's **centroid**: the normalized mean of that story's news-article vectors.
-  - It joins the best story scoring ≥ `grouping.embedding_threshold`. That is **0.55**, approved after tuning on 2,337 real articles and the regression fixtures (`tests/fixtures/grouping_regressions.json`). Known weak spot: broad topic stories (market wraps, "India trade") can still pull in loosely related articles.
+  - It joins the best story scoring ≥ `grouping.embedding_threshold`. That is **0.55**, approved after tuning on 2,337 real articles and the regression fixtures (`tests/fixtures/grouping_regressions.json`).
+  - **Seed check (anti-drift):** the article must also score ≥ `grouping.seed_threshold` (**0.45**) against the story's seed, its earliest news article. Otherwise a story can chain into a topic blob one loosely related article at a time. Seen: the NSE IPO story took in other IPO news, and a UN war-crimes report took in later US troop-death reports.
+    - If the best story fails the seed check, the article joins the next-best story that passes both checks, or starts a new one.
+    - 0.45 is the highest value that keeps regression case (a). From 0.47, India's reactions split off the sanctions-bill story.
+    - Cost: a story whose first article is unrepresentative can split.
 - **Fallback:** if the model can't load, the run uses the Phase 1 title matcher (`rapidfuzz` `token_set_ratio` on titles, threshold 64) and records an error in `runs.errors`.
 - **Non-news headlines** (`app/pipeline/classify.py`, title patterns): explainers ("Explained", "What is…?"), roundups/briefs, and live blogs ("live", "live updates", "as it happened").
   - They are stored and may attach to a matching story.
   - They never start a story, never move its centroid, and never count as a source.
   - They are left out of ranking, the summary input and the digest's source links.
   - Every flagged headline is printed in the run output, so false positives are visible.
-- **Borderline log:** every placement scoring within `grouping.borderline_log_range` (0.45–0.65) is appended to `data/logs/grouping_borderline.jsonl`, with titles, score and decision, for later retuning.
+- **Borderline log:** every placement scoring within `grouping.borderline_log_range` (0.45–0.65), and every article the seed check kept out of its best story, is appended to `data/logs/grouping_borderline.jsonl`, with titles, centroid and seed scores and the decision, for later retuning.
 - **Regrouping** (`scripts/regroup.py`) rebuilds stories from all stored articles without LLM calls.
   - A story whose article set changed and that had a summary gets status `needs_resummary`.
   - Such stories are left out of digests.

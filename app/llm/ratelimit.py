@@ -2,7 +2,10 @@
 
 Three limits per model, matching how the Gemini API measures quota: requests per minute,
 input tokens per minute, and requests per day. Minute limits use a sliding 60-second window
-and wait for room. The daily count is stored in the database so it holds across runs, and
+and wait for room. With the database-backed window (`SqlMinuteWindow`) every request is
+recorded in `llm_requests`, so the window counts calls from all processes using the database
+(a smoke test just before a run, a manual run while the scheduler is up), not just this one.
+The daily count is stored in the database so it holds across runs, and
 resets at midnight in the configured time zone (Pacific time for Gemini; that is early
 afternoon in India). When the daily limit is reached, `acquire` raises instead of waiting.
 
@@ -13,7 +16,7 @@ continue up to the quota.
 
 import logging
 import time
-from collections import defaultdict, deque
+from collections import defaultdict
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -21,16 +24,17 @@ from datetime import time as dt_time
 from typing import Protocol
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import select
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.config import RateLimitSettings
-from app.models import LLMDailyUsage
+from app.models import LLMDailyUsage, LLMRequest
 
 log = logging.getLogger(__name__)
 
 WINDOW_SECONDS = 60.0
 SAFETY_SECONDS = 1.0  # wait slightly past the window edge so clock skew can't trip the limit
+KEEP_SECONDS = 3600.0  # request rows older than this are deleted
 
 
 class RateLimitError(Exception):
@@ -111,6 +115,114 @@ class SqlDailyUsageStore:
             session.commit()
 
 
+class MinuteWindow(Protocol):
+    """Recent requests per model, for the per-minute limits. Times are epoch seconds.
+
+    A caller reserves a slot first and then checks what was reserved ahead of it, so two
+    processes can't both take the last slot: the earlier reservation wins.
+    """
+
+    def reserve(self, model: str, at: float, input_tokens: float) -> int: ...
+
+    def ahead(self, model: str, reservation: int, since: float) -> tuple[int, float, float | None]:
+        """(requests, input tokens, oldest time) reserved after `since`, before `reservation`."""
+        ...
+
+    def release(self, reservation: int) -> None: ...
+
+    def settle(self, reservation: int, input_tokens: float) -> None: ...
+
+
+class MemoryMinuteWindow:
+    """This process only (tests, or no database)."""
+
+    def __init__(self) -> None:
+        self._rows: dict[int, list] = {}  # id -> [model, at, input tokens]
+        self._next_id = 1
+
+    def reserve(self, model: str, at: float, input_tokens: float) -> int:
+        for row_id in [i for i, row in self._rows.items() if row[1] < at - KEEP_SECONDS]:
+            del self._rows[row_id]
+        row_id, self._next_id = self._next_id, self._next_id + 1
+        self._rows[row_id] = [model, at, input_tokens]
+        return row_id
+
+    def ahead(self, model: str, reservation: int, since: float) -> tuple[int, float, float | None]:
+        rows = [
+            row
+            for row_id, row in self._rows.items()
+            if row_id < reservation and row[0] == model and row[1] > since
+        ]
+        return len(rows), sum(row[2] for row in rows), min((row[1] for row in rows), default=None)
+
+    def release(self, reservation: int) -> None:
+        self._rows.pop(reservation, None)
+
+    def settle(self, reservation: int, input_tokens: float) -> None:
+        if reservation in self._rows:
+            self._rows[reservation][2] = input_tokens
+
+
+def _utc(epoch_seconds: float) -> datetime:
+    return datetime.fromtimestamp(epoch_seconds, UTC)
+
+
+class SqlMinuteWindow:
+    """Shared by every process using the database (`llm_requests`), one commit per change."""
+
+    def __init__(self, session_factory: sessionmaker[Session], provider: str) -> None:
+        self._session_factory = session_factory
+        self._provider = provider
+
+    def reserve(self, model: str, at: float, input_tokens: float) -> int:
+        with self._session_factory() as session:
+            session.execute(
+                delete(LLMRequest).where(LLMRequest.requested_at < _utc(at - KEEP_SECONDS))
+            )
+            row = LLMRequest(
+                provider=self._provider,
+                model=model,
+                requested_at=_utc(at),
+                input_tokens=round(input_tokens),
+            )
+            session.add(row)
+            session.commit()
+            return row.id
+
+    def ahead(self, model: str, reservation: int, since: float) -> tuple[int, float, float | None]:
+        with self._session_factory() as session:
+            count, tokens, oldest = session.execute(
+                select(
+                    func.count(LLMRequest.id),
+                    func.coalesce(func.sum(LLMRequest.input_tokens), 0),
+                    func.min(LLMRequest.requested_at),
+                ).where(
+                    LLMRequest.provider == self._provider,
+                    LLMRequest.model == model,
+                    LLMRequest.id < reservation,
+                    LLMRequest.requested_at > _utc(since),
+                )
+            ).one()
+        # func.min bypasses the column type, so SQLite hands back a naive UTC string.
+        if isinstance(oldest, str):
+            oldest = datetime.fromisoformat(oldest)
+        if oldest is not None and oldest.tzinfo is None:
+            oldest = oldest.replace(tzinfo=UTC)
+        return int(count), float(tokens), oldest.timestamp() if oldest is not None else None
+
+    def release(self, reservation: int) -> None:
+        with self._session_factory() as session:
+            session.execute(delete(LLMRequest).where(LLMRequest.id == reservation))
+            session.commit()
+
+    def settle(self, reservation: int, input_tokens: float) -> None:
+        with self._session_factory() as session:
+            row = session.get(LLMRequest, reservation)
+            if row is not None:
+                row.input_tokens = round(input_tokens)
+                session.commit()
+
+
 @dataclass(frozen=True)
 class QuotaStatus:
     model: str
@@ -125,7 +237,7 @@ class QuotaStatus:
 class Reservation:
     model: str
     day: str
-    event: list[float]  # [timestamp, input tokens] inside the minute window
+    window_id: int  # this request's slot in the minute window
 
 
 class RateLimiter:
@@ -135,20 +247,22 @@ class RateLimiter:
         store: DailyUsageStore,
         day_timezone: ZoneInfo,
         require_limits: bool,
-        clock: Callable[[], float] = time.monotonic,
+        # Wall-clock epoch seconds (not monotonic): the window may be shared across processes.
+        clock: Callable[[], float] = time.time,
         sleep: Callable[[float], None] = time.sleep,
         now: Callable[[], datetime] = lambda: datetime.now(UTC),
         display_timezone: ZoneInfo | None = None,
+        window: MinuteWindow | None = None,
     ) -> None:
         self._limits = limits
         self._store = store
+        self._window = window if window is not None else MemoryMinuteWindow()
         self._tz = day_timezone
         self._require = require_limits
         self._clock = clock
         self._sleep = sleep
         self._now = now
         self._display_tz = display_timezone or day_timezone
-        self._events: dict[str, deque[list[float]]] = defaultdict(deque)
 
     def quota_day(self) -> str:
         return self._now().astimezone(self._tz).date().isoformat()
@@ -205,19 +319,19 @@ class RateLimiter:
             )
 
         tokens = float(min(max(estimated_input_tokens, 1), limits.input_tokens_per_minute))
-        events = self._events[model]
         while True:
             now = self._clock()
-            while events and events[0][0] <= now - WINDOW_SECONDS:
-                events.popleft()
-            used_requests = len(events)
-            used_tokens = sum(event[1] for event in events)
+            window_id = self._window.reserve(model, now, tokens)
+            used_requests, used_tokens, oldest = self._window.ahead(
+                model, window_id, now - WINDOW_SECONDS
+            )
             if (
                 used_requests < limits.requests_per_minute
                 and used_tokens + tokens <= limits.input_tokens_per_minute
             ):
                 break
-            wait = max(events[0][0] + WINDOW_SECONDS - now + SAFETY_SECONDS, 0.1)
+            self._window.release(window_id)
+            wait = max((oldest or now) + WINDOW_SECONDS - now + SAFETY_SECONDS, 0.1)
             log.info(
                 "rate limit %s: %d/%d requests and %d/%d input tokens in the last minute; "
                 "waiting %.1fs",
@@ -230,10 +344,8 @@ class RateLimiter:
             )
             self._sleep(wait)
 
-        event = [now, tokens]
-        events.append(event)
         self._store.add(day, model, requests=1)
-        return Reservation(model, day, event)
+        return Reservation(model, day, window_id)
 
     def settle(
         self, reservation: Reservation | None, input_tokens: int, output_tokens: int
@@ -242,7 +354,7 @@ class RateLimiter:
         if reservation is None:
             return
         if input_tokens > 0:
-            reservation.event[1] = float(input_tokens)
+            self._window.settle(reservation.window_id, float(input_tokens))
         self._store.add(
             reservation.day,
             reservation.model,

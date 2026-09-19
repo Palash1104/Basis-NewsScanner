@@ -33,6 +33,7 @@ def _group(case: str, embedder: Embedder, settings: Settings) -> tuple[list[dict
         [is_non_news(a["title"]) for a in articles],
         settings.grouping.embedding_threshold,
         timedelta(hours=settings.pipeline.story_attach_window_hours),
+        settings.grouping.seed_threshold,
     )
     return articles, decisions
 
@@ -79,3 +80,32 @@ def test_d_story3_sources_stay_apart(embedder: Embedder, settings: Settings) -> 
     articles, decisions = _group("rates_story", embedder, settings)
     nyt, aljazeera = decisions
     assert aljazeera.group is None or aljazeera.group != nyt.group
+
+
+def test_e_ipo_story_does_not_drift_into_other_ipos(embedder: Embedder, settings: Settings) -> None:
+    articles, decisions = _group("drift_ipo_blob", embedder, settings)
+    case = CASES["drift_ipo_blob"]
+    group_of = {a["db_id"]: d.group for a, d in zip(articles, decisions, strict=True)}
+    nse_groups = {group_of[db_id] for db_id in case["nse_ipo"]}
+    assert len(nse_groups) == 1, "the NSE IPO articles themselves split"
+    for db_id in case["must_not_join_nse_ipo"]:
+        assert group_of[db_id] not in nse_groups, f"article {db_id} drifted into the NSE IPO story"
+
+
+def test_f_troop_deaths_report_stays_out_of_war_crimes_story(
+    embedder: Embedder, settings: Settings
+) -> None:
+    articles, decisions = _group("drift_troop_deaths", embedder, settings)
+    case = CASES["drift_troop_deaths"]
+    group_of = {a["db_id"]: d.group for a, d in zip(articles, decisions, strict=True)}
+    troop_groups = {group_of[db_id] for db_id in case["troop_deaths"]}
+    war_crimes_groups = {group_of[db_id] for db_id in case["war_crimes"]}
+    assert len(troop_groups) == 1, "the troop-death reports split"
+    assert not troop_groups & war_crimes_groups, "troop deaths joined the war-crimes story"
+
+
+def test_seed_check_is_what_stops_the_drift(embedder: Embedder, settings: Settings) -> None:
+    """Without the seed check the troop-death reports chain into the war-crimes story."""
+    settings.grouping.seed_threshold = None
+    articles, decisions = _group("drift_troop_deaths", embedder, settings)
+    assert len({d.group for d in decisions}) == 1

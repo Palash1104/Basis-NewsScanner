@@ -361,5 +361,292 @@
     "published_at": "2026-09-17T11:27:34.000000+00:00"
    }
   ]
+ },
+ "drift_ipo_blob": {
+  "about": "Story 110 after the 2026-09-19 regroup (no seed check): the NSE IPO story drifted into an 'IPO' topic blob, picking up an Anthropic post-IPO piece and a mutual-fund themes piece. With the seed check those two must not join the NSE IPO story.",
+  "nse_ipo": [
+   63,
+   128,
+   152,
+   164,
+   463
+  ],
+  "must_not_join_nse_ipo": [
+   888,
+   1100
+  ],
+  "articles": [
+   {
+    "db_id": 63,
+    "old_story": 110,
+    "title": "NSE IPO buzz lifts New India Assurance, IFCI up to 9% | What do technical experts say?",
+    "snippet": "New India Assurance's shares rose 9.4% and IFCI's by 7.8% amid the NSE IPO. Both stocks experienced volatility, influenced by market developments. Technical analysts suggest potential support and resistance levels, indicating ongoing fluctuations in their trends.",
+    "source_name": "Livemint",
+    "source_region": "IN",
+    "source_weight": 2,
+    "url": "https://www.livemint.com/market/stock-market-news/nse-ipo-buzz-lifts-new-india-assurance-ifci-up-to-9-what-do-technical-experts-say-11789623090580.html",
+    "published_at": "2026-09-17T05:59:02+00:00"
+   },
+   {
+    "db_id": 128,
+    "old_story": 110,
+    "title": "NSE IPO: Issue subscribed 42% on Day 1; GMP signals 9% listing gain. Should you subscribe?",
+    "snippet": "The NSE IPO was subscribed 42% on Day 1, with investors bidding for 3.7 crore shares against 8.86 crore shares on offer. Non-institutional investors led with 70% subscription, followed by retail investors at 43% and QIBs at 19%. Meanwhile, the IPO’s grey market premium hovered around 9%, suggesting expectations of a moderate listing gain.",
+    "source_name": "The Economic Times",
+    "source_region": "IN",
+    "source_weight": 2,
+    "url": "https://economictimes.indiatimes.com/markets/ipos/fpos/nse-ipo-day-1-issue-subscribed-22-in-early-hours-gmp-signals-9-listing-gain-should-you-subscribe/articleshow/134304976.cms",
+    "published_at": "2026-09-17T07:40:17+00:00"
+   },
+   {
+    "db_id": 152,
+    "old_story": 110,
+    "title": "NSE IPO: India's biggest stock exchange launches mega share sale",
+    "snippet": "",
+    "source_name": "BBC",
+    "source_region": "GLOBAL",
+    "source_weight": 3,
+    "url": "https://news.google.com/rss/articles/CBMiW0FVX3lxTE12WllINEpBanJxS2xaWXlVUjFqVnZycUp2akdfN0R5VXRkNjhsVGVfWS1tazQ0VkdVRUN1dTk5TVJqblp6QTJ3X1lXVlhyLW5wMWFkRUdaYTMtRG8?oc=5",
+    "published_at": "2026-09-17T08:13:59+00:00"
+   },
+   {
+    "db_id": 154,
+    "old_story": 110,
+    "title": "The NSE IPO investor playbook: Should you subscribe to the mega issue or pick rival BSE instead?",
+    "snippet": "The NSE IPO has sparked a valuation debate as investors weigh subscribing at the issue price against waiting for a post-listing correction or considering BSE. With NSE commanding a dominant share of India’s equity markets, analysts point to its strong financials and scale, while flagging rich valuations and risks around options volumes.",
+    "source_name": "The Economic Times",
+    "source_region": "IN",
+    "source_weight": 2,
+    "url": "https://economictimes.indiatimes.com/markets/ipos/fpos/the-nse-ipo-investor-playbook-buy-at-ipo-wait-for-a-correction-or-go-for-bse-instead/articleshow/134305915.cms",
+    "published_at": "2026-09-17T08:15:19+00:00"
+   },
+   {
+    "db_id": 164,
+    "old_story": 110,
+    "title": "NSE IPO GMP today price: What latest grey market premium signals about listing gains",
+    "snippet": "NSE IPO GMP today: According to market observers, the NSE shares are available at a premium of ₹125 in the grey market today",
+    "source_name": "Livemint",
+    "source_region": "IN",
+    "source_weight": 2,
+    "url": "https://www.livemint.com/market/ipo/nse-ipo-gmp-today-price-what-latest-grey-market-premium-signals-about-listing-gains-11789630597755.html",
+    "published_at": "2026-09-17T08:21:52+00:00"
+   },
+   {
+    "db_id": 226,
+    "old_story": 110,
+    "title": "Tata's stocks soar 14% on Chandra and IPO moves",
+    "snippet": "",
+    "source_name": "The Economic Times",
+    "source_region": "IN",
+    "source_weight": 2,
+    "url": "https://economictimes.indiatimes.com/markets/stocks/news/tcs-tata-chemicals-other-group-stocks-rally-up-to-14-as-tata-sons-approves-n-chandras-tenure-extension-prepares-for-ipo/articleshow/134307500.cms",
+    "published_at": "2026-09-17T09:38:35+00:00"
+   },
+   {
+    "db_id": 279,
+    "old_story": 110,
+    "title": "NSE’s biggest bull bets bigger: LIC’s 10.72% stake gets Rs 450 crore anchor boost",
+    "snippet": "LIC, NSE’s largest shareholder with a 10.72% stake, received shares worth about Rs 450 crore in the exchange’s anchor allocation ahead of its IPO. NSE raised Rs 6,746 crore from 189 investors at Rs 1,785 per share.",
+    "source_name": "The Economic Times",
+    "source_region": "IN",
+    "source_weight": 2,
+    "url": "https://economictimes.indiatimes.com/markets/ipos/fpos/nses-biggest-bull-bets-bigger-lics-10-72-stake-gets-rs-450-crore-anchor-boost/articleshow/134308999.cms",
+    "published_at": "2026-09-17T10:36:21+00:00"
+   },
+   {
+    "db_id": 399,
+    "old_story": 110,
+    "title": "Mauritius-based Soach Global to make 25 times return from NSE IPO",
+    "snippet": "Mauritius-based Soach Global is set to make nearly 25 times returns on its decade-old NSE investment, with its 82.5 lakh shares now valued at up to Rs 1,472 crore at the IPO price band. The fund is selling 16.5 lakh shares, while retaining 66 lakh shares as a long-term investment.",
+    "source_name": "The Economic Times",
+    "source_region": "IN",
+    "source_weight": 2,
+    "url": "https://economictimes.indiatimes.com/markets/ipos/fpos/mauritius-based-soach-global-to-make-25-times-return-from-nse-ipo/articleshow/134312583.cms",
+    "published_at": "2026-09-17T12:46:47+00:00"
+   },
+   {
+    "db_id": 401,
+    "old_story": 110,
+    "title": "NSE enters India’s mega-IPO club: 2nd-largest issue, 2nd-highest anchor count with 189 investors",
+    "snippet": "NSE’s Rs 22,561.57 crore IPO ranks as India’s second-largest, behind Hyundai Motor India. The exchange attracted 189 anchor investors and raised Rs 6,746.18 crore before opening for public subscription, making it the second-highest in the historical anchor investor comparison.",
+    "source_name": "The Economic Times",
+    "source_region": "IN",
+    "source_weight": 2,
+    "url": "https://economictimes.indiatimes.com/markets/ipos/fpos/nse-enters-indias-mega-ipo-club-2nd-largest-issue-2nd-highest-anchor-count-with-189-investors/articleshow/134312636.cms",
+    "published_at": "2026-09-17T12:49:44+00:00"
+   },
+   {
+    "db_id": 463,
+    "old_story": 110,
+    "title": "NSE IPO GMP latest price today, subscription status Day 1: Response by investors, grey market signals for listing gains",
+    "snippet": "The NSE IPO received healthy investor interest on its first day, with bids for 3.83 crore shares against 8.86 crore available. Retail investors showed substantial participation, while anchor investors included major firms like Goldman Sachs. The IPO is expected to list on September 24.",
+    "source_name": "Livemint",
+    "source_region": "IN",
+    "source_weight": 2,
+    "url": "https://www.livemint.com/market/stock-market-news/nse-ipo-gmp-latest-price-today-subscription-status-day-1-response-by-investors-grey-market-signals-for-listing-gains-11789650725117.html",
+    "published_at": "2026-09-17T14:04:09+00:00"
+   },
+   {
+    "db_id": 775,
+    "old_story": 110,
+    "title": "Hero Motors, NSE show two realities of India’s unlisted market",
+    "snippet": "Hero Motors' IPO price band has raised concerns for investors who bought shares at ₹300, facing losses as the IPO is now priced at ₹79-84",
+    "source_name": "Livemint",
+    "source_region": "IN",
+    "source_weight": 2,
+    "url": "https://www.livemint.com/market/ipo/hero-motors-nse-ipo-show-two-realities-of-india-s-unlisted-market-investors-trading-11789705715047.html",
+    "published_at": "2026-09-19T00:00:11+00:00"
+   },
+   {
+    "db_id": 888,
+    "old_story": 110,
+    "title": "Investors warn Anthropic could struggle to sustain revenues post-IPO",
+    "snippet": "",
+    "source_name": "Financial Times",
+    "source_region": "US",
+    "source_weight": 1,
+    "url": "https://news.google.com/rss/articles/CBMihAFBVV95cUxOUHlWc1I1bW5JN243Qk1QaERIaktRX05iTFZwTTB2ZVpSRnRDdGlEaHFlZ2lHMzVnRzZkUEw0Y0l1allHbjRZeVRKM0lYY0oxZDhjWXpHb3Uxb0poTEhjN3BvU3h2Uk0ydlFvdEVxRjc0Mkx0WUpzVGZNSnlDWjdwMldfR3k?oc=5",
+    "published_at": "2026-09-19T04:00:24+00:00"
+   },
+   {
+    "db_id": 927,
+    "old_story": 110,
+    "title": "Tata Sons IPO: How 7 Tata Group stocks performed this week amid IPO buzz",
+    "snippet": "Tata Group stocks witnessed sharp volatility this week as developments around the Tata Sons IPO triggered strong buying and selling. Tata Chemicals led the gains with a 13% rise, while Tata Investment Corp gained 8%. Tata Power, IHCL and Tata Motors Passenger Vehicles also ended higher despite Friday’s sell-off.",
+    "source_name": "The Economic Times",
+    "source_region": "IN",
+    "source_weight": 2,
+    "url": "https://economictimes.indiatimes.com/markets/stocks/news/tata-sons-ipo-how-7-tata-group-stocks-performed-this-week-amid-ipo-buzz/articleshow/134347782.cms",
+    "published_at": "2026-09-19T04:34:34+00:00"
+   },
+   {
+    "db_id": 1100,
+    "old_story": 110,
+    "title": "Only 2 of 23 mutual fund themes gained in August; IPO, defence stay green as auto, railways and tech slide : Report",
+    "snippet": "As the domestic equity market saw broad-based pressure in August, only two mutual fund themes - IPO and defence remained in positive territory among the 23 themes, whereas auto and railways were the biggest laggards, according to a report by Vallum Capital,IPO and defence themes gained 2.2% and 1.4%, respectively and at the other end, auto and railways were the biggest laggards, falling 6.5% and 6.4%, while Technology declined 6.1%. The IPO and defence sector based funds received an inflow of…",
+    "source_name": "The Economic Times",
+    "source_region": "IN",
+    "source_weight": 2,
+    "url": "https://economictimes.indiatimes.com/mf/mf-news/only-2-of-23-mutual-fund-themes-gained-in-august-ipo-defence-stay-green-as-auto-railways-and-tech-slide-report/articleshow/134350461.cms",
+    "published_at": "2026-09-19T08:11:34+00:00"
+   }
+  ]
+ },
+ "drift_troop_deaths": {
+  "about": "Story 316 after the 2026-09-19 regroup (no seed check): the Sept 17 UN war-crimes report on US strikes in Iran absorbed the Sept 18-19 reports that US troop deaths exceed the Pentagon's count. Different events: they must end up in different stories.",
+  "war_crimes": [
+   200,
+   365,
+   391,
+   454,
+   492,
+   650
+  ],
+  "troop_deaths": [
+   757,
+   758,
+   860
+  ],
+  "articles": [
+   {
+    "db_id": 200,
+    "old_story": 316,
+    "title": "Iran school bombing: grounds to believe US was behind atrocity, UN finds",
+    "snippet": "",
+    "source_name": "The Guardian",
+    "source_region": "GLOBAL",
+    "source_weight": 2,
+    "url": "https://news.google.com/rss/articles/CBMipAFBVV95cUxQNzJvZW84dU1NMjA2OVZSZVlYS2lJWmhhbjN2M2RZbjlGUGV0WjRNWUNmbXpkREllLUNlWGVEel9TWnFDYmNBM29GbWsya0lIQU5yOUtLWVNjQjBHUTdwNjl4LS1LTGVIVXFmYTNWTTJfbzR6R2xfWkoyQkhpLXhIa2VOMjI3UkdzZ1NHMmx1ZUg1YUUyY3FBdFhmY05CQVJtWXNfVA?oc=5",
+    "published_at": "2026-09-17T09:05:00+00:00"
+   },
+   {
+    "db_id": 365,
+    "old_story": 316,
+    "title": "UN-backed experts cite possible U.S. war crimes in Iran strikes",
+    "snippet": "The international fact-finding mission on Iran says the findings centre on a pair of airstrikes that killed at least 178 civilians, including women and children",
+    "source_name": "The Hindu",
+    "source_region": "IN",
+    "source_weight": 3,
+    "url": "https://www.thehindu.com/news/international/un-backed-experts-cite-possible-us-war-crimes-in-iran-strikes/article71476395.ece",
+    "published_at": "2026-09-17T12:05:44+00:00"
+   },
+   {
+    "db_id": 391,
+    "old_story": 316,
+    "title": "U.N.-backed experts cite possible U.S. war crimes in Iran, including a school attack",
+    "snippet": "Human rights experts commissioned by the U.N. say they have found \"reasonable grounds\" to believe the U.S. committed war crimes in Iran, including a strike on a school in the southern city of Minab.",
+    "source_name": "NPR",
+    "source_region": "GLOBAL",
+    "source_weight": 2,
+    "url": "https://www.npr.org/2026/09/17/nx-s1-5972934/us-iran-war-un-report-alleged-war-crimes",
+    "published_at": "2026-09-17T12:33:36+00:00"
+   },
+   {
+    "db_id": 454,
+    "old_story": 316,
+    "title": "UN experts flag two US strikes in Iran over possible war crimes: Which ones?",
+    "snippet": "The experts said the findings were reached despite difficulties caused by the ongoing conflict, displacement and an internet shutdown in Iran, as well as limited cooperation from both governments.",
+    "source_name": "Livemint",
+    "source_region": "IN",
+    "source_weight": 2,
+    "url": "https://www.livemint.com/news/us-news/un-experts-flag-two-us-strikes-in-iran-over-possible-war-crimes-which-ones-11789651893095.html",
+    "published_at": "2026-09-17T13:52:29+00:00"
+   },
+   {
+    "db_id": 492,
+    "old_story": 316,
+    "title": "US strike on Minab school, anti-govt protest crackdown: UN mission flags war crimes in Iran",
+    "snippet": "The UN-backed mission stated it had \"reasonable ground to believe\" that US committed a war crime when it struck a school in Minab.",
+    "source_name": "Hindustan Times",
+    "source_region": "IN",
+    "source_weight": 2,
+    "url": "https://www.hindustantimes.com/world-news/us-strike-on-minab-school-anti-govt-protest-crackdown-un-mission-flags-war-crimes-in-iran-human-rights-council-101789651688154.html",
+    "published_at": "2026-09-17T14:28:52+00:00"
+   },
+   {
+    "db_id": 650,
+    "old_story": 316,
+    "title": "UN experts say grounds to believe US committed war crimes in Iran strikes",
+    "snippet": "",
+    "source_name": "BBC",
+    "source_region": "GLOBAL",
+    "source_weight": 3,
+    "url": "https://news.google.com/rss/articles/CBMiW0FVX3lxTE94c0dGTGFoQjNZRzNja2ZCVFlBSnczcTdaRW9oQU14MlVHdzBWSWFGdXJqdzB5Tm9LdUZGemtNcWZBeUxGRUQ1dXV4QnVHN29hNm9SS25XSjFGXzg?oc=5",
+    "published_at": "2026-09-17T15:07:47+00:00"
+   },
+   {
+    "db_id": 757,
+    "old_story": 316,
+    "title": "Is Pentagon hiding actual count of US troops killed in Iran war? Pete Hegseth calls WaPo report ‘a complete lie’",
+    "snippet": "After WaPo claimed the Pentagon underreported US troops deaths in Iran war, Pete Hegseth branded the report a \"complete lie\" and \"disgusting.\"",
+    "source_name": "Hindustan Times",
+    "source_region": "IN",
+    "source_weight": 2,
+    "url": "https://www.hindustantimes.com/world-news/us-news/is-pentagon-hiding-actual-count-of-us-troops-killed-in-iran-war-pete-hegseth-calls-wapo-report-a-complete-lie-101789771139503.html",
+    "published_at": "2026-09-18T23:22:56+00:00"
+   },
+   {
+    "db_id": 758,
+    "old_story": 316,
+    "title": "U.S. troop deaths during Iran war exceed Pentagon count by at least four: report",
+    "snippet": "Defence Secretary Pete Hegseth ‌denied the report, calling it a “complete lie”",
+    "source_name": "The Hindu",
+    "source_region": "IN",
+    "source_weight": 3,
+    "url": "https://www.thehindu.com/news/international/us-troop-deaths-during-iran-war-exceed-pentagon-count-by-at-least-four-report/article71482590.ece",
+    "published_at": "2026-09-18T23:23:14+00:00"
+   },
+   {
+    "db_id": 860,
+    "old_story": 316,
+    "title": "Report: More US troops have died in Iran war than Pentagon says",
+    "snippet": "The Pentagon publicly lists 18 US military deaths since the Iran war began.",
+    "source_name": "Al Jazeera",
+    "source_region": "GLOBAL",
+    "source_weight": 2,
+    "url": "https://www.aljazeera.com/video/newsfeed/2026/9/19/report-more-us-troops-have-died-in-iran-war-than-pentagon-says",
+    "published_at": "2026-09-19T03:02:51+00:00"
+   }
+  ]
  }
 }

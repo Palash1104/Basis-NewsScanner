@@ -3,7 +3,17 @@
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import JSON, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import (
+    JSON,
+    DateTime,
+    Float,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.engine import Dialect
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 from sqlalchemy.types import TypeDecorator
@@ -115,3 +125,18 @@ class LLMDailyUsage(Base):
     requests: Mapped[int] = mapped_column(Integer, default=0)
     input_tokens: Mapped[int] = mapped_column(Integer, default=0)
     output_tokens: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class LLMRequest(Base):
+    """One row per LLM request in roughly the last hour, shared by every process using this
+    database, so the per-minute limits count calls made by other runs too (e.g. the smoke test
+    just before a pipeline run). Not in SPEC section 6; added for the LLM rate limiter."""
+
+    __tablename__ = "llm_requests"
+    __table_args__ = (Index("ix_llm_requests_window", "provider", "model", "requested_at"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    provider: Mapped[str] = mapped_column(String(16))
+    model: Mapped[str] = mapped_column(String(64))
+    requested_at: Mapped[datetime] = mapped_column(UTCDateTime)
+    input_tokens: Mapped[int] = mapped_column(Integer)  # estimate, replaced by the real count

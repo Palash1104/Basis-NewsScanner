@@ -62,8 +62,17 @@ grouping:
   # Known weak spot: some same-topic, different-event merges just above 0.55 (market movers,
   # "India trade").
   embedding_threshold: 0.55
-  # Every article whose best story match scores in this range is appended to
-  # data/logs/grouping_borderline.jsonl (titles, score, decision) for later retuning.
+  # Anti-drift check (2026-09-19): an article must also score at least seed_threshold against
+  # the story's seed, its earliest news article, or a story can chain into a topic blob one
+  # loosely related article at a time (seen: NSE IPO -> other IPOs; UN war-crimes report ->
+  # US troop-death reports). 0.45 is the highest value that keeps regression case (a): at
+  # 0.47-0.50 India's reactions split off the sanctions-bill story. Cost at 0.45: stories
+  # whose first article is unrepresentative can split (the Tata Sons chairman row split into
+  # three). Remove the line (or set null) to disable.
+  seed_threshold: 0.45
+  # Every article whose best story match scores in this range, or that the seed check kept
+  # out of its best story, is appended to data/logs/grouping_borderline.jsonl (titles,
+  # scores, decision) for later retuning.
   borderline_log_range: [0.45, 0.65]
   # Title matcher: used only if the embedding model can't load.
   # Approved 2026-09-17 after reviewing sample groupings. Compared on a 24h sample of 786

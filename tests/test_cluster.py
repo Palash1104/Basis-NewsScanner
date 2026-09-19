@@ -156,6 +156,31 @@ def test_embedding_groups_outside_window_are_not_candidates() -> None:
     assert grouper.match(_unit(1, 0), NOW).best_score is None
 
 
+def test_seed_check_stops_a_story_drifting() -> None:
+    # (1,1,0) joins the (1,0,0) story, pulling its centroid over; (0.3,1,0) then clears the
+    # centroid threshold but is far from the seed (1,0,0).
+    drifter = _unit(0.3, 1, 0)
+    for seed_threshold, joins in ((None, True), (0.5, False)):
+        grouper: EmbeddingGrouper[str] = EmbeddingGrouper(0.6, WINDOW, seed_threshold)
+        grouper.add("x", _unit(1, 0, 0), NOW)
+        grouper.add("x", _unit(1, 1, 0), NOW)
+        match = grouper.match(drifter, NOW)
+        assert match.best_score is not None and match.best_score > 0.6
+        assert (match.key == "x") is joins
+        assert match.seed_rejected is not joins
+    assert match.seed_score is not None and match.seed_score < 0.5
+
+
+def test_seed_check_falls_back_to_the_next_story_that_passes_both() -> None:
+    grouper: EmbeddingGrouper[str] = EmbeddingGrouper(0.6, WINDOW, 0.5)
+    grouper.add("x", _unit(1, 0, 0), NOW, ref="x")
+    grouper.add("x", _unit(1, 1, 0), NOW, ref="x")
+    grouper.add("y", _unit(0, 1, 1.2), NOW, ref="y")  # cos 0.61 to the article: passes both
+    match = grouper.match(_unit(0.3, 1, 0), NOW)
+    assert match.best_ref == "x" and match.seed_rejected  # x scored best (0.63) but failed its seed
+    assert match.key == "y"
+
+
 def test_group_embeddings_non_news_never_starts_a_group() -> None:
     published = [NOW, NOW + timedelta(minutes=1), NOW + timedelta(minutes=2)]
     vectors = np.stack([_unit(1, 0), _unit(0, 1), _unit(0.95, 0.05)])
@@ -167,6 +192,7 @@ def test_group_embeddings_non_news_never_starts_a_group() -> None:
 
 def test_assign_with_embeddings(session: Session, settings: Settings) -> None:
     settings.grouping.embedding_threshold = 0.4  # bag-of-words scores run lower than the model
+    settings.grouping.seed_threshold = 0.4
     articles = [
         _article(EU_CANADA[0], NOW - timedelta(hours=3), "https://example.com/e1"),
         _article(EU_CANADA[1], NOW - timedelta(hours=2), "https://example.com/e2"),

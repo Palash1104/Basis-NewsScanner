@@ -69,6 +69,7 @@ def regroup_articles(
         [article.non_news for article in articles],
         settings.grouping.embedding_threshold,
         timedelta(hours=settings.pipeline.story_attach_window_hours),
+        settings.grouping.seed_threshold,
     )
     groups: dict[int, list[Article]] = {}
     for article, decision in zip(articles, decisions, strict=True):

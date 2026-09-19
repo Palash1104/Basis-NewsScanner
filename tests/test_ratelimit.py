@@ -12,6 +12,7 @@ from app.llm.ratelimit import (
     MissingRateLimit,
     RateLimiter,
     SqlDailyUsageStore,
+    SqlMinuteWindow,
     estimate_input_tokens,
 )
 
@@ -39,6 +40,7 @@ def _limiter(
     budget: int | None = None,
     store=None,
     clock: FakeClock | None = None,
+    window=None,
     now=lambda: datetime(2026, 9, 17, 12, 0, tzinfo=UTC),
 ) -> tuple[RateLimiter, FakeClock]:
     clock = clock or FakeClock()
@@ -59,6 +61,7 @@ def _limiter(
         sleep=clock.sleep,
         now=now,
         display_timezone=ZoneInfo("Asia/Kolkata"),
+        window=window,
     )
     return limiter, clock
 
@@ -134,6 +137,44 @@ def test_sql_store_persists_counts(tmp_path: Path) -> None:
         SqlDailyUsageStore(make_session_factory(engine), "anthropic").requests("2026-09-17", MODEL)
         == 0
     )
+
+
+def test_minute_window_is_shared_across_processes(tmp_path: Path) -> None:
+    """Two limiters on one database (e.g. the smoke test, then `newsdesk run`) share the
+    per-minute limits: the second one waits for the first one's calls to leave the window."""
+    engine = make_engine(tmp_path / "usage.db")
+    init_db(engine)
+
+    def window() -> SqlMinuteWindow:
+        return SqlMinuteWindow(make_session_factory(engine), "gemini")
+
+    clock = FakeClock()  # both "processes" read the same wall clock
+    smoke_test, _ = _limiter(rpm=2, tpm=1000, clock=clock, window=window())
+    first = smoke_test.acquire(MODEL, 100)
+    smoke_test.settle(first, input_tokens=700, output_tokens=50)
+    clock.now += 5
+    smoke_test.acquire(MODEL, 100)
+    assert clock.sleeps == []
+
+    run, _ = _limiter(rpm=2, tpm=1000, clock=clock, window=window())
+    run.acquire(MODEL, 100)  # 2 requests in the last minute: wait for the t=0 one to expire
+    assert clock.sleeps == [pytest.approx(56.0)]
+    # Input tokens are shared too: 100 + 100 in the window now, so 900 more must wait.
+    run.acquire(MODEL, 900)
+    assert len(clock.sleeps) == 2
+    other_provider = SqlMinuteWindow(make_session_factory(engine), "anthropic")
+    assert other_provider.ahead(MODEL, 10**9, clock.now - 60)[0] == 0
+
+
+def test_losing_reservation_is_released_while_waiting(tmp_path: Path) -> None:
+    engine = make_engine(tmp_path / "usage.db")
+    init_db(engine)
+    window = SqlMinuteWindow(make_session_factory(engine), "gemini")
+    limiter, clock = _limiter(rpm=1, window=window)
+    limiter.acquire(MODEL, 10)
+    limiter.acquire(MODEL, 10)  # waits once; its first reservation must not linger
+    assert len(clock.sleeps) == 1
+    assert window.ahead(MODEL, 10**9, clock.now - 3600) == (2, 20.0, pytest.approx(1000.0))
 
 
 def test_estimate_is_conservative() -> None:

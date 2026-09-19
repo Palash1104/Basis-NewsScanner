@@ -100,6 +100,8 @@ validation, which hadn't happened in 24 live calls), about 450 input tokens each
 **Limits** (per Google Cloud project, from AI Studio): 15 requests/min, 250,000 input
 tokens/min, 500 requests/day.
 - New work stops at **350 requests a day**. The other 150 are kept for retries.
+- The per-minute limits count every call made through this app's database, including other
+  processes (a smoke test, a manual run while the scheduler is running).
 - The daily quota resets at **midnight Pacific time**: 12:30 IST during US daylight time, and
   13:30 IST otherwise. It does not reset at midnight IST.
 - `newsdesk run` prints the day's usage and the next reset, e.g.
@@ -130,7 +132,9 @@ used to improve Google's products. On Anthropic, `claude-haiku-4-5` costs a few 
 ## Known limitations
 
 - **Grouping uses local embeddings** (`all-MiniLM-L6-v2`, cosine similarity to each story's
-  centroid, threshold 0.55).
+  centroid, threshold 0.55). An article must also resemble the story's first article (seed
+  check, 0.45), so a story can't drift into a loose topic. The cost: a story whose first
+  article is unusual can split. The Tata Sons chairman dispute split into three this way.
   - The model downloads once, about 90 MB, and after that runs offline.
   - Importing it adds roughly 40 seconds to a cold start on Windows.
   - Broad topics can still merge loosely related articles; a live run joined an NSE IPO story
@@ -138,6 +142,8 @@ used to improve Google's products. On Anthropic, `claude-haiku-4-5` costs a few 
   - Scores between 0.45 and 0.65 are logged to `data/logs/grouping_borderline.jsonl` for
     retuning.
   - If the model can't load, the run falls back to title matching and records an error.
+- **A live blog can attach to the wrong story** (seen: an Iran war live blog on the Russia
+  sanctions bill story). It doesn't affect summaries, sources or ranking.
 - **Explainers, roundups and live blogs** are detected by headline patterns. They can attach to
   a story but never start one or count as a source. Each run prints every flagged headline, so
   misfires are visible.
