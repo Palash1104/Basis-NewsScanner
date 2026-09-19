@@ -151,8 +151,10 @@ def count_independent_sources(articles: Sequence[ArticleLike], similarity: float
 
     Near-identical uses token_sort_ratio (same words, any order), not token_set_ratio,
     which would also match a short headline contained in a longer, different one.
+    Non-news articles (explainers, roundups) never count as a source.
     """
-    items = sorted(articles, key=lambda item: item.published_at)
+    news = [item for item in articles if not getattr(item, "non_news", False)]
+    items = sorted(news, key=lambda item: item.published_at)
     sources = [normalize_source(item.source_name) for item in items]
     titles = [normalize_title(item.title) for item in items]
 

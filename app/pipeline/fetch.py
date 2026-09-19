@@ -18,6 +18,7 @@ import httpx
 from app.config import FeedConfig, Region, Settings
 from app.models import utcnow
 from app.net import Sleep, make_client, request_with_retries
+from app.pipeline.classify import is_non_news
 from app.pipeline.dedupe import normalize_source, normalize_url
 
 log = logging.getLogger(__name__)
@@ -66,6 +67,7 @@ class FetchedArticle:
     published_at: datetime
     fetched_at: datetime
     feed_url: str  # which feed produced it; not stored
+    non_news: bool = False  # explainer or roundup headline (app.pipeline.classify)
 
 
 @dataclass
@@ -228,6 +230,7 @@ def parse_feed(
                 published_at=_entry_published(entry, fetched_at),
                 fetched_at=fetched_at,
                 feed_url=feed.url,
+                non_news=is_non_news(title),
             )
         )
     return articles

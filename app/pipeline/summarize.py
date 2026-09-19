@@ -25,6 +25,9 @@ log = logging.getLogger(__name__)
 # Gemini counts thinking tokens against the output cap, so leave room beyond the JSON itself.
 SUMMARY_MAX_TOKENS = 2048
 MIN_NEW_ARTICLES = 2
+# Set by regrouping when a summarized story's article set changed: its summary may be wrong, so
+# it's kept out of digests until it gains a new article and is summarized again.
+STALE_STATUS = "needs_resummary"
 
 
 @dataclass
@@ -40,6 +43,12 @@ class SummarizeResult:
     skipped_quota: list[int] = field(default_factory=list)
 
 
+def news_articles(story: Story) -> list[Article]:
+    """The story's news articles: explainers and roundups aren't summarized or counted."""
+    articles = list(story.articles)
+    return [article for article in articles if not article.non_news] or articles
+
+
 def source_regions(articles: Sequence[Article]) -> list[str]:
     return sorted({article.source_region for article in articles})
 
@@ -49,6 +58,8 @@ def resummarize_reason(story: Story, articles: Sequence[Article]) -> str | None:
     if story.status == "new":
         return "new story"
     added = len(articles) - story.processed_article_count
+    if story.status == STALE_STATUS:
+        return f"stale after regrouping, {added} new article(s)" if added > 0 else None
     if added >= MIN_NEW_ARTICLES:
         return f"{added} new articles"
     new_regions = set(source_regions(articles)) - set(story.processed_source_regions or [])
@@ -96,7 +107,7 @@ def summarize_stories(
     result = SummarizeResult()
     model = settings.llm.summary_model
     for index, story in enumerate(stories):
-        articles = list(story.articles)
+        articles = news_articles(story)
         reason = resummarize_reason(story, articles)
         if reason is None:
             result.skipped_unchanged += 1
@@ -120,7 +131,7 @@ def summarize_stories(
         except (LLMQuotaError, LLMConfigError) as exc:
             result.stopped = str(exc)
             for waiting in stories[index:]:
-                if resummarize_reason(waiting, list(waiting.articles)) is not None:
+                if resummarize_reason(waiting, news_articles(waiting)) is not None:
                     waiting.summary_pending = True
                     result.skipped_quota.append(waiting.id)
             session.commit()

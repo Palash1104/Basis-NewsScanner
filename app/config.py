@@ -18,6 +18,7 @@ Region = Literal["US", "IN", "GLOBAL"]
 REGIONS: tuple[Region, ...] = ("US", "IN", "GLOBAL")
 
 GroupingScorer = Literal["title_token_set", "title_token_sort", "title_snippet_blend"]
+GroupingMethod = Literal["embedding", "title"]
 
 
 class _Strict(BaseModel):
@@ -111,6 +112,14 @@ class DedupeSettings(_Strict):
 
 
 class GroupingSettings(_Strict):
+    # "embedding" (default): cosine similarity of an article to each story's centroid.
+    # "title": the rapidfuzz title matcher, also the automatic fallback if the model can't load.
+    method: GroupingMethod = "embedding"
+    embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
+    embedding_threshold: float = Field(default=0.55, gt=0, lt=1)
+    # Embedding matches scoring in this range are logged for later retuning.
+    borderline_log_range: tuple[float, float] = (0.45, 0.65)
+    # Title matcher settings (fallback).
     scorer: GroupingScorer
     threshold: float = Field(ge=0, le=100)
 

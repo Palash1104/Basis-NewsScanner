@@ -87,3 +87,10 @@ def test_rank_stories_scores_recent_stories_and_returns_top_n(
     assert big.source_count == 3 and big.region_diversity == 3
     assert small.importance_score > 0
     assert old.importance_score == 0  # nothing inside the lookback window
+
+
+def test_non_news_articles_add_nothing_to_importance(settings: Settings) -> None:
+    news = [_article("Storm makes landfall on east coast", "Wire A", "US", 2, 1)]
+    explainer = _article("What is a cyclone? Explained", "Paper B", "IN", 3, 0.5)
+    explainer.non_news = True
+    assert score_articles([*news, explainer], settings, NOW) == score_articles(news, settings, NOW)

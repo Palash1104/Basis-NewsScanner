@@ -50,6 +50,22 @@ dedupe:
   syndication_title_similarity: 90
 
 grouping:
+  # Embedding grouping (moved up from Phase 5): each new article joins the story whose centroid
+  # (mean embedding of its news articles) is most similar, if the cosine similarity is at least
+  # embedding_threshold; otherwise it starts a story. Runs locally, no API calls.
+  method: embedding
+  embedding_model: sentence-transformers/all-MiniLM-L6-v2
+  # Approved 2026-09-19. Tuned with scripts/embedding_report.py on 2,337 real articles
+  # (Sept 16, 17 and 19): 0.55 is the only value that passes all four regression cases
+  # (tests/fixtures/grouping_regressions.json) with the fewest topic blobs. 0.60+ splits the
+  # House vote from India's reaction; 0.50 merges more unrelated same-topic articles.
+  # Known weak spot: some same-topic, different-event merges just above 0.55 (market movers,
+  # "India trade").
+  embedding_threshold: 0.55
+  # Every article whose best story match scores in this range is appended to
+  # data/logs/grouping_borderline.jsonl (titles, score, decision) for later retuning.
+  borderline_log_range: [0.45, 0.65]
+  # Title matcher: used only if the embedding model can't load.
   # Approved 2026-09-17 after reviewing sample groupings. Compared on a 24h sample of 786
   # articles with scripts/grouping_report.py: merges scoring ~62 were about half wrong; at 64,
   # 10 of 12 borderline merges were the same story and 2 were loose topic matches. Near misses

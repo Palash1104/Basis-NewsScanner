@@ -1,14 +1,24 @@
-"""Group articles into stories by text similarity (Phase 1: rapidfuzz).
+"""Group articles into stories (SPEC 7.3).
 
 Grouping is incremental: each article, oldest first, joins the most similar story whose latest
 article is within the attach window, if the similarity clears the threshold; otherwise it
 starts a new story.
+
+Two matchers:
+- `EmbeddingGrouper` (default): cosine similarity between the article's embedding (headline +
+  snippet, all-MiniLM-L6-v2) and each story's centroid, the normalized mean of its news
+  articles' embeddings.
+- `Grouper`: rapidfuzz title similarity. Only used if the embedding model can't load.
+
+Non-news articles (explainers, roundups; see classify.py) may attach to an existing story but
+never start one and never move a centroid.
 """
 
 from collections.abc import Callable, Hashable, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
+import numpy as np
 from rapidfuzz import fuzz, process
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -16,6 +26,7 @@ from sqlalchemy.orm import Session
 from app.config import GroupingScorer, Settings
 from app.models import Article, Story
 from app.pipeline.dedupe import normalize_title
+from app.pipeline.embed import Embedder, article_text
 
 STOPWORDS = frozenset(
     """
@@ -121,35 +132,209 @@ class Grouper[K: Hashable]:
         self._group_last[key] = published_at if last is None else max(last, published_at)
 
 
+class EmbeddingGrouper[K: Hashable]:
+    """In-memory incremental grouper over embeddings. Keys identify groups (e.g. Story objects).
+
+    Each group keeps the sum of its members' (normalized) vectors; its centroid is that sum
+    normalized, so cosine similarity to the centroid is a dot product.
+    """
+
+    def __init__(self, threshold: float, window: timedelta) -> None:
+        self.threshold = threshold
+        self.window = window
+        self._keys: list[K] = []
+        self._index: dict[K, int] = {}
+        self._refs: list[object] = []
+        self._sums = np.zeros((0, 0), dtype=np.float32)
+        self._centroids = np.zeros((0, 0), dtype=np.float32)
+        self._last = np.zeros(0, dtype=np.float64)
+
+    def __len__(self) -> int:
+        return len(self._keys)
+
+    def match(self, vector: np.ndarray, published_at: datetime) -> Match[K]:
+        count = len(self._keys)
+        if count == 0:
+            return Match(None, None, None)
+        eligible = self._last[:count] >= (published_at - self.window).timestamp()
+        if not eligible.any():
+            return Match(None, None, None)
+        scores = np.where(eligible, self._centroids[:count] @ vector, -np.inf)
+        best = int(np.argmax(scores))
+        score = float(scores[best])
+        key = self._keys[best] if score >= self.threshold else None
+        return Match(key, score, self._refs[best])
+
+    def add(self, key: K, vector: np.ndarray, published_at: datetime, ref: object = None) -> None:
+        """Add a news article to group `key` (creating the group if needed)."""
+        index = self._index.get(key)
+        if index is None:
+            index = self._grow(key, vector.shape[0], ref)
+        self._sums[index] += vector
+        norm = float(np.linalg.norm(self._sums[index]))
+        self._centroids[index] = self._sums[index] / norm if norm else self._sums[index]
+        self._last[index] = max(self._last[index], published_at.timestamp())
+
+    def _grow(self, key: K, dimension: int, ref: object) -> int:
+        index = len(self._keys)
+        if index >= self._sums.shape[0]:
+            capacity = max(64, index * 2)
+            sums = np.zeros((capacity, dimension), dtype=np.float32)
+            centroids = np.zeros((capacity, dimension), dtype=np.float32)
+            last = np.full(capacity, -np.inf, dtype=np.float64)
+            if index:
+                sums[:index] = self._sums[:index]
+                centroids[:index] = self._centroids[:index]
+                last[:index] = self._last[:index]
+            self._sums, self._centroids, self._last = sums, centroids, last
+        self._keys.append(key)
+        self._index[key] = index
+        self._refs.append(ref)
+        return index
+
+
+@dataclass(frozen=True)
+class Decision:
+    """How one article was placed by `group_embeddings` (for reports and tests)."""
+
+    index: int  # position in the input
+    group: int | None  # group joined or started; None for a non-news article left ungrouped
+    created: bool
+    best_group: int | None  # most similar eligible group before placement
+    best_score: float | None
+
+
+def group_embeddings(
+    published: Sequence[datetime],
+    vectors: np.ndarray,
+    non_news: Sequence[bool],
+    threshold: float,
+    window: timedelta,
+) -> list[Decision]:
+    """Group items from scratch, oldest first, exactly as the pipeline does. Group ids are ints;
+    a group's first member is its representative. Returns one Decision per item, in input order.
+    """
+    grouper: EmbeddingGrouper[int] = EmbeddingGrouper(threshold, window)
+    decisions: dict[int, Decision] = {}
+    next_group = 0
+    for index in sorted(range(len(published)), key=lambda i: published[i]):
+        match = grouper.match(vectors[index], published[index])
+        best_group = match.best_ref if isinstance(match.best_ref, int) else None
+        if non_news[index]:
+            decisions[index] = Decision(index, match.key, False, best_group, match.best_score)
+            continue
+        if match.key is None:
+            group, created = next_group, True
+            next_group += 1
+        else:
+            group, created = match.key, False
+        grouper.add(group, vectors[index], published[index], ref=group)
+        decisions[index] = Decision(index, group, created, best_group, match.best_score)
+    return [decisions[index] for index in range(len(published))]
+
+
+@dataclass(frozen=True)
+class Placement:
+    """Where one new article went, and how close the nearest story was."""
+
+    article: Article
+    story: Story | None  # the story it joined or started; None if left out
+    best_story: Story | None  # most similar eligible story before placement
+    score: float | None  # similarity to best_story (cosine, or 0-100 for the title matcher)
+    decision: str  # "joined" | "new story" | "non-news attached" | "non-news left out"
+
+
 @dataclass(frozen=True)
 class GroupingResult:
     attached: int
     created: int
+    non_news_attached: int = 0
+    non_news_ungrouped: int = 0
+    method: str = "title"
+    placements: tuple[Placement, ...] = ()
 
 
 def assign_to_stories(
-    session: Session, articles: Sequence[Article], settings: Settings, now: datetime
+    session: Session,
+    articles: Sequence[Article],
+    settings: Settings,
+    now: datetime,
+    embedder: Embedder | None = None,
 ) -> GroupingResult:
-    """Attach unassigned `articles` to recent stories or create new stories for them."""
+    """Attach unassigned `articles` to recent stories or create new stories for them.
+
+    Uses embeddings when `settings.grouping.method` is "embedding" and an embedder is given;
+    otherwise the title matcher.
+    """
+    use_embeddings = settings.grouping.method == "embedding" and embedder is not None
+    method = "embedding" if use_embeddings else "title"
     if not articles:
-        return GroupingResult(0, 0)
+        return GroupingResult(0, 0, method=method)
     window = timedelta(hours=settings.pipeline.story_attach_window_hours)
     earliest = min(article.published_at for article in articles)
     new_ids = {article.id for article in articles if article.id is not None}
-    existing = session.scalars(
-        select(Article)
-        .where(Article.story_id.is_not(None), Article.published_at >= earliest - window)
-        .order_by(Article.published_at)
-    ).all()
+    existing = [
+        article
+        for article in session.scalars(
+            select(Article)
+            .where(Article.story_id.is_not(None), Article.published_at >= earliest - window)
+            .order_by(Article.published_at)
+        )
+        if article.id not in new_ids and article.story is not None and not article.non_news
+    ]
+    ordered = sorted(articles, key=lambda item: item.published_at)
 
-    grouper: Grouper[Story] = Grouper(settings.grouping.scorer, settings.grouping.threshold, window)
-    for article in existing:
-        if article.id not in new_ids and article.story is not None:
-            grouper.add(article.story, article.title, article.snippet, article.published_at)
+    match: Callable[[int, Article], Match[Story]]
+    add: Callable[[Story, int, Article], None]
+    if use_embeddings:
+        assert embedder is not None
+        vectors = embedder.embed(
+            [article_text(item.title, item.snippet) for item in [*existing, *ordered]]
+        )
+        grouper: EmbeddingGrouper[Story] = EmbeddingGrouper(
+            settings.grouping.embedding_threshold, window
+        )
+        for item, vector in zip(existing, vectors, strict=False):
+            grouper.add(item.story, vector, item.published_at, ref=item.story)  # type: ignore[arg-type]
+        new_vectors = vectors[len(existing) :]
 
-    attached = created = 0
-    for article in sorted(articles, key=lambda item: item.published_at):
-        story = grouper.match(article.title, article.snippet, article.published_at).key
+        def match(index: int, item: Article) -> Match[Story]:
+            return grouper.match(new_vectors[index], item.published_at)
+
+        def add(story: Story, index: int, item: Article) -> None:
+            grouper.add(story, new_vectors[index], item.published_at, ref=story)
+    else:
+        title_grouper: Grouper[Story] = Grouper(
+            settings.grouping.scorer, settings.grouping.threshold, window
+        )
+        for item in existing:
+            title_grouper.add(  # type: ignore[arg-type]
+                item.story, item.title, item.snippet, item.published_at, ref=item.story
+            )
+
+        def match(index: int, item: Article) -> Match[Story]:
+            return title_grouper.match(item.title, item.snippet, item.published_at)
+
+        def add(story: Story, index: int, item: Article) -> None:
+            title_grouper.add(story, item.title, item.snippet, item.published_at, ref=story)
+
+    attached = created = non_news_attached = non_news_ungrouped = 0
+    placements: list[Placement] = []
+    for index, article in enumerate(ordered):
+        found = match(index, article)
+        story = found.key
+        best = found.best_ref if isinstance(found.best_ref, Story) else None
+        if article.non_news:
+            article.story = story
+            if story is None:
+                non_news_ungrouped += 1
+                decision = "non-news left out"
+            else:
+                non_news_attached += 1
+                decision = "non-news attached"
+            placements.append(Placement(article, story, best, found.best_score, decision))
+            continue
+        decision = "joined" if story is not None else "new story"
         if story is None:
             story = Story(
                 first_seen_at=article.published_at,
@@ -163,5 +348,8 @@ def assign_to_stories(
             story.first_seen_at = min(story.first_seen_at, article.published_at)
             attached += 1
         article.story = story
-        grouper.add(story, article.title, article.snippet, article.published_at)
-    return GroupingResult(attached=attached, created=created)
+        add(story, index, article)
+        placements.append(Placement(article, story, best, found.best_score, decision))
+    return GroupingResult(
+        attached, created, non_news_attached, non_news_ungrouped, method, tuple(placements)
+    )

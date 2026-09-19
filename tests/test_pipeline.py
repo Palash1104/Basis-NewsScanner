@@ -16,9 +16,9 @@ from app.db import init_db, make_engine, make_session_factory
 from app.delivery.telegram import TelegramError
 from app.llm.client import LLMClient
 from app.llm.ratelimit import MemoryDailyUsageStore, RateLimiter
-from app.models import Run, Story
+from app.models import Article, Run, Story
 from tests.conftest import NOW, make_feed
-from tests.fakes import FakeProvider, echo_summary_responder, rss
+from tests.fakes import FakeEmbedder, FakeProvider, echo_summary_responder, rss
 
 US_FEED = make_feed(name="Paper US", url="https://us.example.com/rss", region="US", weight=2)
 IN_FEED = make_feed(name="Paper IN", url="https://in.example.com/rss", region="IN", weight=3)
@@ -247,3 +247,75 @@ def test_quota_runs_out_mid_run_and_next_run_catches_up(
     with db() as session:
         assert session.scalars(select(Story).where(Story.summary_pending.is_(True))).all() == []
         assert len(session.scalars(select(Story).where(Story.status == "summarized")).all()) == 3
+
+
+def _summarized_story(session: Session, headline: str, regions: list[str], status: str) -> Story:
+    story = Story(
+        first_seen_at=NOW,
+        updated_at=NOW,
+        headline=headline,
+        summary="One. Two.",
+        category="Other",
+        regions=regions,
+        status=status,
+    )
+    story.articles = [
+        Article(
+            url=f"https://example.com/{headline.replace(' ', '-')}",
+            source_name="BBC",
+            source_region="GLOBAL",
+            source_weight=3,
+            title=headline,
+            snippet="",
+            published_at=NOW,
+            fetched_at=NOW,
+        )
+    ]
+    session.add(story)
+    return story
+
+
+def test_digest_keeps_empty_region_stories_and_drops_stale_ones(
+    db: sessionmaker[Session], settings: Settings
+) -> None:
+    with db() as session:
+        _summarized_story(session, "Fiji declares national HIV crisis", [], "summarized")
+        _summarized_story(session, "Regrouped story with an old summary", ["US"], "needs_resummary")
+        session.commit()
+
+    report = run_digest(db, settings, send=False, now=NOW + timedelta(minutes=1))
+    text = "\n".join(report.messages)
+    assert report.stories == 1
+    assert (
+        "<b>Fiji declares national HIV crisis</b>\n<i>Other</i>" in text
+    )  # no region, still shown
+    assert "Regrouped story" not in text
+
+
+def test_run_logs_borderline_matches_and_non_news(
+    db: sessionmaker[Session], settings: Settings, tmp_path: Path
+) -> None:
+    settings.paths.log_dir = str(tmp_path / "logs")
+    settings.grouping.embedding_threshold = 0.4
+    settings.grouping.borderline_log_range = (0.0, 1.0)
+    server = FeedServer()
+    server.items["in.example.com"].append(
+        (
+            "What is an EU associate member? Explained",
+            "https://in.example.com/x",
+            NOW - timedelta(minutes=30),
+            "Background.",
+        )
+    )
+    llm, _ = _llm(settings)
+    report = run_pipeline(
+        db, settings, FEEDS, llm, now=NOW, transport=server.transport, embedder=FakeEmbedder()
+    )
+
+    assert report.grouping_method == "embedding"
+    assert [e["title"] for e in report.non_news] == ["What is an EU associate member? Explained"]
+    assert report.non_news[0]["reason"] == "explainer (explained)"
+    lines = (tmp_path / "logs" / "grouping_borderline.jsonl").read_text("utf-8").splitlines()
+    assert len(lines) == report.borderline_logged > 0
+    row = json.loads(lines[0])
+    assert {"score", "decision", "article", "nearest_story", "threshold"} <= set(row)

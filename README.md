@@ -50,7 +50,9 @@ but skips summaries and records why. The digest only includes summarized stories
 | `uv run newsdesk digest --send` | Send that digest to Telegram. |
 | `uv run newsdesk scheduler` | Keep running: a pipeline pass every `schedule.pipeline_every_hours` (hourly), and a digest at each `delivery.digest_times` (07:30 and 19:30 IST). Stop with Ctrl+C; restart it after editing `settings.yaml`. |
 | `uv run python scripts/verify_feeds.py [--include-disabled]` | Check every feed responds and has recent entries. |
-| `uv run python scripts/grouping_report.py --refresh` | Compare grouping thresholds on a fresh sample (writes `data/grouping_report.md`). |
+| `uv run python scripts/embedding_report.py [--refresh]` | Compare embedding grouping thresholds on real samples and the regression fixtures (writes `data/embedding_report.md`). |
+| `uv run python scripts/regroup.py [--dry-run]` | Regroup every stored article with embeddings (no LLM calls). Changed stories that had a summary become `needs_resummary`. |
+| `uv run python scripts/grouping_report.py --refresh` | The old title-matcher threshold report (the title matcher is now only a fallback). |
 | `uv run pytest -q` | Run the tests (network and LLM calls are mocked). |
 
 Logs go to the console and `data/logs/newsdesk.log`. The SQLite database is
@@ -77,7 +79,7 @@ the project folder as the start directory.
 ## Configuration
 
 - `config/settings.yaml`: LLM provider and models, rate limits, lookback window, grouping
-  threshold, ranking weights, digest size and times.
+  method and threshold, ranking weights, digest size and times.
 
 ### LLM provider
 
@@ -127,11 +129,18 @@ used to improve Google's products. On Anthropic, `claude-haiku-4-5` costs a few 
 
 ## Known limitations
 
-- **Grouping is title-based** (fuzzy word overlap), so short headlines can join the wrong story
-  or one event can split in two. Seen in live runs: "Two arrested on charges of rape" grouped
-  with an unrelated ICE arrest story, and US House passage of a Russia sanctions bill and
-  India's reaction to it became separate stories. Embedding-based grouping is planned for
-  Phase 5.
+- **Grouping uses local embeddings** (`all-MiniLM-L6-v2`, cosine similarity to each story's
+  centroid, threshold 0.55).
+  - The model downloads once, about 90 MB, and after that runs offline.
+  - Importing it adds roughly 40 seconds to a cold start on Windows.
+  - Broad topics can still merge loosely related articles; a live run joined an NSE IPO story
+    with other Indian IPO news.
+  - Scores between 0.45 and 0.65 are logged to `data/logs/grouping_borderline.jsonl` for
+    retuning.
+  - If the model can't load, the run falls back to title matching and records an error.
+- **Explainers, roundups and live blogs** are detected by headline patterns. They can attach to
+  a story but never start one or count as a source. Each run prints every flagged headline, so
+  misfires are visible.
 - **Google News links** are Google redirect URLs, labelled with the real outlet's name.
 - **The digest holds at most 15 stories** (`delivery.max_stories_per_digest`). Summarized
   stories that don't make the cut aren't carried into the next digest unless they're

@@ -13,6 +13,15 @@ between phases.
 - Digest: 15 stories in 4 Telegram messages, sent without errors.
 - Grouping threshold 64 approved by the user.
 
+**Phase 1 fixes (2026-09-19):** embedding grouping, non-news flagging, region tagging.
+- 189 tests pass, including the real-model grouping regressions.
+- All 717 stored articles regrouped: 595 stories became 440. 15 summarized stories became
+  `needs_resummary`; 5 were unchanged.
+- Run 8: 26/26 feeds, 20 calls, 11,452 input / 2,279 output tokens, 11 non-news headlines,
+  109 borderline pairs logged.
+- Fiji check (smoke test): regions `[]`.
+- Digest dry run: 15 stories.
+
 Phase 2 has not started; wait for the user.
 
 Since then (2026-09-17):
@@ -27,11 +36,12 @@ Open follow-ups (not Phase 1 criteria):
 - When Phase 2 adds event extraction (about 2× summary-model calls), revisit
   `schedule.pipeline_every_hours`. Hourly is estimated at 314/day typical and 528 busy, over
   the 350 budget; every 2 hours at 257 / 384; every 3 hours at 219 / 304.
-- Title matching mis-groups short headlines. "Two arrested on charges of rape" joined an ICE
-  arrest story (score 78), "What are all the sanctions Iran is under?" joined the Russia
-  sanctions bill story (78.3), and that bill story also split in two. A threshold change won't
-  fix this; Phase 5 embeddings are meant to.
-- `DEISGN.md` (the user's misspelled design-import notes) is untracked, left as the user's call.
+- Embedding grouping at 0.55 still forms some topic blobs. Examples: market movers, "India
+  IPOs" (NSE IPO + Hero Motors + Tata Sons), and "US troop deaths + Iran war-crimes report".
+  Retune from `data/logs/grouping_borderline.jsonl` once it has a few days of data. 0.60 fails
+  regression case (a); 0.45 fails (d).
+- The RPM limiter is per process. Calls made by another process (e.g. the smoke test) just
+  before a run aren't counted, so a 429 can occur. It's retried after the limiter waits.
 
 ## Commands
 
@@ -44,6 +54,8 @@ uv run pytest -q                               # tests (network and LLM always m
 uv run python scripts/smoke_test.py [--send-test-message]   # live: feeds, 1 LLM call, Telegram
 uv run ruff check . && uv run ruff format .    # lint + format
 uv run python scripts/verify_feeds.py [--include-disabled] [--file other.yaml]
+uv run python scripts/embedding_report.py [--refresh] [--candidate 0.55]   # embedding threshold tuning
+uv run python scripts/regroup.py [--dry-run]    # regroup all stored articles, no LLM calls
 uv run python scripts/grouping_report.py [--refresh --lookback-hours 24] [--detail title_token_set:64]
 ```
 
@@ -55,7 +67,11 @@ uv run python scripts/grouping_report.py [--refresh --lookback-hours 24] [--deta
 - `app/net.py` shared HTTP retry/backoff (feeds, Telegram)
 - `app/pipeline/fetch.py` concurrent fetch + parse; `SourceResolver` maps Google News outlet names
 - `app/pipeline/dedupe.py` URL/title/source normalization, dedupe, independent-source count
-- `app/pipeline/cluster.py` incremental `Grouper` + `assign_to_stories`
+- `app/pipeline/cluster.py` `EmbeddingGrouper` (centroids), title `Grouper` (fallback),
+  `group_embeddings` (pure), `assign_to_stories` (returns per-article `Placement`s)
+- `app/pipeline/embed.py` `Embedder` protocol, `SentenceTransformerEmbedder`, `load_embedder`
+- `app/pipeline/classify.py` non-news headline patterns (explainer, roundup, live blog)
+- `app/pipeline/regroup.py` one-off regroup of stored articles (`scripts/regroup.py`)
 - `app/pipeline/rank.py` importance score (SPEC 7.4) · `app/pipeline/summarize.py` when to
   (re)summarize, article selection, story updates
 - `app/llm/client.py` `LLMClient` (the only thing the pipeline calls: rate limiting, transient
@@ -167,6 +183,28 @@ uv run python scripts/grouping_report.py [--refresh --lookback-hours 24] [--deta
 - Digest window: stories summarized since the start of the last digest sent without errors
   (or the lookback window if none). `--dry-run` records nothing; a failed send is recorded with
   errors and doesn't move the window.
-- Grouping scorer/threshold chosen from `scripts/grouping_report.py` on real data (see comment in
-  settings.yaml). Title-only fuzzy matching both over- and under-merges near the threshold;
-  Phase 5 replaces it with embeddings.
+- Grouping (SPEC 7.3):
+  - Local `all-MiniLM-L6-v2` embeddings of title + snippet.
+  - Cosine similarity to each story's centroid (the normalized sum of its news articles'
+    vectors), threshold 0.55. Chosen with `scripts/embedding_report.py`; the regression cases
+    are in `tests/fixtures/grouping_regressions.json`.
+  - The title matcher (`token_set_ratio` 64) is only used if the model fails to load.
+  - The model loads with `local_files_only=True` first, so there are no Hub calls after the
+    first download. Cold import takes about 40s on Windows.
+  - Tests use `tests/fakes.py` `FakeEmbedder`. `test_grouping_regressions.py` uses the real
+    model and skips if it's unavailable.
+- Non-news articles (`articles.non_news`, an extra column):
+  - They attach to a story if they match, never start one, and never move the centroid.
+  - They are excluded from source counts, ranking, summary input and digest source links.
+  - Every one is listed in `newsdesk run` output.
+  - Removed as too broad: "live coverage", "timeline", "what you need to know".
+- Borderline placements (score within `grouping.borderline_log_range`) are appended to
+  `{log_dir}/grouping_borderline.jsonl`.
+- `needs_resummary` (set only by `regroup.py`) is a story status excluded from digests, since
+  the digest selects `summarized`. The story is summarized again once it has more news
+  articles than `processed_article_count`.
+- Regions (`summary-v3`):
+  - The prompt no longer shows the outlet's region.
+  - The model tags US/India/Global only by where the event happens or who it involves.
+  - An empty list is valid, and the digest meta line then shows only the category.
+- `DESIGN.md` is the user's design-import notes (renamed from the misspelled `DEISGN.md`).

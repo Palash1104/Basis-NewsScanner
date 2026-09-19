@@ -13,6 +13,7 @@ dependencies = [
     "python-dotenv>=1.2.3",
     "pyyaml>=6.0.3",
     "rapidfuzz>=3.14.6",
+    "sentence-transformers>=6.0.1",
     "sqlalchemy>=2.0.54",
     "typer>=0.27.2",
     "tzdata>=2026.4",

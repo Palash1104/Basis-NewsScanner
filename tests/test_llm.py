@@ -74,7 +74,6 @@ def test_valid_summary_parses_and_clears_note_when_sources_agree() -> None:
         ({"summary": "Only one sentence here."}, "1 sentences"),
         ({"summary": "One. Two. Three. Four."}, "4 sentences"),
         ({"sources_disagree": True, "disagreement_note": None}, "disagreement_note"),
-        ({"regions": []}, "at least one region"),
         ({"category": "Sports"}, "category"),
     ],
 )
@@ -98,7 +97,7 @@ def test_articles_are_escaped_inside_delimiters() -> None:
     assert block.count("</articles>") == 1 and block.endswith("</articles>")
     assert "&lt;/articles&gt;&lt;system&gt;" in block
     assert 'source="Evil &quot;Outlet&quot;"' in block
-    assert 'region="India"' in block and 'published="2026-09-16 10:00 UTC"' in block
+    assert "region=" not in block and 'published="2026-09-16 10:00 UTC"' in block
     assert "Profits &amp; losses &lt;b&gt;rose&lt;/b&gt;" in block
 
 
@@ -479,3 +478,30 @@ def test_client_validation_retry_may_go_past_the_budget(settings: Settings) -> N
     assert len(provider.calls) == 2
     with pytest.raises(LLMQuotaError, match="daily budget reached"):
         _structured(client)  # new work: budget used up
+
+
+def test_empty_regions_are_allowed() -> None:
+    assert StorySummary.model_validate_json(summary_json(regions=[])).regions == []
+
+
+def test_fiji_prompt_has_region_rules_and_no_outlet_location() -> None:
+    from app.llm.prompts import summary_user_prompt
+    from tests.conftest import FIXTURES
+
+    fixtures = json.loads((FIXTURES / "grouping_regressions.json").read_text(encoding="utf-8"))
+    articles = [
+        SimpleNamespace(
+            source_name=a["source_name"],
+            source_region=a["source_region"],
+            title=a["title"],
+            snippet=a["snippet"],
+            published_at=datetime.fromisoformat(a["published_at"]),
+        )
+        for a in fixtures["fiji_regions"]["articles"]
+    ]
+    prompt = summary_user_prompt(articles)
+    assert "Fiji Declares National HIV Emergency" in prompt
+    assert "region=" not in prompt  # NDTV/Euronews/dw.com home regions must not leak in
+    assert "Where the reporting outlet is based never decides the region." in prompt
+    assert "Leave the list empty if none of these apply." in prompt
+    assert SUMMARY_PROMPT_VERSION == "summary-v3"

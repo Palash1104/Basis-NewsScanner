@@ -12,10 +12,13 @@ Usage:
 
 import argparse
 import asyncio
+import json
 import logging
 import sys
+from datetime import datetime
+from types import SimpleNamespace
 
-from app.config import get_secret, load_env, load_feeds, load_settings
+from app.config import ROOT_DIR, get_secret, load_env, load_feeds, load_settings
 from app.db import init_db, make_engine, make_session_factory
 from app.delivery.telegram import TelegramError, get_me, send_messages
 from app.llm.client import LLMConfigError, LLMError, make_llm_client
@@ -85,6 +88,39 @@ def main() -> int:
         except LLMError as exc:
             print(f"\nLLM failed: {exc}")
             outcomes["llm"] = "FAIL"
+
+    # 2b. Regions: the Fiji HIV story (real articles) must not be tagged US or India just
+    # because of where the outlets are based.
+    if llm is not None:
+        fixtures = json.loads(
+            (ROOT_DIR / "tests/fixtures/grouping_regressions.json").read_text(encoding="utf-8")
+        )
+        fiji = [
+            SimpleNamespace(
+                source_name=a["source_name"],
+                title=a["title"],
+                snippet=a["snippet"],
+                published_at=datetime.fromisoformat(a["published_at"]),
+            )
+            for a in fixtures["fiji_regions"]["articles"]
+        ]
+        try:
+            output = llm.structured(
+                model=settings.llm.summary_model,
+                system=SUMMARY_SYSTEM,
+                user=summary_user_prompt(fiji),
+                schema=StorySummary,
+                max_tokens=SUMMARY_MAX_TOKENS,
+                purpose="smoke test regions",
+            )
+            regions = output.value.regions
+            print(f"\nFiji HIV story: {output.value.headline}\n  regions: {regions}")
+            outcomes["regions"] = (
+                "OK" if not {"US", "India"} & set(regions) else f"FAIL (tagged {regions})"
+            )
+        except LLMError as exc:
+            print(f"\nRegions check failed: {exc}")
+            outcomes["regions"] = "FAIL"
 
     # 3. Telegram: getMe, and optionally one message.
     token = get_secret("TELEGRAM_BOT_TOKEN")

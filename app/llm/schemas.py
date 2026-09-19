@@ -47,7 +47,9 @@ class StorySummary(BaseModel):
     )
     category: Category
     regions: list[SummaryRegion] = Field(
-        description="Which of US, India, Global the story concerns (at least one)."
+        description="US or India only if the event happens there or directly involves that "
+        "country's government, economy, companies or people; Global only with clear "
+        "international consequences. Never based on where the outlet is. May be empty."
     )
     sources_disagree: bool = Field(description="True if the articles disagree on key facts.")
     disagreement_note: str | None = Field(
@@ -82,8 +84,7 @@ class StorySummary(BaseModel):
     @field_validator("regions")
     @classmethod
     def _regions(cls, value: list[str]) -> list[str]:
-        if not value:
-            raise ValueError("list at least one region")
+        # Empty is allowed: an event elsewhere without clear international consequences.
         return list(dict.fromkeys(value))  # de-duplicate, keep order
 
     @model_validator(mode="after")

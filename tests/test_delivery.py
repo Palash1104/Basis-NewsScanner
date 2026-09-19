@@ -177,3 +177,21 @@ def test_transport_failure_message_hides_token(settings: Settings) -> None:
     with pytest.raises(TelegramError) as info:
         asyncio.run(get_me(TOKEN, settings.http, httpx.MockTransport(handler), sleep=_no_sleep))
     assert TOKEN not in str(info.value) and "***" in str(info.value)
+
+
+def test_pick_sources_skips_non_news() -> None:
+    def article(source: str, non_news: bool) -> Article:
+        return Article(
+            url=f"https://example.com/{source}",
+            source_name=source,
+            source_region="US",
+            source_weight=3,
+            title="t",
+            snippet="",
+            published_at=NOW,
+            fetched_at=NOW,
+            non_news=non_news,
+        )
+
+    links = pick_sources([article("Explainer Weekly", True), article("BBC", False)])
+    assert [link.name for link in links] == ["BBC"]

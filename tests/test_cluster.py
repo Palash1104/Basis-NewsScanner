@@ -1,11 +1,19 @@
 from datetime import datetime, timedelta
 
+import numpy as np
 from sqlalchemy.orm import Session
 
 from app.config import Settings
 from app.models import Article, Story
-from app.pipeline.cluster import Grouper, assign_to_stories, make_text_key
+from app.pipeline.cluster import (
+    EmbeddingGrouper,
+    Grouper,
+    assign_to_stories,
+    group_embeddings,
+    make_text_key,
+)
 from tests.conftest import NOW
+from tests.fakes import FakeEmbedder
 
 WINDOW = timedelta(hours=36)
 
@@ -118,3 +126,71 @@ def test_assign_to_stories_ignores_stories_outside_window(
     result = assign_to_stories(session, [new], settings, NOW)
     assert result.created == 1
     assert new.story is not old.story
+
+
+def _unit(*values: float) -> np.ndarray:
+    vector = np.array(values, dtype=np.float32)
+    return vector / np.linalg.norm(vector)
+
+
+def test_embedding_grouper_matches_the_closest_centroid() -> None:
+    grouper: EmbeddingGrouper[str] = EmbeddingGrouper(0.8, WINDOW)
+    grouper.add("x", _unit(1, 0, 0), NOW)
+    grouper.add("y", _unit(0, 1, 0), NOW)
+    match = grouper.match(_unit(0.9, 0.1, 0), NOW)
+    assert match.key == "x" and match.best_score is not None and match.best_score > 0.99
+    assert grouper.match(_unit(0.6, 0.6, 0.5), NOW).key is None  # nothing close enough
+
+
+def test_centroid_moves_as_articles_join() -> None:
+    grouper: EmbeddingGrouper[str] = EmbeddingGrouper(0.9, WINDOW)
+    grouper.add("x", _unit(1, 0, 0), NOW)
+    assert grouper.match(_unit(1, 1, 0), NOW).key is None  # cos 0.71 to (1,0,0)
+    grouper.add("x", _unit(0, 1, 0), NOW)  # centroid now (1,1,0)/sqrt(2)
+    assert grouper.match(_unit(1, 1, 0), NOW).key == "x"
+
+
+def test_embedding_groups_outside_window_are_not_candidates() -> None:
+    grouper: EmbeddingGrouper[str] = EmbeddingGrouper(0.5, WINDOW)
+    grouper.add("x", _unit(1, 0), NOW - timedelta(hours=40))
+    assert grouper.match(_unit(1, 0), NOW).best_score is None
+
+
+def test_group_embeddings_non_news_never_starts_a_group() -> None:
+    published = [NOW, NOW + timedelta(minutes=1), NOW + timedelta(minutes=2)]
+    vectors = np.stack([_unit(1, 0), _unit(0, 1), _unit(0.95, 0.05)])
+    decisions = group_embeddings(published, vectors, [False, True, True], 0.8, WINDOW)
+    assert decisions[0].created
+    assert decisions[1].group is None  # non-news, nothing similar: left out
+    assert decisions[2].group == decisions[0].group and not decisions[2].created  # attaches
+
+
+def test_assign_with_embeddings(session: Session, settings: Settings) -> None:
+    settings.grouping.embedding_threshold = 0.4  # bag-of-words scores run lower than the model
+    articles = [
+        _article(EU_CANADA[0], NOW - timedelta(hours=3), "https://example.com/e1"),
+        _article(EU_CANADA[1], NOW - timedelta(hours=2), "https://example.com/e2"),
+        _article(GAZA, NOW - timedelta(hours=1), "https://example.com/g1"),
+        _article("What is an EU associate member for Canada?", NOW, "https://example.com/x1"),
+    ]
+    articles[3].non_news = True
+    session.add_all(articles)
+    session.flush()
+    embedder = FakeEmbedder()
+
+    result = assign_to_stories(session, articles, settings, NOW, embedder)
+
+    assert result.method == "embedding" and embedder.calls
+    assert (result.created, result.attached) == (2, 1)
+    assert articles[0].story is articles[1].story is not articles[2].story
+    assert result.non_news_attached + result.non_news_ungrouped == 1
+    assert session.query(Story).count() == 2  # the explainer started nothing
+
+
+def test_assign_falls_back_to_title_matcher_without_embedder(
+    session: Session, settings: Settings
+) -> None:
+    articles = [_article(EU_CANADA[0], NOW, "https://example.com/t1")]
+    session.add_all(articles)
+    session.flush()
+    assert assign_to_stories(session, articles, settings, NOW, None).method == "title"

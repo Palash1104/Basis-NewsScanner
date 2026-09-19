@@ -169,3 +169,38 @@ def test_quota_error_stops_remaining_stories(session: Session, settings: Setting
     again = summarize_stories(session, [first, second], _llm(settings, fake), settings, NOW)
     assert again.summarized == [first.id, second.id]
     assert not first.summary_pending and not second.summary_pending
+
+
+def test_non_news_articles_are_not_summarized_or_counted(
+    session: Session, settings: Settings
+) -> None:
+    news = [_article("A"), _article("B")]
+    explainer = _article("C")
+    explainer.title = "What is going on? Explained"
+    explainer.non_news = True
+    story = _story(session, [*news, explainer])
+    fake = FakeProvider(responses=[provider_response(summary_json())])
+
+    summarize_stories(session, [story], _llm(settings, fake), settings, NOW)
+
+    assert "Explained" not in fake.calls[0]["user"]
+    assert story.processed_article_count == 2
+
+
+def test_stale_story_is_summarized_only_after_gaining_an_article(
+    session: Session, settings: Settings
+) -> None:
+    story = _story(
+        session,
+        [_article("A"), _article("B")],
+        status="needs_resummary",
+        processed_article_count=2,
+        processed_source_regions=["US"],
+    )
+    assert resummarize_reason(story, story.articles) is None
+    story.articles.append(_article("C", hours_ago=0.5))
+    assert resummarize_reason(story, story.articles) == "stale after regrouping, 1 new article(s)"
+
+    fake = FakeProvider(responses=[provider_response(summary_json())])
+    result = summarize_stories(session, [story], _llm(settings, fake), settings, NOW)
+    assert result.summarized == [story.id] and story.status == "summarized"

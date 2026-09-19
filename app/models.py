@@ -77,6 +77,9 @@ class Article(Base):
     source_weight: Mapped[int] = mapped_column(Integer)
     title: Mapped[str] = mapped_column(Text)
     snippet: Mapped[str] = mapped_column(Text, default="")
+    # Not in SPEC section 6: explainer/roundup headline (app.pipeline.classify). Non-news
+    # articles never start a story or count as a source.
+    non_news: Mapped[bool] = mapped_column(default=False)
     published_at: Mapped[datetime] = mapped_column(UTCDateTime, index=True)
     fetched_at: Mapped[datetime] = mapped_column(UTCDateTime)
     story_id: Mapped[int | None] = mapped_column(ForeignKey("stories.id"), index=True)

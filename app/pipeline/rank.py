@@ -29,6 +29,8 @@ def score_articles(articles: Sequence[Article], settings: Settings, now: datetim
     + w_recency * 0.5 ** (hours since latest article / half-life)
     """
     weights = settings.ranking
+    # Explainers and roundups add nothing to a story's importance.
+    articles = [article for article in articles if not article.non_news] or list(articles)
     sources = count_independent_sources(articles, settings.dedupe.syndication_title_similarity)
     regions = len({article.source_region for article in articles})
     mean_weight = sum(article.source_weight for article in articles) / len(articles)

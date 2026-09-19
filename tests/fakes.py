@@ -10,6 +10,8 @@ from html import escape
 from types import SimpleNamespace
 from typing import Any
 
+import numpy as np
+
 from app.llm.client import ProviderResponse
 
 
@@ -134,3 +136,23 @@ def rss(items: list[tuple[str, str, datetime, str]]) -> bytes:
         f"<title>Test</title><link>https://example.com</link><description>t</description>"
         f"{entries}</channel></rss>"
     ).encode()
+
+
+class FakeEmbedder:
+    """Deterministic stand-in for the sentence-transformers model: a normalized bag of words
+    hashed into 256 dimensions, so cosine similarity tracks shared words."""
+
+    name = "fake-bag-of-words"
+
+    def __init__(self) -> None:
+        self.calls: list[list[str]] = []
+
+    def embed(self, texts: list[str]) -> np.ndarray:
+        self.calls.append(list(texts))
+        vectors = np.zeros((len(texts), 256), dtype=np.float32)
+        for row, text in enumerate(texts):
+            for word in re.findall(r"[a-z0-9]+", text.lower()):
+                if len(word) > 2:
+                    vectors[row, hash(word) % 256] += 1.0
+        norms = np.linalg.norm(vectors, axis=1, keepdims=True)
+        return vectors / np.where(norms == 0, 1, norms)

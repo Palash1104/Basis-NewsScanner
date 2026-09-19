@@ -32,6 +32,9 @@ def make_engine(db_path: Path | str) -> Engine:
 # Columns added after their table was first created. create_all() only creates missing tables,
 # so these are added with ALTER TABLE when an existing database lacks them.
 ADDED_COLUMNS: dict[str, dict[str, str]] = {
+    "articles": {
+        "non_news": "BOOLEAN NOT NULL DEFAULT 0",
+    },
     "stories": {
         "model": "VARCHAR(64)",
         "summary_pending": "BOOLEAN NOT NULL DEFAULT 0",

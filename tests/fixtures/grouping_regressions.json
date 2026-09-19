@@ -1,0 +1,365 @@
+{
+ "_about": "Real articles fetched 2026-09-17 behind known grouping/tagging misses (title matcher era). Used by tests/test_grouping_regressions.py and tests/test_llm.py.",
+ "same_event_split": {
+  "about": "US House passes the Russia sanctions bill (old story 2) and India's reaction (old story 24): one event, split in two by the title matcher. Must group together. Pass: the lead articles (db ids in must_group_together: House passes the bill; BBC, Reuters and MEA on India's reaction) share one story, and that story holds at least 90% of these articles (side follow-ups such as a US politics live blog may split off).",
+  "articles": [
+   {
+    "db_id": 2,
+    "old_story": 2,
+    "title": "U.S. House advances Russia sanctions Bill that seeks 100% tariffs on India, others; set for final vote",
+    "snippet": "The resolution to advance the Russia sanctions Bill and a slew of other legislations was approved by a 214-211 vote, shocking the House Democratic leadership. The Bill is expected to come up for a final vote in the House on September 16",
+    "source_name": "The Hindu",
+    "source_region": "IN",
+    "source_weight": 3,
+    "url": "https://www.thehindu.com/news/international/russia-sanctions-bill-advances-in-us-house-india-tariffs-final-vote/article71470872.ece",
+    "published_at": "2026-09-17T03:37:06.000000+00:00"
+   },
+   {
+    "db_id": 6,
+    "old_story": 2,
+    "title": "U.S. House of Representatives to take up Russia sanctions bill next week",
+    "snippet": "Ukrainian civilians continue to be killed by Putin’s war machine, and this bill hits the Kremlin’s coffers hard; Now is the time to pass it and force Putin to the negotiating table, said Senate Foreign Relations ranking member Jeanne Shaheen",
+    "source_name": "The Hindu",
+    "source_region": "IN",
+    "source_weight": 3,
+    "url": "https://www.thehindu.com/news/international/us-house-of-representatives-to-take-up-russia-sanctions-bill-next-week/article71461175.ece",
+    "published_at": "2026-09-17T03:42:27.000000+00:00"
+   },
+   {
+    "db_id": 23,
+    "old_story": 2,
+    "title": "'Indian side has made clear...': MEA as Russia sanctions bill threatening 100% tariff clears US House",
+    "snippet": "India said it will continue to ensure energy security for its 1.4 billion people through diversified sourcing and based on evolving market dynamics.",
+    "source_name": "Hindustan Times",
+    "source_region": "IN",
+    "source_weight": 2,
+    "url": "https://www.hindustantimes.com/india-news/mea-as-russia-sanctions-bill-threatening-100-tariff-clears-us-house-oil-purchase-donald-trump-modi-trade-ukraine-china-101789619361353.html",
+    "published_at": "2026-09-17T04:30:14.000000+00:00"
+   },
+   {
+    "db_id": 26,
+    "old_story": 24,
+    "title": "‘1.4 billion people first’: India’s response to 100% US tariff threat over Russian oil",
+    "snippet": "",
+    "source_name": "The Indian Express",
+    "source_region": "IN",
+    "source_weight": 3,
+    "url": "https://indianexpress.com/article/india/us-passes-russia-sanctions-bill-india-reaction-100-percent-tariff-donald-trump-10881577",
+    "published_at": "2026-09-17T04:38:34.000000+00:00"
+   },
+   {
+    "db_id": 27,
+    "old_story": 2,
+    "title": "India vows to protect energy security as US Russia bill opens door to 100% tariffs",
+    "snippet": "India is closely watching a US bill that could allow tariffs of up to 100% on countries buying Russian energy. With Russia accounting for 30.3% of India’s crude imports in FY2026, New Delhi said it would prioritise energy security, diversify supplies and protect its trade and economic interests.",
+    "source_name": "The Economic Times",
+    "source_region": "IN",
+    "source_weight": 2,
+    "url": "https://economictimes.indiatimes.com/news/economy/foreign-trade/india-vows-to-protect-energy-security-as-us-bill-opens-door-to-100-tariffs/articleshow/134301648.cms",
+    "published_at": "2026-09-17T04:39:50.000000+00:00"
+   },
+   {
+    "db_id": 32,
+    "old_story": 2,
+    "title": "‘India, you better buy oil somewhere else’: US senator’s warning after Russia sanctions bill clears House",
+    "snippet": "The legislation does not itself impose a 100% tariff on Indian goods, but gives Trump the authority to levy such duties under special conditions if he wishes.",
+    "source_name": "Hindustan Times",
+    "source_region": "IN",
+    "source_weight": 2,
+    "url": "https://www.hindustantimes.com/india-news/india-you-better-buy-oil-somewhere-else-us-senator-s-warning-after-russia-sanctions-bill-clears-house-101789619145208.html",
+    "published_at": "2026-09-17T04:57:37.000000+00:00"
+   },
+   {
+    "db_id": 33,
+    "old_story": 24,
+    "title": "India reacts to 100% US tariff threat over Russian oil, says ‘determined to protect trade, economic interests’",
+    "snippet": "India said it is ‘monitoring’ the newly passed US Sanctions on Russia and Iran Act, which risks imposing tariffs of up to 100% on Russian oil purchases. The MEA reaffirmed energy security for 1.4 billion citizens via diversified sourcing and vowed to protect India's trade and economic interests.",
+    "source_name": "Livemint",
+    "source_region": "IN",
+    "source_weight": 2,
+    "url": "https://www.livemint.com/news/india/india-reacts-to-100-us-tariff-threat-over-russian-oil-says-determined-to-protect-trade-economic-interests-11789620040856.html",
+    "published_at": "2026-09-17T04:58:57.000000+00:00"
+   },
+   {
+    "db_id": 592,
+    "old_story": 24,
+    "title": "India says new US tariffs over Russian oil could hit ties, vows to protect energy security",
+    "snippet": "",
+    "source_name": "Reuters",
+    "source_region": "GLOBAL",
+    "source_weight": 3,
+    "url": "https://news.google.com/rss/articles/CBMiugFBVV95cUxPTEYxR3ZWQVp2WmNVWFlkTGd2QThGc3VMX2pPd3JSbkR4ekxSZm1WbjdhSU1hZ2JHaHZIZEJRSEEwdUZUOVl4REwxWU9OWUFJcWxaWm9hNk4yeXJJVU5FSUQ4WWZFVTVwQmpaZlFOem5wc1hiNnJJQklmQXo3aWpaOG1tY2tUWm9IalFnSFUzbWFoREwxNHo0RzZrb0RNbHJSa25yMDlidVk5WEt4RkNKRjQwRXpZSWkyYUE?oc=5",
+    "published_at": "2026-09-17T05:19:00.000000+00:00"
+   },
+   {
+    "db_id": 48,
+    "old_story": 24,
+    "title": "India faces 100% tariff threat over Russian oil after US House vote",
+    "snippet": "Trump’s tariff threat puts India’s Russian oil strategy- and its access to the US market - in a new bind.",
+    "source_name": "BBC",
+    "source_region": "GLOBAL",
+    "source_weight": 3,
+    "url": "https://www.bbc.co.uk/news/articles/c3lyrn4p870yo",
+    "published_at": "2026-09-17T05:33:29.000000+00:00"
+   },
+   {
+    "db_id": 92,
+    "old_story": 2,
+    "title": "‘What kind of language being used?’ Congress slams US senator's warning to India over Russian oil",
+    "snippet": "The remark by US senator, who took a stern tone against countries buying oil from Russia, did not go down well with Congress.",
+    "source_name": "Hindustan Times",
+    "source_region": "IN",
+    "source_weight": 2,
+    "url": "https://www.hindustantimes.com/india-news/congress-slams-us-warning-to-india-over-russian-oil-pawan-khera-on-language-used-by-richard-blumenthal-101789625457630.html",
+    "published_at": "2026-09-17T06:33:10.000000+00:00"
+   },
+   {
+    "db_id": 130,
+    "old_story": 24,
+    "title": "India warns new US tariffs over Russian oil could impact ties",
+    "snippet": "",
+    "source_name": "Al Jazeera",
+    "source_region": "GLOBAL",
+    "source_weight": 2,
+    "url": "https://news.google.com/rss/articles/CBMipAFBVV95cUxQMl9PcjVlYklaOEduZmFaQTc4UTYydWlqdzRhWkI5SGl6YTl5blRoY042TWJidktWNDFfTmo1NHFTYU1MVVVVSXozUkVMcWVWRWZBTExJZzVhZ2hzeGJTNFBDdjZ1YzZ5cHdsRFc5T1U5WDlZdDduUE01MmMyTkZyQ3U2ZDFGb0Yya1I5U0FINW5xMzNOOUhnbVByU054WmNjYjFqZ9IBqgFBVV95cUxNQURNRGtuanJNa3FsVEZWdWJHT1BuQTN2NUJVVm11RUFnemZfbDlnN2h0NFFUU2l4dWNYNGduSGtQV28wYUQ1X3l3cGl6NU9BVFU1WXRlMl9uMDQzOU0wVzdGR3JKVHA4TzB3dW03TXpmZ2JKTFJlbzRzZU9EWGcyTEQ3djdFWFBQeHRab2duTlRfcUxWbjBZWm1oa3BBa0xBeVR4ZlJCWkhJQQ?oc=5",
+    "published_at": "2026-09-17T07:43:01.000000+00:00"
+   },
+   {
+    "db_id": 143,
+    "old_story": 24,
+    "title": "In charts: How India’s Russian oil imports shifted amid US tariff flip-flops",
+    "snippet": "India faces potential 100% US tariffs under new legislation targeting Russian energy buyers. This comes as India’s reliance on Russian oil has surged, complicating its ongoing energy-security diversification.",
+    "source_name": "Livemint",
+    "source_region": "IN",
+    "source_weight": 2,
+    "url": "https://www.livemint.com/economy/russian-oil-india-russia-oil-trade-us-tariffs-donald-trump-russian-crude-india-oil-imports-west-asia-war-11789627064026.html",
+    "published_at": "2026-09-17T08:00:03.000000+00:00"
+   },
+   {
+    "db_id": 144,
+    "old_story": 24,
+    "title": "India flags impact on ties, energy markets from US law on Russian oil imports",
+    "snippet": "The US House of Representatives has passed a bipartisan sanctions bill targeting Russia over the Ukraine war, giving Trump the power to slap up to 100% tariffs on countries like India and China for their energy imports from Russia.",
+    "source_name": "Livemint",
+    "source_region": "IN",
+    "source_weight": 2,
+    "url": "https://www.livemint.com/economy/india-says-committed-to-ensuring-energy-security-protecting-economic-interest-after-us-passes-russia-sanctions-law-11789623327110.html",
+    "published_at": "2026-09-17T08:01:20.000000+00:00"
+   },
+   {
+    "db_id": 188,
+    "old_story": 2,
+    "title": "‘India, buy your oil elsewhere’: Senator after US House passes Russia sanctions bill",
+    "snippet": "",
+    "source_name": "The Indian Express",
+    "source_region": "IN",
+    "source_weight": 3,
+    "url": "https://indianexpress.com/article/world/us-house-passes-russia-sanctions-bill-100-percent-tariff-threat-india-oil-imports-10881975",
+    "published_at": "2026-09-17T08:49:51.000000+00:00"
+   },
+   {
+    "db_id": 312,
+    "old_story": 24,
+    "title": "India-US tariff timeline: How Trump went from 10 to 100% duty over Russian oil purchase in last 1.5 years",
+    "snippet": "From February 2025 to September 2026, let’s look at the timeline of events surrounding US tariffs on India.",
+    "source_name": "Hindustan Times",
+    "source_region": "IN",
+    "source_weight": 2,
+    "url": "https://www.hindustantimes.com/india-news/india-us-tariff-timeline-how-trump-went-from-10-to-100-duty-over-russian-oil-purchase-in-last-1-5-years-101789641022855.html",
+    "published_at": "2026-09-17T11:14:15.000000+00:00"
+   },
+   {
+    "db_id": 325,
+    "old_story": 2,
+    "title": "US House passes Russia sanctions bill: Why Kremlin says it will ‘complicate’ Ukraine peace efforts",
+    "snippet": "The US House has passed a Russia sanctions bill that could allow tariffs of up to 100% on countries, including India, that buy Russian oil and gas. The Kremlin warned that new sanctions could complicate efforts to reach a peace deal in Ukraine.",
+    "source_name": "Livemint",
+    "source_region": "IN",
+    "source_weight": 2,
+    "url": "https://www.livemint.com/news/world/us-house-passes-russia-sanctions-bill-why-kremlin-says-it-will-complicate-ukraine-peace-efforts-11789642478410.html",
+    "published_at": "2026-09-17T11:23:55.000000+00:00"
+   },
+   {
+    "db_id": 347,
+    "old_story": 2,
+    "title": "U.S. House passes Russia sanctions bill seeking to impose up to 100% tariffs on India, others",
+    "snippet": "The Bill, which will now be sent U.S. President Donald Trump for his signature, could result in significant U.S. tariffs on India",
+    "source_name": "The Hindu",
+    "source_region": "IN",
+    "source_weight": 3,
+    "url": "https://www.thehindu.com/news/international/us-house-passes-russia-sanctions-bill-india-tariffs/article71474350.ece",
+    "published_at": "2026-09-17T11:50:14.000000+00:00"
+   },
+   {
+    "db_id": 411,
+    "old_story": 24,
+    "title": "US tariffs against Russian oil buyers pass: What it means for China, India",
+    "snippet": "US sanctions aim to weaken Russian oil exports, heavily targeting China and India as Moscow's largest energy buyers.",
+    "source_name": "Al Jazeera",
+    "source_region": "GLOBAL",
+    "source_weight": 2,
+    "url": "https://www.aljazeera.com/features/2026/9/17/us-tariffs-against-russian-oil-buyers-pass-what-it-means-for-china",
+    "published_at": "2026-09-17T12:59:36.000000+00:00"
+   },
+   {
+    "db_id": 647,
+    "old_story": 2,
+    "title": "‘So many loopholes’: Democratic House leader Jeffries flags concerns over Russia sanctions bill – US politics live",
+    "snippet": "",
+    "source_name": "The Guardian",
+    "source_region": "GLOBAL",
+    "source_weight": 2,
+    "url": "https://news.google.com/rss/articles/CBMixwFBVV95cUxPVkl4QkRrcmNLNE1PdTBfa1RteDlvZEppVmo0bG1lbWNrRXVfRS12V2JkY1RqaEg1ODJxWU1hUGIzcHQtSTI4X1NEcVZHYTlQdkFTRGFvWkFnQVo3LWo1NzdaSWRmXy1ZdXN1UElRTDhSOTg4Z0t5WmstRktLMG5oSUp4TDRtalR1Nl9QMVhEWTV3a0otbHFxM2s2MFd4TnhZbC1TcWd2Y3BwTXNVbWQ0a2lLelNqVm9uQWNvS2NnTEJpYzd6U0RR?oc=5",
+    "published_at": "2026-09-17T13:25:26.000000+00:00"
+   },
+   {
+    "db_id": 456,
+    "old_story": 24,
+    "title": "As U.S. readies 100% tariffs, Russia provided more than half of India’s oil imports in July",
+    "snippet": "The U.S. House of Representatives passed a Bill on September 16 that seeks to impose tariffs of up to 100% on the top-5 countries absorbing the largest shares of Russia’s oil",
+    "source_name": "The Hindu",
+    "source_region": "IN",
+    "source_weight": 3,
+    "url": "https://www.thehindu.com/business/Economy/as-us-readies-100-tariffs-russia-provided-more-than-half-of-indias-oil-imports-in-july/article71476447.ece",
+    "published_at": "2026-09-17T13:55:00.000000+00:00"
+   },
+   {
+    "db_id": 634,
+    "old_story": 2,
+    "title": "Congress says U.S. law on Russian oil purchase is an ‘affront’ to India’s sovereignty",
+    "snippet": "The government is projecting the recently concluded BRICS Summit’s joint declaration as a symbol of the world’s trust in India, but is now facing ‘aggressive bullying from a strategic partner’, party general secretary K.C. Venugopal says",
+    "source_name": "The Hindu",
+    "source_region": "IN",
+    "source_weight": 3,
+    "url": "https://www.thehindu.com/news/national/congress-says-us-law-on-russian-oil-purchase-is-an-affront-to-indias-sovereignty/article71477239.ece",
+    "published_at": "2026-09-17T15:50:22.000000+00:00"
+   },
+   {
+    "db_id": 686,
+    "old_story": 2,
+    "title": "India warns US on Russia sanctions bill",
+    "snippet": "",
+    "source_name": "The Economic Times",
+    "source_region": "IN",
+    "source_weight": 2,
+    "url": "https://economictimes.indiatimes.com/news/india/india-warns-that-washingtons-russia-sanctions-bill-holds-implications-for-bilateral-ties-energy-market/articleshow/134316619.cms",
+    "published_at": "2026-09-17T16:09:28.000000+00:00"
+   }
+  ],
+  "must_group_together": [
+   347,
+   48,
+   592,
+   23
+  ],
+  "min_share_in_one_story": 0.9
+ },
+ "iran_sanctions_explainer": {
+  "about": "Explainer that the title matcher put in the Russia sanctions story. Must be flagged non-news and never count as an independent source.",
+  "articles": [
+   {
+    "db_id": 545,
+    "old_story": 2,
+    "title": "What are all the sanctions Iran is under?",
+    "snippet": "Iran has faced a torrent of international sanctions since the 1979 revolution - here's what's in place right now.",
+    "source_name": "Al Jazeera",
+    "source_region": "GLOBAL",
+    "source_weight": 2,
+    "url": "https://www.aljazeera.com/news/2026/9/17/what-are-all-the-sanctions-iran-is-under",
+    "published_at": "2026-09-17T15:01:27.000000+00:00"
+   }
+  ]
+ },
+ "ice_vs_rape": {
+  "about": "Old story 343 ('ICE Agent Arrested for Minneapolis Shooting'): an unrelated Kerala rape case joined on 'arrested' + 'charges'. Must NOT group.",
+  "articles": [
+   {
+    "db_id": 402,
+    "old_story": 343,
+    "title": "ICE agent arrested in Minneapolis on charges of assault and false reporting of crime",
+    "snippet": "Christian Castro faced assault charges after shooting Venezuelan man through the door of his apartment while children were present A federal immigration officer wanted on assault charges for shooting and ​wounding a Venezuelan man in Minneapolis was arrested there on Wednesday, eight months after a confrontation that became a flashpoint over ‌Donald Trump’s deportation sweeps. Christian Castro, an Immigrations and Customs Enforcement (ICE) agent, was taken into custody by agents of the…",
+    "source_name": "The Guardian",
+    "source_region": "GLOBAL",
+    "source_weight": 2,
+    "url": "https://www.theguardian.com/us-news/2026/sep/17/ice-agent-arrested-minneapolis",
+    "published_at": "2026-09-17T12:50:01.000000+00:00"
+   },
+   {
+    "db_id": 478,
+    "old_story": 343,
+    "title": "Two arrested on charges of rape",
+    "snippet": "",
+    "source_name": "The Hindu",
+    "source_region": "IN",
+    "source_weight": 3,
+    "url": "https://www.thehindu.com/news/national/kerala/two-arrested-on-charges-of-rape/article71476943.ece",
+    "published_at": "2026-09-17T14:20:47.000000+00:00"
+   }
+  ]
+ },
+ "rates_story": {
+  "about": "Old story 395 ('Trump faces isolation on interest rates...'): two loosely related articles. Must NOT group.",
+  "articles": [
+   {
+    "db_id": 668,
+    "old_story": 395,
+    "title": "Trump Looks Isolated on Interest Rates",
+    "snippet": "",
+    "source_name": "The New York Times",
+    "source_region": "US",
+    "source_weight": 3,
+    "url": "https://news.google.com/rss/articles/CBMifkFVX3lxTE1vN3dJZTRTZDBzSHo5M3prWkFWSlRfd1JpLWpXNWNyTV9abURrWEVtM0x6Q3Z3WHFtS29wVm1WN3lDb3NvS0pPbXd6U3pBZEREeXVLbTlHajZ0X25FdU1OekMwci1CME5XcEd0VlI5Y3d3U2Z5S1A2THZibTN0QQ?oc=5",
+    "published_at": "2026-09-17T12:13:42.000000+00:00"
+   },
+   {
+    "db_id": 470,
+    "old_story": 395,
+    "title": "Ghalibaf’s maths missile at Trump decoded: Is Iran fixing US interest rates?",
+    "snippet": "Iran's speaker mocks US interest rates, citing the Taylor equation amidst rising global oil prices and inflation.",
+    "source_name": "Al Jazeera",
+    "source_region": "GLOBAL",
+    "source_weight": 2,
+    "url": "https://www.aljazeera.com/news/2026/9/17/ghalibafs-maths-missile-at-trump-decoded-is-iran-fixing-us-interest-rates",
+    "published_at": "2026-09-17T14:10:41.000000+00:00"
+   }
+  ]
+ },
+ "fiji_regions": {
+  "about": "Old story 121: Fiji HIV crisis, tagged US, India, Global because of where the outlets are. Should be neither US nor India.",
+  "articles": [
+   {
+    "db_id": 135,
+    "old_story": 121,
+    "title": "Fiji Declares National HIV Emergency As Infections Surge 16-Fold Since 2019",
+    "snippet": "",
+    "source_name": "NDTV",
+    "source_region": "IN",
+    "source_weight": 1,
+    "url": "https://news.google.com/rss/articles/CBMisgFBVV95cUxNRGFpYkNiTnBGbUozemVobmRBSDdybEhhQ1Z1RktFTXlhcG5XTFVXTF9JVE12X01vcXlfZTdGTVVlOHBNNGNJWDZnN1E3cm1uX1BKR0hoMEpiaWQxVGpOZWNLUkZINHlURHBTSTFnZ0pReEhSQjBpcVA5a1JWUnFCRlhuYzFmdXRQaXFYWHJJYWcwVGJUeG1nT251d0g3NDlIVkdSRjJuMkFWelhjeVZ5SXRR?oc=5",
+    "published_at": "2026-09-17T07:52:59.000000+00:00"
+   },
+   {
+    "db_id": 236,
+    "old_story": 121,
+    "title": "Fiji declares HIV a national crisis, 1 in 60 adults carry it",
+    "snippet": "",
+    "source_name": "dw.com",
+    "source_region": "US",
+    "source_weight": 1,
+    "url": "https://news.google.com/rss/articles/CBMilwFBVV95cUxPbmNiamI1QW4wbkgtck5JcG9JUXB2SEx5Zmw4UjlVZ2UtbkdaeXlUX2xpX3NiR3NhSHh5S0lxcDJRZ21IZjNlcmxJd0R5NjI5Sm9pS0hTREVMalp0QmRrTVl6ZVFHdzdVZXJESlRNRDEwLUV2ZHNZVkZ6YkRRMy1hMXZ1VG1sdWlZZXZZM09uWEltRDUtUXhz0gGXAUFVX3lxTFBjYTBLWHFKWjF2MmRVUWREdktycll0ZHVpc1BxbnVGY19zRzJMZS1iVzEtdm5XMzhuYjFEX3NTOXY3OXRsRjQzUVBBV2F2dVVyUUZPckx3eVA1c0ROWXM1ZVpoNjc2eDFnT2dvazhRdnNhNWhPZllZSUd1SmVNNndIaWt4RTZlSWM0M2V5MFNSR2tMSEtmV0U?oc=5",
+    "published_at": "2026-09-17T09:51:05.000000+00:00"
+   },
+   {
+    "db_id": 602,
+    "old_story": 121,
+    "title": "Fiji declares national HIV crisis as cases spike",
+    "snippet": "",
+    "source_name": "Euronews.com",
+    "source_region": "IN",
+    "source_weight": 1,
+    "url": "https://news.google.com/rss/articles/CBMimwFBVV95cUxOeE9SM0xsbTNhQUItLXpEdFk1bWxlLTQzTm9ZYjFqS0J4Y05fMTZKajhpS05yVUJZOUFCMlV6ekVUZkhoWXFuMXBvSjVpMEp4NmotbllEVnMtUUtfck1oUGRta21MOVdQVXhTNWFOdE5qVkU5Q0Z3R0RJN05yZXk5TFdLdDdHNHJROHNhOU9LNlllbC1EdWF6SFBQNA?oc=5",
+    "published_at": "2026-09-17T11:27:34.000000+00:00"
+   }
+  ]
+ }
+}

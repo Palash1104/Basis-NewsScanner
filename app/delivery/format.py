@@ -32,8 +32,10 @@ class DigestItem:
 
 
 def pick_sources(articles: Sequence[Article], limit: int = MAX_SOURCE_LINKS) -> list[SourceLink]:
-    """One link per outlet, most prominent outlets first, earliest article per outlet."""
-    ordered = sorted(articles, key=lambda a: (-a.source_weight, a.published_at))
+    """One link per outlet, most prominent outlets first, earliest article per outlet.
+    Explainers and roundups aren't listed as sources."""
+    news = [article for article in articles if not article.non_news] or list(articles)
+    ordered = sorted(news, key=lambda a: (-a.source_weight, a.published_at))
     links: list[SourceLink] = []
     seen: set[str] = set()
     for article in ordered:

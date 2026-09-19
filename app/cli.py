@@ -2,6 +2,7 @@
 `newsdesk scheduler`."""
 
 import asyncio
+import json
 import logging
 import sys
 from collections.abc import Callable, Sequence
@@ -24,8 +25,10 @@ from app.delivery.telegram import TelegramError, send_messages
 from app.llm.client import LLMClient, LLMConfigError, make_llm_client
 from app.models import Article, Run, Story, utcnow
 from app.net import make_client
-from app.pipeline.cluster import assign_to_stories
+from app.pipeline.classify import non_news_reason
+from app.pipeline.cluster import GroupingResult, assign_to_stories
 from app.pipeline.dedupe import dedupe_articles
+from app.pipeline.embed import Embedder, load_embedder
 from app.pipeline.fetch import FeedResult, SourceResolver, fetch_all, filter_recent
 from app.pipeline.rank import pending_stories, rank_stories
 from app.pipeline.summarize import summarize_stories
@@ -60,6 +63,12 @@ class PipelineReport:
     skipped_unchanged: int = 0
     failed: int = 0
     llm_call_errors: int = 0
+    grouping_method: str = ""
+    non_news_attached: int = 0
+    non_news_ungrouped: int = 0
+    # Every non-news headline this run, so false positives are visible (never silent).
+    non_news: list[dict[str, Any]] = field(default_factory=list)
+    borderline_logged: int = 0
     pending_carried: int = 0  # stories skipped for quota on an earlier run, done first this run
     skipped_quota: int = 0  # stories left pending because the quota ran out this run
     llm_calls: int = 0
@@ -100,6 +109,8 @@ def run_pipeline(
     now: datetime | None = None,
     transport: httpx.AsyncBaseTransport | None = None,
     llm_unavailable: str | None = None,
+    embedder: Embedder | None = None,
+    embedder_unavailable: str | None = None,
 ) -> PipelineReport:
     """One pass: fetch → dedupe → group → rank → summarize. `feeds` includes disabled feeds
     (their names still resolve Google News outlets); only enabled feeds are fetched.
@@ -149,6 +160,7 @@ def run_pipeline(
                     snippet=article.snippet,
                     published_at=article.published_at,
                     fetched_at=article.fetched_at,
+                    non_news=article.non_news,
                 )
                 for article in kept
             ]
@@ -157,10 +169,25 @@ def run_pipeline(
             report.articles_new = len(new_articles)
 
             stage = "group"
-            grouping = assign_to_stories(session, new_articles, settings, now)
+            grouping = assign_to_stories(session, new_articles, settings, now, embedder)
+            report.grouping_method = grouping.method
+            report.non_news_attached = grouping.non_news_attached
+            report.non_news_ungrouped = grouping.non_news_ungrouped
+            if settings.grouping.method == "embedding" and grouping.method != "embedding":
+                reason = embedder_unavailable or "no embedder given"
+                report.errors.append(
+                    {
+                        "stage": "group",
+                        "error": f"embedding model unavailable ({reason}); used the title matcher",
+                    }
+                )
             report.stories_created = grouping.created
             report.articles_attached = grouping.attached
-            session.commit()
+            session.commit()  # assigns story ids for the logs below
+            report.non_news = non_news_entries(grouping)
+            for entry in report.non_news:
+                log.info("non-news %s", entry)
+            report.borderline_logged = log_borderline(grouping, settings, report.run_id)
 
             stage = "rank"
             top = rank_stories(session, settings, now)
@@ -221,6 +248,67 @@ def run_pipeline(
             run.errors = report.errors
             session.commit()
     return report
+
+
+def non_news_entries(grouping: GroupingResult) -> list[dict[str, Any]]:
+    entries = []
+    for placement in grouping.placements:
+        if not placement.article.non_news:
+            continue
+        story = placement.story
+        entries.append(
+            {
+                "title": placement.article.title,
+                "source": placement.article.source_name,
+                "reason": non_news_reason(placement.article.title),
+                "decision": placement.decision,
+                "story_id": story.id if story else None,
+                "story_headline": story.headline if story else None,
+            }
+        )
+    return entries
+
+
+def log_borderline(grouping: GroupingResult, settings: Settings, run_id: int) -> int:
+    """Append every embedding match scoring inside grouping.borderline_log_range to
+    data/logs/grouping_borderline.jsonl, for retuning the threshold later."""
+    if grouping.method != "embedding":
+        return 0
+    low, high = settings.grouping.borderline_log_range
+    rows = []
+    for placement in grouping.placements:
+        score = placement.score
+        if score is None or not low <= score <= high:
+            continue
+        article, best = placement.article, placement.best_story
+        rows.append(
+            {
+                "logged_at": utcnow().isoformat(),
+                "run_id": run_id,
+                "threshold": settings.grouping.embedding_threshold,
+                "score": round(score, 4),
+                "decision": placement.decision,
+                "article": {
+                    "title": article.title,
+                    "source": article.source_name,
+                    "url": article.url,
+                    "published_at": article.published_at.isoformat(),
+                    "non_news": bool(article.non_news),
+                },
+                "nearest_story": {
+                    "id": best.id if best else None,
+                    "headline": best.headline if best else None,
+                    "articles": len(best.articles) if best else None,
+                },
+            }
+        )
+    if rows:
+        path = settings.resolve_path(settings.paths.log_dir) / "grouping_borderline.jsonl"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as handle:
+            for row in rows:
+                handle.write(json.dumps(row, ensure_ascii=False) + "\n")
+    return len(rows)
 
 
 # ---------------------------------------------------------------- digest
@@ -340,8 +428,20 @@ def _llm_client(
 def run_once(settings: Settings, session_factory: sessionmaker[Session]) -> list[str]:
     """One pipeline pass with the configured LLM client; returns the summary lines to show."""
     llm, llm_unavailable = _llm_client(settings, session_factory)
+    embedder: Embedder | None = None
+    embedder_unavailable: str | None = None
+    if settings.grouping.method == "embedding":
+        embedder, embedder_unavailable = load_embedder(settings.grouping.embedding_model)
     feeds = load_feeds(include_disabled=True)
-    report = run_pipeline(session_factory, settings, feeds, llm, llm_unavailable=llm_unavailable)
+    report = run_pipeline(
+        session_factory,
+        settings,
+        feeds,
+        llm,
+        llm_unavailable=llm_unavailable,
+        embedder=embedder,
+        embedder_unavailable=embedder_unavailable,
+    )
 
     pending = (
         f" + {report.pending_carried} pending from earlier runs" if report.pending_carried else ""
@@ -353,7 +453,9 @@ def run_once(settings: Settings, session_factory: sessionmaker[Session]) -> list
         f"{settings.pipeline.lookback_hours}h {report.articles_recent}, "
         f"new {report.articles_new} ({report.duplicates_dropped} duplicates dropped)",
         f"stories: {report.stories_created} new, {report.articles_attached} articles attached "
-        f"to existing · top {report.stories_ranked} ranked{pending} · summarized "
+        f"to existing ({report.grouping_method} grouping; non-news: "
+        f"{report.non_news_attached} attached, {report.non_news_ungrouped} left out) · "
+        f"top {report.stories_ranked} ranked{pending} · summarized "
         f"{report.summarized}, unchanged {report.skipped_unchanged}, failed {report.failed}, "
         f"LLM errors {report.llm_call_errors}{left}",
         f"LLM ({settings.llm.provider}, {settings.llm.summary_model}): {report.llm_calls} calls, "
@@ -366,6 +468,21 @@ def run_once(settings: Settings, session_factory: sessionmaker[Session]) -> list
                 f"quota: {quota.used}/{quota.limit} requests used on quota day {quota.day} "
                 f"(budget {quota.budget}), resets {llm.limiter.format_reset()}"
             )
+    if report.grouping_method == "embedding":
+        low, high = settings.grouping.borderline_log_range
+        lines.append(
+            f"borderline matches ({low}-{high}) logged: {report.borderline_logged} "
+            f"→ {settings.paths.log_dir}/grouping_borderline.jsonl"
+        )
+    if report.non_news:
+        lines.append(f"non-news headlines this run ({len(report.non_news)}):")
+        for entry in report.non_news:
+            where = (
+                f'attached to story {entry["story_id"]} "{entry["story_headline"]}"'
+                if entry["story_id"]
+                else "left out (no matching story)"
+            )
+            lines.append(f"  [{entry['reason']}] {entry['title']} ({entry['source']}) → {where}")
     lines += [f"  error: {error}" for error in report.errors]
     return lines
 
