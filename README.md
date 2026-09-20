@@ -7,9 +7,9 @@ price checks and a track record (see `SPEC.md`).
 
 Research notes, not financial advice.
 
-**Status:** Phase 4 complete (fetch → group → rank → summarize → extract the event → apply
-the playbook → check whether the market already moved → score the calls afterwards →
-Telegram digest). Market
+**Status:** Phase 5 complete (fetch → group → rank and rerank → summarize → extract the
+event → apply the playbook and the LLM impact layer → check whether the market already moved
+→ score the calls afterwards → Telegram digest). Market
 impact notes start in Phase 2.
 
 ## Setup
@@ -159,9 +159,10 @@ used to improve Google's products. On Anthropic, `claude-haiku-4-5` costs a few 
   each number. Read a hit rate as a hint about a rule, not a measurement.
 - **Moves need an open market.** News that breaks after a close has no reference price until
   the next session, so those impacts show no move until then. That is normal, not an error.
-- **Market impacts come from hand-written rules** (`config/playbook.yaml`), not from a model,
-  and they are hypotheses: Phase 4 scores how often each rule is right. A rule that fires on
-  most conflicts (`geopolitical_risk_off`) is meant to be judged that way, not trusted yet.
+- **Market impacts come from two layers.** Hand-written rules (`config/playbook.yaml`) run on
+  every analysed story; a model adds to them on the five most significant stories of each run,
+  and can flag a rule that doesn't fit. Each call records which layer it came from, so the
+  track record can compare them. They are hypotheses: scoring says how often each is right.
 - **Impacts are kept forever once written.** Re-analysing a story adds new calls but never
   edits old ones, so the track record reflects what was said at the time.
 - **Google News links** are Google redirect URLs, labelled with the real outlet's name.

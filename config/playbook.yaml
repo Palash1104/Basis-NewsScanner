@@ -251,3 +251,20 @@
   impacts:
     - {symbol: ^NSEI, direction: down, order: second, confidence: low, mechanism: "US tariffs threaten Indian exports and growth"}
     - {symbol: INR=X, direction: up, order: second, confidence: low, mechanism: "Tariffs threaten India's export earnings, weakening the rupee"}
+
+# Added 2026-09-20 after the impact-layer quality gate: no rule covered work-visa policy, and
+# the model found the exposure on its own (the $100,000 H-1B fee story). Keyed on the
+# immigration_visas channel added in event prompt v3, so it can't fire on unrelated sector news.
+# Relies on the severity precedence rule: an easing (a fee cut) is de_escalation and is excluded.
+- id: visa_policy_india_it
+  description: Work-visa or immigration rules that raise the cost of serving US clients
+  when:
+    channels_any: [immigration_visas]
+    countries_any: [India]
+    severity_any: [minor, moderate, major, escalation]
+  impacts:
+    - {symbol: ^CNXIT, direction: down, order: first, confidence: medium, mechanism: "Costlier US work visas raise the cost of serving US clients for Indian IT exporters"}
+    - {symbol: TCS.NS, direction: down, order: first, confidence: medium, mechanism: "Costlier US work visas raise TCS's onsite delivery costs"}
+    - {symbol: INFY.NS, direction: down, order: first, confidence: medium, mechanism: "Costlier US work visas raise Infosys's onsite delivery costs"}
+    - {symbol: HCLTECH.NS, direction: down, order: first, confidence: medium, mechanism: "Costlier US work visas raise HCLTech's onsite delivery costs"}
+    - {symbol: WIPRO.NS, direction: down, order: first, confidence: medium, mechanism: "Costlier US work visas raise Wipro's onsite delivery costs"}

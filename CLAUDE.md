@@ -30,6 +30,19 @@ between phases.
 - The minute window is shared across processes via `llm_requests`.
 - Run 9: 16 new articles, 1 call.
 
+**Phase 5 complete (2026-09-20):** LLM impact layer and rerank.
+- 375 tests pass.
+- Quality gate before wiring in (`scripts/impact_gate.py`, 20 fixtures on Flash-Lite): 13 of
+  20 returned `no_clear_impact`, 0 invented symbols, 1 rule disagreement. A 5-fixture spot
+  check on 3.6 Flash was worse (missed crude on an oil story, invented an Iran war on a Fed
+  story), so layer B stays on Flash-Lite.
+- Live run 20: 5 layer-B calls, 9 impacts with `origin=both`, 2 rule disagreements. One
+  caught `us_nato_defense_spending` firing on a monument-zoning story; the other demoted
+  `geopolitical_risk_off` on routine North Korean missile launches.
+- Event prompt v3 fixed the over-inclusion: the Fed story's countries went from
+  `[United States, Iran, India]` to `[United States]`.
+- New playbook rule 16, `visa_policy_india_it`, from a gap the gate found.
+
 **Phase 4 complete (2026-09-20):** scoring and track record (SPEC 7.9).
 - 354 tests pass.
 - First live scoring: 24 calls judged at horizon 1 (3 hit, 11 miss, 10 no-move); horizon 5
@@ -53,7 +66,7 @@ between phases.
 - Run 12: 16 events extracted, 90 impacts from 4 rules; 56/500 requests used that day.
 - 20 real extractions are kept as fixtures (`tests/fixtures/event_extractions.json`).
 
-Phase 5 has not started; wait for the user.
+Phase 6 (the web UI) has not started; wait for the user.
 
 Since then (2026-09-17):
 - Real rate limits for `gemini-3.5-flash-lite` are set (15 RPM, 250k input TPM, 500 RPD), with
@@ -91,6 +104,10 @@ Open follow-ups (not Phase 1 criteria):
   centroids or digest links, but it appears in that story's article list.
 - The shared minute window only sees calls made through this app's database. Calls made with
   the same key elsewhere (AI Studio, another machine) can still cause a 429, which is retried.
+- SQLite writes: never hold a write transaction across an LLM call. The rate limiter writes
+  from its own session, so an open transaction locks it out ("database is locked", twice on
+  2026-09-20). Every per-story loop commits before the next call, and connections set
+  `PRAGMA busy_timeout=10000`.
 
 ## Commands
 
@@ -109,6 +126,7 @@ uv run python scripts/regroup.py [--dry-run]    # regroup all stored articles, n
 uv run python scripts/grouping_report.py [--refresh --lookback-hours 24] [--detail title_token_set:64]
 uv run python scripts/event_fixtures.py [story_ids...]   # live extractions -> test fixtures
 uv run newsdesk score [--rescore]              # judge due calls, print the track record
+uv run python scripts/impact_gate.py [--model summary|reasoning] [--story ID...]
 ```
 
 ## Layout
@@ -136,6 +154,8 @@ uv run newsdesk score [--rescore]              # judge due calls, print the trac
 - `app/pipeline/prices.py` `PriceProvider` + yfinance, the price cache, reference selection,
   volatility baseline, move labels
 - `app/pipeline/scoring.py` sessions and trading-day counting, scoring, the track record
+- `app/pipeline/impact_llm.py` layer B: the call, universe validation, caps
+- `app/pipeline/merge_impacts.py` merging layer A and layer B (SPEC 7.7)
 - `app/llm/client.py` `LLMClient` (the only thing the pipeline calls: rate limiting, transient
   retries, validation retry, token counts), the `LLMProvider` protocol, `GeminiProvider` (REST
   via httpx), `AnthropicProvider` (SDK), `make_llm_client` factory
@@ -354,6 +374,24 @@ uv run newsdesk score [--rescore]              # judge due calls, print the trac
     `min_samples_to_show_rate` (5) judged calls.
   - n counts asset-calls, not independent events, so the distinct story count is reported
     next to it. The digest shows at most one track-record line per story.
+- LLM impact layer (SPEC 7.7 B) and rerank:
+  - Layer B runs on `summary_model`, not `reasoning_model`: this project's `gemini-3.6-flash`
+    allows only 20 requests a day, and `gemini-3.8-flash` is listed by the API but has no
+    quota here (like `gemini-3.1-pro-preview` in Phase 1). Always check the AI Studio
+    rate-limit page, not the model list.
+  - It runs on the top `impacts.llm_max_stories_per_run` (5) stories per run, in post-rerank
+    order, and only where the playbook step would map impacts at all.
+  - The rerank keeps the reasoning model: one call per run, and any failure (503s and its
+    daily cap are both common) falls back to the computed importance order.
+  - Merging happens before writing, so impacts stay written-once. A call both layers make is
+    one row with `origin=both`.
+  - Known limitation: a rule disagreement only demotes impacts written in the same run. For a
+    story analyzed earlier the reason is recorded but its rows keep their confidence, because
+    an impact is the call as it was made (story 975, 2026-09-20).
+  - Known gap, left open on purpose (user, 2026-09-20): the model declines on corporate
+    governance stories even when a group company is in the universe (a Tata Sons board row,
+    where TCS and Tata Steel are both listed). A prompt line would fix it, but a high decline
+    rate is worth more for now. Revisit once there is track-record data by origin.
 - Ticker validation (`newsdesk validate-tickers`):
   - One yfinance `history(period="5d")` call per symbol. Yahoo's name, currency, exchange and
     instrument type come from the same request's metadata.

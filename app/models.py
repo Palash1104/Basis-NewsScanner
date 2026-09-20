@@ -152,6 +152,23 @@ class Impact(Base):
     )
 
 
+class RuleDisagreementRow(Base):
+    """Where the LLM impact layer said a playbook rule doesn't fit an event (SPEC 7.7). The
+    rule's impacts are still written, at low confidence; this keeps the reason. Not in SPEC
+    section 6, which has nowhere to put it."""
+
+    __tablename__ = "rule_disagreements"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    story_id: Mapped[int] = mapped_column(ForeignKey("stories.id"), index=True)
+    event_id: Mapped[int | None] = mapped_column(ForeignKey("events.id"), index=True)
+    rule_id: Mapped[str] = mapped_column(String(64), index=True)
+    reason: Mapped[str] = mapped_column(Text)
+    model: Mapped[str] = mapped_column(String(64))
+    prompt_version: Mapped[str] = mapped_column(String(32))
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime)
+
+
 class ImpactScore(Base):
     """How one call turned out at one horizon (SPEC 7.9). Written once, when every input is
     present; a late bar just means the next run writes it."""

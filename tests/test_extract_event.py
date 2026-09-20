@@ -113,7 +113,7 @@ def test_prompt_escapes_text_and_states_the_severity_rule() -> None:
     assert "<headline>A &lt;b&gt; headline</headline>" in prompt
     assert "de_escalation: the development eases" in prompt
     assert "whatever its size" in prompt
-    assert EVENT_PROMPT_VERSION == "event-v2"
+    assert EVENT_PROMPT_VERSION == "event-v3"
 
 
 # ---------------------------------------------------------------- extraction step
@@ -132,7 +132,7 @@ def test_extraction_stores_a_normalized_event(session: Session, settings: Settin
     assert event.countries == ["United States", "India", "EU"]
     assert event.channels == ["tariffs_trade"]
     assert event.regions == ["US", "India"]  # copied from the story
-    assert (event.model, event.prompt_version) == (settings.llm.summary_model, "event-v2")
+    assert (event.model, event.prompt_version) == (settings.llm.summary_model, "event-v3")
     assert event.created_at == NOW
     assert [note.split(": ", 1)[1].split(" ")[0] for note in result.notes] == ["model", "unmapped"]
     # The prompt carries the summary and the (escaped) articles it was written from.

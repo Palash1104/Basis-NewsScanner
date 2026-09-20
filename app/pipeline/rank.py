@@ -5,6 +5,7 @@ from collections import defaultdict
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from typing import TYPE_CHECKING
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -12,6 +13,9 @@ from sqlalchemy.orm import Session
 from app.config import Settings
 from app.models import Article, Story
 from app.pipeline.dedupe import count_independent_sources
+
+if TYPE_CHECKING:  # a type hint only: rank.py must not import the LLM client
+    from app.llm.client import LLMClient
 
 
 @dataclass(frozen=True)
@@ -45,9 +49,11 @@ def score_articles(articles: Sequence[Article], settings: Settings, now: datetim
     return Importance(score, sources, regions, mean_weight, hours)
 
 
-def rank_stories(session: Session, settings: Settings, now: datetime) -> list[Story]:
-    """Rescore every story with an article inside the lookback window, store the scores,
-    and return the top `max_stories_per_run`, most important first."""
+def rank_stories(
+    session: Session, settings: Settings, now: datetime, limit: int | None = None
+) -> list[Story]:
+    """Rescore every story with an article inside the lookback window, store the scores, and
+    return the top `limit` (by default `max_stories_per_run`), most important first."""
     cutoff = now - timedelta(hours=settings.pipeline.lookback_hours)
     recent_story_ids = select(Article.story_id).where(
         Article.story_id.is_not(None), Article.published_at >= cutoff
@@ -72,7 +78,8 @@ def rank_stories(session: Session, settings: Settings, now: datetime) -> list[St
         ranked.append((importance.score, latest, story))
 
     ranked.sort(key=lambda item: (item[0], item[1]), reverse=True)
-    return [story for _, _, story in ranked[: settings.pipeline.max_stories_per_run]]
+    top = limit if limit is not None else settings.pipeline.max_stories_per_run
+    return [story for _, _, story in ranked[:top]]
 
 
 def pending_stories(session: Session, settings: Settings, now: datetime) -> list[Story]:
@@ -89,3 +96,54 @@ def pending_stories(session: Session, settings: Settings, now: datetime) -> list
             .order_by(Story.importance_score.desc())
         )
     )
+
+
+def rerank_stories(
+    llm: "LLMClient", stories: Sequence[Story], settings: Settings, limit: int
+) -> tuple[list[Story], str | None]:
+    """SPEC 7.4 (Phase 5): let the reasoning model reorder the candidates by real-world
+    significance. Returns the new order and a note if anything went wrong; on any failure the
+    importance order is kept, so a bad or missing rerank can never cost a run."""
+    from app.llm.client import LLMError
+    from app.llm.prompts import RERANK_SYSTEM, rerank_user_prompt
+    from app.llm.schemas import StoryRanking
+
+    candidates = list(stories)[:limit]
+    if len(candidates) < 2:
+        return list(stories), None
+    rest = list(stories)[limit:]
+    try:
+        output = llm.structured(
+            model=settings.llm.reasoning_model,
+            system=RERANK_SYSTEM,
+            user=rerank_user_prompt(
+                [
+                    (story.id, story.headline, story.source_count, story.regions or [])
+                    for story in candidates
+                ]
+            ),
+            schema=StoryRanking,
+            max_tokens=2048,
+            purpose=f"rerank {len(candidates)} stories",
+        )
+    except LLMError as exc:
+        return list(stories), f"rerank skipped, keeping the importance order: {exc}"
+
+    by_id = {story.id: story for story in candidates}
+    ordered: list[Story] = []
+    unknown = 0
+    for story_id in output.value.story_ids:
+        story = by_id.pop(story_id, None)
+        if story is None:
+            unknown += 1
+            continue
+        ordered.append(story)
+    missing = [story for story in candidates if story.id in by_id]
+    ordered.extend(missing)  # anything the model left out keeps its importance order
+    note = None
+    if unknown or missing:
+        note = (
+            f"rerank returned {unknown} unknown id(s) and left out {len(missing)} story(ies); "
+            "those kept their importance order"
+        )
+    return ordered + rest, note

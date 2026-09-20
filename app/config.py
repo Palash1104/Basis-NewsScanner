@@ -99,6 +99,9 @@ class HttpSettings(_Strict):
 
 class PipelineSettings(_Strict):
     lookback_hours: int = Field(gt=0)
+    # How many top-ranked stories the reasoning model reorders before summarizing (SPEC 7.4,
+    # Phase 5). 0 keeps the computed importance order.
+    rerank_candidates: int = Field(default=40, ge=0)
     story_attach_window_hours: int = Field(gt=0)
     max_stories_per_run: int = Field(gt=0)
     max_articles_per_story_for_llm: int = Field(gt=0)
@@ -142,6 +145,9 @@ class ImpactSettings(_Strict):
     # which answers a different question (was the call right).
     moved_vol_multiple: float = Field(default=1.0, gt=0)
     vol_min_returns: int = Field(default=10, gt=0)  # fewer usable days: show the move, no label
+    # The LLM impact layer (SPEC 7.7 B) runs on at most this many stories per run, the most
+    # significant ones after the rerank. 0 turns the layer off.
+    llm_max_stories_per_run: int = Field(default=5, ge=0)
     price_stale_days: int = Field(default=5, gt=0)  # newest bar older than this: unusable
 
 

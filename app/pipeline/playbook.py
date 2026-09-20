@@ -20,7 +20,7 @@ import re
 from collections.abc import Iterable, Sequence
 from datetime import datetime
 from pathlib import Path
-from typing import Literal, Protocol
+from typing import TYPE_CHECKING, Literal, Protocol
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -29,6 +29,9 @@ from sqlalchemy.orm import Session
 from app.config import CONFIG_DIR, AssetConfig
 from app.llm.schemas import Channel, EventType, PolicyStance, Severity
 from app.models import Event, Impact, Story
+
+if TYPE_CHECKING:
+    from app.pipeline.merge_impacts import MergedCall
 
 log = logging.getLogger(__name__)
 
@@ -171,43 +174,72 @@ def load_playbook(
     return rules
 
 
+def stories_awaiting_impacts(session: Session, since: datetime) -> list[Story]:
+    """Stories that have a recent event but were never analyzed: the impacts step didn't
+    finish (a crash, or the process stopped). Without this they would keep their event and
+    never get impacts, because the step otherwise only looks at this run's extractions."""
+    from sqlalchemy import select
+
+    return list(
+        session.scalars(
+            select(Story)
+            .join(Event, Event.story_id == Story.id)
+            .where(Story.status != ANALYZED_STATUS, Event.created_at >= since)
+            .distinct()
+        )
+    )
+
+
 def apply_rules(
     session: Session, story: Story, event: Event, rules: Sequence[Rule], now: datetime
 ) -> list[Impact]:
-    """Store the impacts of every rule matching `event`, and mark the story analyzed.
+    """Store the impacts of every rule matching `event` (layer A only), and mark the story
+    analyzed. With the LLM layer on, `store_calls` is given merged calls instead."""
+    from app.pipeline.merge_impacts import merge_impacts
 
-    Impacts already on the story (same rule, symbol and direction) are left alone, so
-    re-extraction adds rather than rewrites. Any symbol that ends up with both directions is
-    marked as a conflict ("mixed signals" in the digest).
+    matched = [
+        (rule.id, impact) for rule in matching_rules(rules, event) for impact in rule.impacts
+    ]
+    return store_calls(session, story, event, merge_impacts(matched, []), now)
+
+
+def store_calls(
+    session: Session, story: Story, event: Event, calls: Sequence["MergedCall"], now: datetime
+) -> list[Impact]:
+    """Write calls the story doesn't already have, and mark it analyzed.
+
+    A call the story already has (same rule, symbol and direction) is left alone, so
+    re-analysis adds rather than rewrites. Any symbol called both ways is marked as a
+    conflict ("mixed signals" in the digest).
     """
     existing = {(impact.rule_id, impact.symbol, impact.direction) for impact in story.impacts}
     created: list[Impact] = []
-    for rule in matching_rules(rules, event):
-        for template in rule.impacts:
-            key = (rule.id, template.symbol, template.direction)
-            if key in existing:
-                continue
-            existing.add(key)
-            impact = Impact(
-                story=story,
-                event=event,
-                symbol=template.symbol,
-                direction=template.direction,
-                mechanism=template.mechanism,
-                order=template.order,
-                confidence=template.confidence,
-                origin=ORIGIN_PLAYBOOK,
-                rule_id=rule.id,
-                created_at=now,
-            )
-            session.add(impact)
-            created.append(impact)
+    for call in calls:
+        key = (call.rule_id, call.symbol, call.direction)
+        if key in existing:
+            continue
+        existing.add(key)
+        impact = Impact(
+            story=story,
+            event=event,
+            symbol=call.symbol,
+            direction=call.direction,
+            mechanism=call.mechanism,
+            order=call.order,
+            confidence=call.confidence,
+            horizon=call.horizon,
+            origin=call.origin,
+            rule_id=call.rule_id,
+            created_at=now,
+        )
+        session.add(impact)
+        created.append(impact)
     if created:
         log.info(
-            "story %d: %d impacts from %s",
+            "story %d: %d impacts (%s)",
             story.id,
             len(created),
-            ", ".join(sorted({impact.rule_id for impact in created if impact.rule_id})),
+            ", ".join(sorted({impact.origin for impact in created})),
         )
     mark_conflicts([*story.impacts, *created])
     story.status = ANALYZED_STATUS

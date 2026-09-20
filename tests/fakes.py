@@ -110,11 +110,23 @@ def event_json(**overrides: Any) -> str:
     return json.dumps(data)
 
 
+def impacts_json(**overrides: Any) -> str:
+    data = {"no_clear_impact": True, "impacts": [], "rule_disagreements": []}
+    data.update(overrides)
+    return json.dumps(data)
+
+
 def echo_summary_responder(kwargs: dict[str, Any]) -> ProviderResponse:
-    """A valid summary whose headline is the first article title in the prompt, or a fixed
-    valid event for event-extraction requests."""
-    if kwargs["schema"].__name__ == "EventExtraction":
+    """A valid summary whose headline is the first article title in the prompt; a fixed event
+    for extraction; "nothing to add" for the impact layer; and the ids unchanged for a rerank."""
+    schema = kwargs["schema"].__name__
+    if schema == "EventExtraction":
         return provider_response(event_json())
+    if schema == "LLMImpacts":
+        return provider_response(impacts_json())
+    if schema == "StoryRanking":
+        ids = [int(match) for match in re.findall(r'<story id="(\d+)"', kwargs["user"])]
+        return provider_response(json.dumps({"story_ids": ids}))
     match = re.search(r'published="[^"]*">([^\n<]*)', kwargs["user"])
     title = match.group(1) if match else "Untitled story"
     headline = " ".join(title.split()[:12])

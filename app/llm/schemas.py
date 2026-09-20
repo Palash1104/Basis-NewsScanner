@@ -130,6 +130,7 @@ Channel = Literal[
     "tariffs_trade",
     "defense_spending",
     "tech_regulation",
+    "immigration_visas",
     "semiconductor_supply",
     "agriculture_supply",
     "metals_demand",
@@ -206,3 +207,71 @@ class EventExtraction(BaseModel):
     def _channels(cls, value: list[str]) -> list[str]:
         # "none" mixed with real channels is fixed (and logged) by extract_event, not rejected.
         return list(dict.fromkeys(value))
+
+
+# ---------------------------------------------------------------- LLM impacts (SPEC 7.7 B)
+
+Direction = Literal["up", "down"]
+Order = Literal["first", "second"]
+Confidence = Literal["high", "medium", "low"]
+Horizon = Literal["intraday", "days", "weeks"]
+
+
+class LLMImpact(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    symbol: str = Field(description="A symbol from ALLOWED ASSETS. Never invent one.")
+    direction: Direction
+    mechanism: str = Field(description="One sentence stating the cause and effect chain.")
+    order: Order = Field(
+        description="first: directly exposed. second: exposed through a knock-on effect."
+    )
+    confidence: Confidence
+    horizon: Horizon
+
+    @field_validator("symbol", "mechanism")
+    @classmethod
+    def _strip(cls, value: str) -> str:
+        value = " ".join(value.split())
+        if not value:
+            raise ValueError("must not be empty")
+        return value
+
+
+class RuleDisagreement(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    rule_id: str
+    reason: str = Field(description="Why this rule doesn't fit this event, in one sentence.")
+
+
+# The model's view of a story's market impact. Symbols are checked against the universe
+# afterwards (invalid ones are dropped and logged), and the second-order confidence cap is
+# enforced in code as well as asked for in the prompt.
+class LLMImpacts(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    no_clear_impact: bool = Field(
+        description="True when no asset in the list would plausibly move because of this."
+    )
+    impacts: list[LLMImpact]
+    rule_disagreements: list[RuleDisagreement]
+
+    @model_validator(mode="after")
+    def _empty_when_no_impact(self) -> "LLMImpacts":
+        if self.no_clear_impact and self.impacts:
+            raise ValueError("no_clear_impact is true, so impacts must be empty")
+        return self
+
+
+# ---------------------------------------------------------------- rerank (SPEC 7.4, Phase 5)
+
+
+# The reasoning model's ordering of candidate stories, most significant first. Ids are checked
+# against the candidates afterwards: unknown ids are dropped, missing ones keep their place.
+class StoryRanking(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    story_ids: list[int] = Field(
+        description="Every candidate story id, most significant first. Include them all."
+    )

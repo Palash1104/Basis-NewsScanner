@@ -16,7 +16,7 @@ from app.db import init_db, make_engine, make_session_factory
 from app.delivery.telegram import TelegramError
 from app.llm.client import LLMClient
 from app.llm.ratelimit import MemoryDailyUsageStore, RateLimiter
-from app.models import Article, Event, Run, Story
+from app.models import Article, Event, Impact, RuleDisagreementRow, Run, Story
 from app.pipeline.prices import Bar
 from tests.conftest import NOW, make_feed
 from tests.fakes import (
@@ -24,6 +24,8 @@ from tests.fakes import (
     FakePrices,
     FakeProvider,
     echo_summary_responder,
+    impacts_json,
+    provider_response,
     rss,
 )
 
@@ -94,19 +96,20 @@ def test_run_twice_does_not_resummarize(db: sessionmaker[Session], settings: Set
     assert (first.feeds_ok, first.feeds_failed) == (2, 1)
     assert first.articles_new == 4
     assert (first.stories_created, first.articles_attached) == (3, 1)  # the EU pair grouped
-    # Each summary is followed by an event extraction: 3 + 3 calls.
-    assert first.summarized == 3 and first.events_extracted == 3 and len(fake.calls) == 6
+    # One rerank, then a summary, an extraction and an impact call per story: 1 + 3 + 3 + 3.
+    assert first.summarized == 3 and first.events_extracted == 3 and len(fake.calls) == 10
+    assert first.reranked == 3 and first.llm_impact_calls == 3
     # The fake event (US/India tariffs, escalating) matches one rule, twice per story.
     assert first.stories_analyzed == 3 and first.impacts_created == 6
     assert first.impact_rules == {"us_tariffs_on_india": 6}
-    assert first.input_tokens == 6 * 120 and first.output_tokens == 6 * 60
+    assert first.input_tokens == 10 * 120 and first.output_tokens == 10 * 60
     assert any(e["stage"] == "fetch" and e["feed"] == "Down" for e in first.errors)
 
     llm, fake = _llm(settings)
     second = run_pipeline(db, settings, FEEDS, llm, now=NOW, transport=server.transport)
     assert second.articles_new == 0 and second.duplicates_dropped == 4
     assert second.summarized == 0 and second.skipped_unchanged == 3
-    assert second.events_extracted == 0 and fake.calls == []
+    assert second.events_extracted == 0 and len(fake.calls) == 1  # the rerank only
 
     # Two more outlets' articles on the EU story: only that story is summarized again.
     later = NOW + timedelta(hours=1)
@@ -131,13 +134,14 @@ def test_run_twice_does_not_resummarize(db: sessionmaker[Session], settings: Set
     assert third.articles_new == 2 and third.articles_attached == 2
     assert third.summarized == 1 and third.skipped_unchanged == 2
     assert third.events_extracted == 1  # re-extracted along with its re-summary
+    assert len(fake.calls) == 4  # rerank, summary, extraction, impacts
 
     with db() as session:
         runs = session.scalars(select(Run).order_by(Run.id)).all()
         assert [r.kind for r in runs] == ["pipeline"] * 3
         assert [r.stories_processed for r in runs] == [3, 0, 1]
-        assert runs[0].input_tokens == 720 and runs[0].finished_at is not None
-        assert runs[1].input_tokens == 0
+        assert runs[0].input_tokens == 1200 and runs[0].finished_at is not None
+        assert runs[1].input_tokens == 120  # the rerank, which runs even with no summaries
         eu = session.scalars(select(Story).where(Story.processed_article_count == 4)).one()
         assert eu.status == "analyzed" and eu.updated_at == later
         # Re-extraction doesn't duplicate impacts the story already has.
@@ -172,8 +176,8 @@ def test_digest_dry_run_then_send(db: sessionmaker[Session], settings: Settings)
     text = "\n".join(dry.messages)
     assert "Gaza" in text and "Research notes, not financial advice." in text
     # Playbook impacts appear with their mechanism (SPEC §13, Phase 2).
-    assert "▼ Nifty 50 · 2nd · low — US tariffs threaten Indian exports and growth" in text
-    assert "▲ USD/INR (rupee weaker) · 2nd · low" in text
+    assert "▼ Nifty 50 · 2nd · low · playbook — US tariffs threaten Indian exports" in text
+    assert "▲ USD/INR (rupee weaker) · 2nd · low · playbook" in text
     with db() as session:
         assert session.scalars(select(Run).where(Run.kind == "digest")).all() == []
 
@@ -243,6 +247,7 @@ def _budget_limited_llm(settings: Settings, budget: int) -> tuple[LLMClient, Fak
 def test_quota_runs_out_mid_run_and_next_run_catches_up(
     db: sessionmaker[Session], settings: Settings
 ) -> None:
+    settings.pipeline.rerank_candidates = 0  # this test is about the summary budget
     server = FeedServer()
     llm, fake = _budget_limited_llm(settings, budget=1)
     first = run_pipeline(db, settings, FEEDS, llm, now=NOW, transport=server.transport)
@@ -266,9 +271,10 @@ def test_quota_runs_out_mid_run_and_next_run_catches_up(
     second = run_pipeline(db, settings, FEEDS, llm, now=NOW, transport=server.transport)
     assert second.pending_carried == 2
     assert second.summarized == 2 and second.skipped_quota == 0
-    # The carried-over extraction, then the two new summaries' extractions: 2 + 3 calls.
+    # The carried-over extraction, the two new summaries and their extractions, then an
+    # impact call for each of the three analyzed stories: 2 + 3 + 3.
     assert second.events_pending_carried == 1 and second.events_extracted == 3
-    assert len(fake.calls) == 5
+    assert second.llm_impact_calls == 3 and len(fake.calls) == 8
     with db() as session:
         assert session.scalars(select(Story).where(Story.summary_pending.is_(True))).all() == []
         assert session.scalars(select(Story).where(Story.event_pending.is_(True))).all() == []
@@ -387,5 +393,82 @@ def test_prices_reach_the_digest_as_moves_and_labels(
 
     dry = run_digest(db, settings, send=False, now=NOW + timedelta(minutes=5))
     text = "\n".join(dry.messages)
-    assert "▼ Nifty 50 -0.3% (already moved) · since news · 2nd" in text
+    assert "▼ Nifty 50 -0.3% (already moved) · since news · 2nd · low · playbook" in text
     assert "▲ USD/INR (rupee weaker) +0.0%" in text  # priced, but nothing worth flagging
+
+
+def _impacts_responder(llm_json: str):
+    """Like echo_summary_responder, but the impact layer answers with `llm_json`."""
+
+    def responder(kwargs: dict) -> object:
+        if kwargs["schema"].__name__ == "LLMImpacts":
+            return provider_response(llm_json)
+        return echo_summary_responder(kwargs)
+
+    return responder
+
+
+def test_the_llm_layer_adds_calls_merges_them_and_records_disagreements(
+    db: sessionmaker[Session], settings: Settings
+) -> None:
+    """Layer B agrees with one playbook call, adds one of its own, and disputes a rule."""
+    settings.impacts.llm_max_stories_per_run = 2
+    llm_json = impacts_json(
+        no_clear_impact=False,
+        impacts=[
+            {
+                "symbol": "^NSEI",  # the playbook says this too
+                "direction": "down",
+                "mechanism": "Tariffs weigh on Indian equities",
+                "order": "first",
+                "confidence": "high",
+                "horizon": "days",
+            },
+            {
+                "symbol": "^CNXIT",  # the playbook has no rule for this
+                "direction": "down",
+                "mechanism": "IT exporters lose US demand",
+                "order": "first",
+                "confidence": "medium",
+                "horizon": "weeks",
+            },
+            {
+                "symbol": "MADEUP.NS",
+                "direction": "up",
+                "mechanism": "Invented",
+                "order": "first",
+                "confidence": "high",
+                "horizon": "days",
+            },
+        ],
+        rule_disagreements=[
+            {"rule_id": "us_tariffs_on_india", "reason": "the tariffs are not in force yet"}
+        ],
+    )
+    fake = FakeProvider(responder=_impacts_responder(llm_json))
+    llm = LLMClient(settings.llm, fake, sleep=lambda seconds: None)
+
+    report = run_pipeline(db, settings, FEEDS, llm, now=NOW, transport=FeedServer().transport)
+
+    assert report.llm_impact_calls == 2  # capped at 2 stories a run
+    assert report.llm_impacts_added == 2  # one ^CNXIT call per analyzed story
+    assert report.llm_disagreements == 2
+    assert any("MADEUP.NS" in note and "invalid symbol" in note for note in report.llm_notes)
+
+    with db() as session:
+        impacts = session.scalars(select(Impact).order_by(Impact.id)).all()
+        by_origin: dict[str, set[str]] = {}
+        for impact in impacts:
+            by_origin.setdefault(impact.origin, set()).add(impact.symbol)
+        assert by_origin["both"] == {"^NSEI"}  # agreed, so one row from both layers
+        assert by_origin["llm"] == {"^CNXIT"}  # the model's own call
+        # INR=X is the rule the model didn't mention; ^NSEI appears here too because the
+        # third story fell outside the two-story cap and never got an LLM call.
+        assert by_origin["playbook"] == {"INR=X", "^NSEI"}
+        nifty = next(i for i in impacts if i.symbol == "^NSEI" and i.origin == "both")
+        assert nifty.rule_id == "us_tariffs_on_india" and nifty.horizon == "days"
+        assert nifty.confidence == "low"  # the rule is disputed, so its call is demoted
+        assert not any(i.symbol == "MADEUP.NS" for i in impacts)
+        disagreements = session.scalars(select(RuleDisagreementRow)).all()
+        assert {d.rule_id for d in disagreements} == {"us_tariffs_on_india"}
+        assert "not in force yet" in disagreements[0].reason

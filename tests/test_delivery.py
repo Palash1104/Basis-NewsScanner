@@ -220,7 +220,8 @@ def test_impacts_sharing_a_mechanism_share_a_line() -> None:
     impacts = [_impact("BZ=F", "up"), _impact("CL=F", "up")]
     (line,) = impact_lines(impacts, ASSETS, limit=6)
     assert (
-        line == "▲ Brent crude, WTI crude · 1st · medium — Supply fears add a risk premium to crude"
+        line == "▲ Brent crude, WTI crude · 1st · medium · playbook — "
+        "Supply fears add a risk premium to crude"
     )
 
 
@@ -233,12 +234,12 @@ def test_impact_order_first_then_confidence_and_currency_direction_is_spelled_ou
         _impact("BZ=F", "up", confidence="high"),
     ]
     lines = impact_lines(impacts, ASSETS, limit=6)
-    assert lines[0].startswith("▲ Brent crude · 1st · high")
+    assert lines[0].startswith("▲ Brent crude · 1st · high · playbook")
     assert (
-        lines[1]
-        == "▲ USD/INR (rupee weaker) · 2nd · medium — A higher oil import bill hits the rupee"
+        lines[1] == "▲ USD/INR (rupee weaker) · 2nd · medium · playbook — "
+        "A higher oil import bill hits the rupee"
     )
-    assert lines[2].startswith("▼ Asian Paints · 2nd · low")
+    assert lines[2].startswith("▼ Asian Paints · 2nd · low · playbook")
 
 
 def test_rules_that_agree_are_counted_once() -> None:
@@ -254,7 +255,7 @@ def test_rules_that_agree_are_counted_once() -> None:
         ),
     ]
     (line,) = impact_lines(impacts, ASSETS, limit=6)
-    assert line == "▼ Nifty 50 · 2nd · low · 2 rules — Risk-off selling"
+    assert line == "▼ Nifty 50 · 2nd · low · playbook · 2 rules — Risk-off selling"
 
 
 def test_opposite_calls_become_one_mixed_signals_line() -> None:
@@ -307,7 +308,8 @@ def test_impact_line_shows_the_move_and_the_label() -> None:
     ]
     (line,) = impact_lines(impacts, ASSETS, limit=6, labels={1: "already moved"})
     assert line.startswith(
-        "▲ Brent crude +2.4% (already moved), WTI crude +1.9% · since news · 1st · medium"
+        "▲ Brent crude +2.4% (already moved), WTI crude +1.9% · since news · "
+        "1st · medium · playbook"
     )
 
 
@@ -327,4 +329,4 @@ def test_yield_moves_are_shown_in_points_with_the_unit() -> None:
 
 def test_impacts_without_a_price_show_the_name_alone() -> None:
     (line,) = impact_lines([_impact("BZ=F", "up")], ASSETS, limit=6)
-    assert line.startswith("▲ Brent crude · 1st · medium")
+    assert line.startswith("▲ Brent crude · 1st · medium · playbook")

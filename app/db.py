@@ -24,6 +24,10 @@ def make_engine(db_path: Path | str) -> Engine:
         cursor = dbapi_connection.cursor()
         cursor.execute("PRAGMA foreign_keys=ON")
         cursor.execute("PRAGMA journal_mode=WAL")
+        # The rate limiter writes from its own session while the pipeline holds one, and a
+        # second process (the scheduler, a manual run) may be writing too. Without this,
+        # SQLite fails such a write immediately with "database is locked".
+        cursor.execute("PRAGMA busy_timeout=10000")
         cursor.close()
 
     return engine

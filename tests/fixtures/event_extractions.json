@@ -1,8 +1,8 @@
 {
  "_about": "Real event extractions for stored stories, made by scripts/event_fixtures.py. Used to check the event prompt and to test the playbook against real events.",
  "model": "gemini-3.5-flash-lite",
- "prompt_version": "event-v2",
- "extracted_at": "2026-09-20T14:38:57.023028+00:00",
+ "prompt_version": "event-v3",
+ "extracted_at": "2026-09-20T16:11:04.111913+00:00",
  "events": [
   {
    "story_id": 2,
@@ -51,14 +51,11 @@
     "event_type": "sanctions_trade_policy",
     "countries": [
      "United States",
-     "India",
      "Russia",
+     "India",
      "China"
     ],
-    "entities": [
-     "U.S. House",
-     "Lindsey Graham"
-    ],
+    "entities": [],
     "companies": [],
     "channels": [
      "tariffs_trade",
@@ -73,14 +70,11 @@
     "event_type": "sanctions_trade_policy",
     "countries": [
      "United States",
-     "India",
      "Russia",
+     "India",
      "China"
     ],
-    "entities": [
-     "U.S. House",
-     "Lindsey Graham"
-    ],
+    "entities": [],
     "companies": [],
     "channels": [
      "tariffs_trade",
@@ -93,31 +87,38 @@
    },
    "notes": [],
    "tokens": [
-    1070,
-    143
+    1186,
+    124
    ]
   },
   {
    "story_id": 111,
    "label": "geopolitics: Saudi-Houthi strikes, Riyadh air-raid alerts",
-   "headline": "Saudi Arabia issues rare air raid alerts for Riyadh",
-   "summary": "Saudi Arabia issued air-raid alerts for Riyadh after explosions were reported in the capital. This marks the first such alert in Riyadh since the height of the US-Iran war.",
+   "headline": "Houthis launch missile and drone attacks targeting the Saudi capital of Riyadh.",
+   "summary": "The Houthi militia launched missiles and drones at Riyadh and Saudi oil facilities, and the coalition successfully intercepted a ballistic missile. This escalation raises fears of a rapid crisis in West Asia and a large Saudi response, impacting regional stability.",
    "summary_source": "stored",
    "regions": [
+    "US",
     "Global"
    ],
    "articles": [
+    {
+     "source_name": "The New York Times",
+     "title": "In Significant Escalation, Houthis Attack Saudi Capital",
+     "snippet": "The Houthis, an Iranian-backed militia, said they had fired a wave of missiles and drones at Riyadh, and on Saudi oil facilities.",
+     "published_at": "2026-09-20T06:38:21+00:00"
+    },
+    {
+     "source_name": "The Hindu",
+     "title": "U.S. fears rapid escalation in West Asia after Houthis attack Riyadh",
+     "snippet": "The Riyadh-led coalition confirmed on September 19, 2026 evening on X that a ballistic missile launched by the Houthis towards the capital was \"successfully intercepted and destroyed\"",
+     "published_at": "2026-09-20T06:26:29+00:00"
+    },
     {
      "source_name": "BBC",
      "title": "Saudi Arabia issues first air raid alerts for Riyadh since Houthis escalated attacks",
      "snippet": "Residents later received the all-clear after explosions were reported in the capital.",
      "published_at": "2026-09-19T04:20:47+00:00"
-    },
-    {
-     "source_name": "The Hindu",
-     "title": "Houthis say Saudi Arabia launched 26 strikes in Yemen over 24 hours",
-     "snippet": "This month, the Houthis, who already held most of Yemen’s populated areas, launched a lightning offensive to take over the country’s entire Red Sea coast, giving them control over the vital Bab al-Mandab strait",
-     "published_at": "2026-09-19T02:55:55+00:00"
     },
     {
      "source_name": "The Indian Express",
@@ -126,16 +127,10 @@
      "published_at": "2026-09-17T08:38:59+00:00"
     },
     {
-     "source_name": "Livemint",
-     "title": "Saudi Arabia Issues Rare Air-Raid Alerts for Riyadh",
-     "snippet": "Saudi Arabian authorities issued air-raid alerts for Riyadh early Saturday, the first in the capital since the height of the US-Iran war in March and April.",
-     "published_at": "2026-09-19T06:22:54+00:00"
-    },
-    {
      "source_name": "Al Jazeera",
-     "title": "Houthis accuse Saudi Arabia of launching 26 attacks in 24 hours",
-     "snippet": "",
-     "published_at": "2026-09-19T05:40:29+00:00"
+     "title": "‘There will be a very sizeable Saudi response’ to Houthi attacks",
+     "snippet": "Nawaf Obaid tells Al Jazeera that Saudi Arabia’s response to Houthi attacks from Yemen will be massive.",
+     "published_at": "2026-09-20T09:30:51+00:00"
     }
    ],
    "event": {
@@ -143,22 +138,18 @@
     "countries": [
      "Saudi Arabia",
      "Yemen",
-     "Iran",
-     "United States",
-     "Oman"
+     "Iran"
     ],
     "entities": [
      "Houthis",
-     "Bab al-Mandab strait",
-     "Riyadh",
-     "Red Sea"
+     "Riyadh"
     ],
     "companies": [],
     "channels": [
      "oil_supply",
      "shipping_routes",
-     "safe_haven_demand",
-     "risk_sentiment"
+     "risk_sentiment",
+     "safe_haven_demand"
     ],
     "severity": "escalation",
     "policy_stance": "not_applicable",
@@ -170,22 +161,18 @@
     "countries": [
      "Saudi Arabia",
      "Yemen",
-     "Iran",
-     "United States",
-     "Oman"
+     "Iran"
     ],
     "entities": [
      "Houthis",
-     "Bab al-Mandab strait",
-     "Riyadh",
-     "Red Sea"
+     "Riyadh"
     ],
     "companies": [],
     "channels": [
      "oil_supply",
      "shipping_routes",
-     "safe_haven_demand",
-     "risk_sentiment"
+     "risk_sentiment",
+     "safe_haven_demand"
     ],
     "severity": "escalation",
     "policy_stance": "not_applicable",
@@ -194,8 +181,8 @@
    },
    "notes": [],
    "tokens": [
-    1104,
-    177
+    1247,
+    149
    ]
   },
   {
@@ -263,7 +250,7 @@
    },
    "notes": [],
    "tokens": [
-    867,
+    983,
     127
    ]
   },
@@ -353,15 +340,15 @@
    },
    "notes": [],
    "tokens": [
-    1103,
+    1219,
     132
    ]
   },
   {
    "story_id": 612,
    "label": "geopolitics: US-Denmark security deal on Greenland",
-   "headline": "US and Denmark reach new security deal regarding Greenland",
-   "summary": "The United States and Denmark have reached a security agreement concerning Greenland. The deal gives the US permanent control over security needs without fulfilling annexation plans, though specifics still require parliamentary action.",
+   "headline": "US and Denmark reach a security agreement regarding Greenland",
+   "summary": "The United States and Denmark have reached a new deal concerning Greenland that involves security control and a large military presence. This agreement follows earlier tensions and threats over the island, raising important questions about international relations and regional security.",
    "summary_source": "stored",
    "regions": [
     "US",
@@ -394,9 +381,9 @@
     },
     {
      "source_name": "Al Jazeera",
-     "title": "Trump ‘settled for less’ with new US-Denmark Greenland security deal",
-     "snippet": "The US-Denmark Greenland security deal gives Trump an agreement without delivering his ambition to annex the territory.",
-     "published_at": "2026-09-19T07:35:05+00:00"
+     "title": "Trump’s Greenland deal: A triumph of optics?",
+     "snippet": "It seems the new agreement may not be that 'new'.",
+     "published_at": "2026-09-20T10:49:10+00:00"
     }
    ],
    "event": {
@@ -406,13 +393,12 @@
      "Denmark"
     ],
     "entities": [
-     "Greenland",
-     "European Union"
+     "Greenland"
     ],
     "companies": [],
     "channels": [
-     "defense_spending",
-     "risk_sentiment"
+     "risk_sentiment",
+     "defense_spending"
     ],
     "severity": "de_escalation",
     "policy_stance": "not_applicable",
@@ -426,13 +412,12 @@
      "Denmark"
     ],
     "entities": [
-     "Greenland",
-     "European Union"
+     "Greenland"
     ],
     "companies": [],
     "channels": [
-     "defense_spending",
-     "risk_sentiment"
+     "risk_sentiment",
+     "defense_spending"
     ],
     "severity": "de_escalation",
     "policy_stance": "not_applicable",
@@ -441,8 +426,8 @@
    },
    "notes": [],
    "tokens": [
-    1132,
-    128
+    1245,
+    122
    ]
   },
   {
@@ -480,9 +465,10 @@
     ],
     "companies": [],
     "channels": [
-     "defense_spending"
+     "defense_spending",
+     "risk_sentiment"
     ],
-    "severity": "moderate",
+    "severity": "escalation",
     "policy_stance": "not_applicable",
     "policy_actor": null,
     "is_new_development": true
@@ -498,17 +484,18 @@
     ],
     "companies": [],
     "channels": [
-     "defense_spending"
+     "defense_spending",
+     "risk_sentiment"
     ],
-    "severity": "moderate",
+    "severity": "escalation",
     "policy_stance": "not_applicable",
     "policy_actor": null,
     "is_new_development": true
    },
    "notes": [],
    "tokens": [
-    935,
-    116
+    1051,
+    124
    ]
   },
   {
@@ -547,16 +534,13 @@
     ],
     "entities": [
      "United Nations",
-     "IAEA",
-     "Kim Yo Jong",
-     "KCNA"
+     "IAEA"
     ],
     "companies": [],
     "channels": [
-     "risk_sentiment",
-     "safe_haven_demand"
+     "risk_sentiment"
     ],
-    "severity": "minor",
+    "severity": "escalation",
     "policy_stance": "not_applicable",
     "policy_actor": null,
     "is_new_development": true
@@ -568,31 +552,28 @@
     ],
     "entities": [
      "United Nations",
-     "IAEA",
-     "Kim Yo Jong",
-     "KCNA"
+     "IAEA"
     ],
     "companies": [],
     "channels": [
-     "risk_sentiment",
-     "safe_haven_demand"
+     "risk_sentiment"
     ],
-    "severity": "minor",
+    "severity": "escalation",
     "policy_stance": "not_applicable",
     "policy_actor": null,
     "is_new_development": true
    },
    "notes": [],
    "tokens": [
-    980,
-    135
+    1096,
+    114
    ]
   },
   {
    "story_id": 63,
    "label": "central bank: Federal Reserve raises rates",
-   "headline": "US Federal Reserve Raises Key Interest Rate Amid Inflation Pressures",
-   "summary": "The US Federal Reserve raised its key interest rate to fight high inflation and the effects of renewed US-Iran combat. This move puts pressure on the Reserve Bank of India to decide whether it should raise its own rates soon.",
+   "headline": "US Federal Reserve raises interest rates to fight persistent inflation",
+   "summary": "The US Federal Reserve raised its key interest rate for the first time in three years to fight high inflation and the effects of rising gas prices. This decision creates pressure on other central banks, like India's Reserve Bank, as they consider their own upcoming rate choices amid currency pressures.",
    "summary_source": "generated",
    "regions": [],
    "articles": [
@@ -618,27 +599,21 @@
    "event": {
     "event_type": "central_bank_monetary",
     "countries": [
-     "United States",
-     "Iran",
-     "India"
+     "United States"
     ],
     "entities": [
      "Federal Reserve",
      "Reserve Bank of India"
     ],
     "companies": [
-     "Emkay",
      "HDFC Bank"
     ],
     "channels": [
      "us_interest_rates",
-     "india_interest_rates",
      "inflation",
-     "usd_strength",
-     "inr_exchange_rate",
-     "oil_supply"
+     "usd_strength"
     ],
-    "severity": "escalation",
+    "severity": "major",
     "policy_stance": "hawkish",
     "policy_actor": "Federal Reserve",
     "is_new_development": true
@@ -646,42 +621,36 @@
    "raw_event": {
     "event_type": "central_bank_monetary",
     "countries": [
-     "United States",
-     "Iran",
-     "India"
+     "United States"
     ],
     "entities": [
      "Federal Reserve",
      "Reserve Bank of India"
     ],
     "companies": [
-     "Emkay",
      "HDFC Bank"
     ],
     "channels": [
      "us_interest_rates",
-     "india_interest_rates",
      "inflation",
-     "usd_strength",
-     "inr_exchange_rate",
-     "oil_supply"
+     "usd_strength"
     ],
-    "severity": "escalation",
+    "severity": "major",
     "policy_stance": "hawkish",
     "policy_actor": "Federal Reserve",
     "is_new_development": true
    },
    "notes": [],
    "tokens": [
-    1130,
-    186
+    1257,
+    142
    ]
   },
   {
    "story_id": 132,
    "label": "central bank: Bank of England seen holding rates",
-   "headline": "Bank of England holds interest rates steady as inflation rises",
-   "summary": "The Bank of England kept its benchmark interest rate at 3.75 percent while pausing gilt sales as inflation rose to 3.1 percent. This matters because rising energy costs and inflation risks could lead to tighter monetary policies and future rate hikes.",
+   "headline": "Bank of England holds interest rates steady amid rising inflation",
+   "summary": "The Bank of England kept its benchmark interest rate steady at 3.75 percent as inflation rose to 3.1 percent. This matters because growing price pressures from energy costs could lead to tighter monetary policies and future rate hikes.",
    "summary_source": "generated",
    "regions": [],
    "articles": [
@@ -717,13 +686,14 @@
     ],
     "entities": [
      "Bank of England",
-     "Monetary Policy Committee"
+     "Monetary Policy Committee",
+     "Andrew Bailey"
     ],
     "companies": [],
     "channels": [
      "inflation"
     ],
-    "severity": "escalation",
+    "severity": "moderate",
     "policy_stance": "hawkish",
     "policy_actor": "Bank of England",
     "is_new_development": true
@@ -735,28 +705,29 @@
     ],
     "entities": [
      "Bank of England",
-     "Monetary Policy Committee"
+     "Monetary Policy Committee",
+     "Andrew Bailey"
     ],
     "companies": [],
     "channels": [
      "inflation"
     ],
-    "severity": "escalation",
+    "severity": "moderate",
     "policy_stance": "hawkish",
     "policy_actor": "Bank of England",
     "is_new_development": true
    },
    "notes": [],
    "tokens": [
-    1162,
-    119
+    1275,
+    124
    ]
   },
   {
    "story_id": 39,
    "label": "currency: rupee slips below 96 per dollar",
-   "headline": "Indian Rupee settles lower against U.S. dollar after breaching 96",
-   "summary": "The Indian rupee dropped below the 96 level against the U.S. dollar before recovering slightly to close almost flat. Currency values affect the cost of imports and overall economic stability.",
+   "headline": "Indian Rupee Settles Lower Against U.S. Dollar After Early Losses",
+   "summary": "The Indian rupee dropped below the 96 level against the U.S. dollar in early trade before ending slightly lower at 95.94. This movement matters because currency values affect the cost of imports and overall economic stability.",
    "summary_source": "generated",
    "regions": [],
    "articles": [
@@ -811,15 +782,15 @@
    },
    "notes": [],
    "tokens": [
-    941,
+    1067,
     118
    ]
   },
   {
    "story_id": 716,
    "label": "analysis: high oil prices could be worse thanks to China",
-   "headline": "High oil prices could be worse thanks to China",
-   "summary": "Oil prices remain high, but Chinese leader Xi may have spared Trump from even worse conditions. This matters because oil prices affect energy costs and the broader economy.",
+   "headline": "Trump and Xi Jinping prepare to meet as global tensions rise",
+   "summary": "Donald Trump and Chinese President Xi Jinping are holding a summit. This meeting and their ongoing rivalry impact oil prices, rare earth supplies, and the global economy.",
    "summary_source": "stored",
    "regions": [
     "US",
@@ -833,6 +804,18 @@
      "published_at": "2026-09-19T04:08:00+00:00"
     },
     {
+     "source_name": "Moneycontrol",
+     "title": "Trump-Xi showdown casts a shadow over the global economy",
+     "snippet": "",
+     "published_at": "2026-09-20T03:28:08+00:00"
+    },
+    {
+     "source_name": "The Guardian",
+     "title": "China’s stranglehold on rare earths must be ended, says hopeful supplier to EU",
+     "snippet": "Rafael Moreno, whose company has opened demo plant in Brazil, says market is ‘nervous’ as Trump-Xi summit looms The head of a mining company hoping to supply the EU with rare earths in two years’ time has said it is “paramount” to end China’s stranglehold on the supply of the raw materials used in everything from cars to wind turbines and military jets. As Donald Trump and China’s president, Xi Jinping, prepare to meet on Thursday in their second summit of the year, Rafael Moreno said it was…",
+     "published_at": "2026-09-20T11:00:14+00:00"
+    },
+    {
      "source_name": "The Economic Times",
      "title": "Oil is high, but Xi may have spared Trump more",
      "snippet": "",
@@ -840,70 +823,76 @@
     }
    ],
    "event": {
-    "event_type": "commodity_supply_disruption",
+    "event_type": "sanctions_trade_policy",
     "countries": [
      "United States",
      "China"
     ],
     "entities": [
-     "Xi Jinping",
-     "Donald Trump"
+     "Donald Trump",
+     "Xi Jinping"
     ],
     "companies": [],
     "channels": [
-     "oil_supply"
+     "tariffs_trade",
+     "oil_supply",
+     "metals_demand",
+     "risk_sentiment"
     ],
-    "severity": "minor",
+    "severity": "moderate",
     "policy_stance": "not_applicable",
     "policy_actor": null,
-    "is_new_development": false
+    "is_new_development": true
    },
    "raw_event": {
-    "event_type": "commodity_supply_disruption",
+    "event_type": "sanctions_trade_policy",
     "countries": [
      "United States",
      "China"
     ],
     "entities": [
-     "Xi Jinping",
-     "Donald Trump"
+     "Donald Trump",
+     "Xi Jinping"
     ],
     "companies": [],
     "channels": [
-     "oil_supply"
+     "tariffs_trade",
+     "oil_supply",
+     "metals_demand",
+     "risk_sentiment"
     ],
-    "severity": "minor",
+    "severity": "moderate",
     "policy_stance": "not_applicable",
     "policy_actor": null,
-    "is_new_development": false
+    "is_new_development": true
    },
    "notes": [],
    "tokens": [
-    872,
-    120
+    1189,
+    142
    ]
   },
   {
    "story_id": 179,
    "label": "corporate: Tata Sons board row over chairman",
-   "headline": "Tata Sons faces boardroom turmoil over chairman reappointment",
-   "summary": "Tata Trusts opposed the board's decision to reappoint N Chandrasekaran as chairman of Tata Sons, causing stock prices to drop. This leadership dispute creates uncertainty for investors regarding the future of the group companies.",
+   "headline": "Tata Sons faces boardroom leadership disputes and questions over going public",
+   "summary": "Tata Sons is facing leadership and ownership disputes over the chairman's re-appointment and plans to go public. This boardroom battle creates uncertainty for India's corporate crown.",
    "summary_source": "stored",
    "regions": [
     "India"
    ],
    "articles": [
     {
+     "source_name": "The Hindu",
+     "title": "Battle lines in the boardroom | Tata Sons",
+     "snippet": "The group’s promoter company faces questions over leadership, ownership and regulatory issues amid growing differences over who should serve as its executive chairman and whether the company should be listed",
+     "published_at": "2026-09-20T12:28:24+00:00"
+    },
+    {
      "source_name": "BBC",
      "title": "Tata Sons: India's corporate crown braces for upheaval amid boardroom revolt",
      "snippet": "The Tata boardroom battle has intensified over a re-appointment of its chairman and a diktat to go public.",
      "published_at": "2026-09-18T23:07:16+00:00"
-    },
-    {
-     "source_name": "The Hindu",
-     "title": "Chandrasekaran accepts re-appointment as Tata Sons chairman, Tata Trusts terms it illegal",
-     "snippet": "It is learnt that all board members, other than Noel Tata, who is a board member and Chairman of Tata Trusts, voted for the reappointment of Mr. Chandrasekaran; Tata Trusts which holds 66% stake in Tata Sons has termed this reappointment and decision as illegal",
-     "published_at": "2026-09-17T13:53:17+00:00"
     },
     {
      "source_name": "The Indian Express",
@@ -913,9 +902,9 @@
     },
     {
      "source_name": "The Economic Times",
-     "title": "Tata Group stocks reel from aftershocks as Trusts opposes third term for N Chandra",
-     "snippet": "Tata stocks plummeted on Friday due to opposition from Tata Trusts, who contested the reappointment of N Chandrasekaran as chairman by the Tata Sons board. This leadership tug-of-war has raised concerns among investors, uncertain about its implications for multiple group companies. The potential for Tata Sons to go public remains a pivotal opportunity for stakeholders, with future resolutions between the board and Trusts likely affecting market sentiment.",
-     "published_at": "2026-09-19T03:55:49+00:00"
+     "title": "Tata Trusts v Tata Sons: Noel gets Singhvi on board",
+     "snippet": "",
+     "published_at": "2026-09-20T10:46:11+00:00"
     },
     {
      "source_name": "Hindustan Times",
@@ -930,10 +919,7 @@
      "India"
     ],
     "entities": [
-     "Tata Sons",
-     "Tata Trusts",
-     "N Chandrasekaran",
-     "Noel Tata"
+     "Tata Trusts"
     ],
     "companies": [
      "Tata Sons"
@@ -952,10 +938,7 @@
      "India"
     ],
     "entities": [
-     "Tata Sons",
-     "Tata Trusts",
-     "N Chandrasekaran",
-     "Noel Tata"
+     "Tata Trusts"
     ],
     "companies": [
      "Tata Sons"
@@ -970,8 +953,8 @@
    },
    "notes": [],
    "tokens": [
-    1228,
-    134
+    1217,
+    112
    ]
   },
   {
@@ -1034,7 +1017,7 @@
    },
    "notes": [],
    "tokens": [
-    968,
+    1084,
     107
    ]
   },
@@ -1078,7 +1061,7 @@
     "channels": [
      "company_specific"
     ],
-    "severity": "moderate",
+    "severity": "minor",
     "policy_stance": "not_applicable",
     "policy_actor": null,
     "is_new_development": true
@@ -1100,14 +1083,14 @@
     "channels": [
      "company_specific"
     ],
-    "severity": "moderate",
+    "severity": "minor",
     "policy_stance": "not_applicable",
     "policy_actor": null,
     "is_new_development": true
    },
    "notes": [],
    "tokens": [
-    1037,
+    1153,
     140
    ]
   },
@@ -1161,10 +1144,12 @@
      "India"
     ],
     "entities": [
-     "White House"
+     "White House",
+     "Boston-based appeals court"
     ],
     "companies": [],
     "channels": [
+     "immigration_visas",
      "sector_specific"
     ],
     "severity": "escalation",
@@ -1179,10 +1164,12 @@
      "India"
     ],
     "entities": [
-     "White House"
+     "White House",
+     "Boston-based appeals court"
     ],
     "companies": [],
     "channels": [
+     "immigration_visas",
      "sector_specific"
     ],
     "severity": "escalation",
@@ -1192,8 +1179,8 @@
    },
    "notes": [],
    "tokens": [
-    1244,
-    112
+    1360,
+    129
    ]
   },
   {
@@ -1256,8 +1243,7 @@
      "Irregular"
     ],
     "channels": [
-     "tech_regulation",
-     "company_specific"
+     "sector_specific"
     ],
     "severity": "moderate",
     "policy_stance": "not_applicable",
@@ -1282,8 +1268,7 @@
      "Irregular"
     ],
     "channels": [
-     "tech_regulation",
-     "company_specific"
+     "sector_specific"
     ],
     "severity": "moderate",
     "policy_stance": "not_applicable",
@@ -1292,8 +1277,8 @@
    },
    "notes": [],
    "tokens": [
-    1195,
-    155
+    1311,
+    148
    ]
   },
   {
@@ -1359,7 +1344,7 @@
    },
    "notes": [],
    "tokens": [
-    930,
+    1046,
     95
    ]
   },
@@ -1444,15 +1429,15 @@
    },
    "notes": [],
    "tokens": [
-    1186,
+    1302,
     122
    ]
   },
   {
    "story_id": 181,
    "label": "non-market: Kennedy Center protests",
-   "headline": "Protesters gather at Kennedy Center over demolition threats",
-   "summary": "Thousands of demonstrators formed a human chain at the Kennedy Center to protest plans by President Donald Trump to close and potentially demolish the venue. The protests highlight growing concern over the future of the major cultural institution following legal battles and threats of closure.",
+   "headline": "Protests erupt in Washington over threats to demolish Kennedy Center",
+   "summary": "Thousands of demonstrators gathered in Washington to protest plans by President Trump to close and potentially demolish the Kennedy Center. The protests highlight growing concerns over the future of the prominent arts venue and its newly renamed identity.",
    "summary_source": "stored",
    "regions": [
     "US"
@@ -1460,9 +1445,9 @@
    "articles": [
     {
      "source_name": "The New York Times",
-     "title": "Kennedy Center Supporters Rally Amid Fears of Trump’s Demolition",
+     "title": "How President Trump Broke the Kennedy Center",
      "snippet": "",
-     "published_at": "2026-09-19T07:20:00+00:00"
+     "published_at": "2026-09-20T10:12:08+00:00"
     },
     {
      "source_name": "The Hindu",
@@ -1496,9 +1481,9 @@
     ],
     "entities": [
      "Kennedy Center",
-     "Donald Trump",
      "Trump-Kennedy Centre",
-     "Kerry Kennedy"
+     "Foggy Bottom",
+     "Washington"
     ],
     "companies": [],
     "channels": [
@@ -1516,9 +1501,9 @@
     ],
     "entities": [
      "Kennedy Center",
-     "Donald Trump",
      "Trump-Kennedy Centre",
-     "Kerry Kennedy"
+     "Foggy Bottom",
+     "Washington"
     ],
     "companies": [],
     "channels": [
@@ -1531,7 +1516,7 @@
    },
    "notes": [],
    "tokens": [
-    1181,
+    1288,
     122
    ]
   },
@@ -1546,16 +1531,16 @@
    ],
    "articles": [
     {
+     "source_name": "The Hindu",
+     "title": "Russian election, cast as test of support for Ukraine war, enters final day",
+     "snippet": "Most anti-war candidates ‌were barred from the ballot; those who did run from the liberal Yabloko party said they feared for their freedom after courts handed long jail terms to two senior party figures before the vote for comments about the conflict deemed illegal by authorities",
+     "published_at": "2026-09-20T07:54:58+00:00"
+    },
+    {
      "source_name": "Al Jazeera",
      "title": "Russia’s elections are more than political theatre",
      "snippet": "For the Kremlin, parliamentary elections remain a mechanism for political participation, feedback and legitimacy.",
      "published_at": "2026-09-19T06:46:17+00:00"
-    },
-    {
-     "source_name": "Hindustan Times",
-     "title": "Russia’s sham election is descending into farce",
-     "snippet": "The parliamentary vote may be followed by a bigger mobilisation for war",
-     "published_at": "2026-09-17T16:18:05+00:00"
     },
     {
      "source_name": "CNBC",
@@ -1568,18 +1553,24 @@
      "title": "Russians head to the polls to choose lawmakers for their parliament",
      "snippet": "Russians head to the polls to choose lawmakers for their parliament, the Duma. It's Russia's first nationwide parliamentary race since launching its full scale invasion of Ukraine in 2022.",
      "published_at": "2026-09-18T23:04:57+00:00"
+    },
+    {
+     "source_name": "Hindustan Times",
+     "title": "Russia’s sham election is descending into farce",
+     "snippet": "The parliamentary vote may be followed by a bigger mobilisation for war",
+     "published_at": "2026-09-17T16:18:05+00:00"
     }
    ],
    "event": {
     "event_type": "election_political_change",
     "countries": [
-     "Russia",
-     "Ukraine"
+     "Russia"
     ],
     "entities": [
      "Kremlin",
      "Duma",
-     "United Russia"
+     "United Russia",
+     "Yabloko"
     ],
     "companies": [],
     "channels": [
@@ -1593,13 +1584,13 @@
    "raw_event": {
     "event_type": "election_political_change",
     "countries": [
-     "Russia",
-     "Ukraine"
+     "Russia"
     ],
     "entities": [
      "Kremlin",
      "Duma",
-     "United Russia"
+     "United Russia",
+     "Yabloko"
     ],
     "companies": [],
     "channels": [
@@ -1612,8 +1603,8 @@
    },
    "notes": [],
    "tokens": [
-    1063,
-    124
+    1278,
+    126
    ]
   }
  ]

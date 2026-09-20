@@ -45,8 +45,15 @@ from app.config import (
 from app.db import init_db, make_engine, make_session_factory
 from app.delivery.format import digest_item, format_digest, telegram_length
 from app.delivery.telegram import TelegramError, send_messages
-from app.llm.client import LLMClient, LLMConfigError, make_llm_client
-from app.models import Article, Run, Story, utcnow
+from app.llm.client import (
+    LLMClient,
+    LLMConfigError,
+    LLMError,
+    LLMQuotaError,
+    make_llm_client,
+)
+from app.llm.prompts import IMPACT_PROMPT_VERSION
+from app.models import Article, RuleDisagreementRow, Run, Story, utcnow
 from app.net import make_client
 from app.pipeline.classify import non_news_reason
 from app.pipeline.cluster import GroupingResult, assign_to_stories
@@ -54,7 +61,20 @@ from app.pipeline.dedupe import dedupe_articles
 from app.pipeline.embed import Embedder, load_embedder
 from app.pipeline.extract_event import extract_events, pending_event_stories
 from app.pipeline.fetch import FeedResult, SourceResolver, fetch_all, filter_recent
-from app.pipeline.playbook import Rule, apply_rules, load_playbook
+from app.pipeline.impact_llm import (
+    matched_impacts,
+    request_impacts,
+    validate_impacts,
+)
+from app.pipeline.merge_impacts import merge_impacts
+from app.pipeline.playbook import (
+    Rule,
+    load_playbook,
+    maps_to_impacts,
+    matching_rules,
+    store_calls,
+    stories_awaiting_impacts,
+)
 from app.pipeline.prices import (
     DAILY,
     DAILY_LEAD,
@@ -66,7 +86,7 @@ from app.pipeline.prices import (
     label_for,
     price_impacts,
 )
-from app.pipeline.rank import pending_stories, rank_stories
+from app.pipeline.rank import pending_stories, rank_stories, rerank_stories
 from app.pipeline.scoring import (
     ScoreReport,
     mark_unreferenced,
@@ -123,6 +143,12 @@ class PipelineReport:
     events_skipped_quota: int = 0
     stories_analyzed: int = 0  # event extracted and the playbook applied
     impacts_created: int = 0
+    reranked: int = 0  # stories the reasoning model reordered
+    llm_impact_calls: int = 0
+    llm_impacts_added: int = 0  # calls the playbook didn't have
+    llm_disagreements: int = 0
+    # Invented symbols, capped confidences and anything else layer B had thrown out.
+    llm_notes: list[str] = field(default_factory=list)
     impacts_priced: int = 0  # impacts that got a reference price this run
     impacts_refreshed: int = 0  # impacts whose move so far was updated
     impacts_waiting: int = 0  # market hasn't opened since the story; priced after the open
@@ -253,7 +279,18 @@ def run_pipeline(
             report.borderline_logged = log_borderline(grouping, settings, report.run_id)
 
             stage = "rank"
-            top = rank_stories(session, settings, now)
+            candidates_wanted = max(
+                settings.pipeline.rerank_candidates, settings.pipeline.max_stories_per_run
+            )
+            top = rank_stories(session, settings, now, limit=candidates_wanted)
+            if llm is not None and settings.pipeline.rerank_candidates:
+                # SPEC 7.4: the reasoning model decides what matters most, which then decides
+                # what gets summarized and which stories layer B spends a call on.
+                top, note = rerank_stories(llm, top, settings, settings.pipeline.rerank_candidates)
+                report.reranked = min(len(top), settings.pipeline.rerank_candidates)
+                if note:
+                    report.errors.append({"stage": "rank", "error": note})
+            top = top[: settings.pipeline.max_stories_per_run]
             report.stories_ranked = len(top)
             # Summaries skipped for quota on an earlier run go first, even if no longer top-N.
             pending = pending_stories(session, settings, now)
@@ -328,19 +365,87 @@ def run_pipeline(
                         report.errors.append(
                             {"stage": "impacts", "error": f"playbook not loaded: {exc}"}
                         )
-                for story_id in extraction.extracted:
+                assets = _assets(report.errors)
+                # Layer B runs on the most significant stories of this run (after the
+                # rerank), and only on those the playbook step would map at all.
+                rank_of = {story.id: index for index, story in enumerate(top)}
+                # This run's extractions, plus any story whose event never got analyzed
+                # because an earlier run stopped between the two steps.
+                waiting = stories_awaiting_impacts(
+                    session, now - timedelta(hours=settings.pipeline.lookback_hours)
+                )
+                analyzed = sorted(
+                    {*extraction.extracted, *(story.id for story in waiting)},
+                    key=lambda i: rank_of.get(i, 10**6),
+                )
+                llm_budget = settings.impacts.llm_max_stories_per_run if assets else 0
+                for story_id in analyzed:
                     story = session.get(Story, story_id)
                     if story is None or story.latest_event is None:
                         continue
-                    created = apply_rules(session, story, story.latest_event, playbook, now)
+                    event = story.latest_event
+                    matched = matching_rules(playbook, event)
+                    calls_in = matched_impacts(matched)
+                    disagreements: list[Any] = []
+                    model_calls: list[Any] = []
+                    if llm_budget and maps_to_impacts(event):
+                        llm_budget -= 1
+                        try:
+                            output = request_impacts(
+                                llm, story, event, calls_in, list(assets.values()), settings
+                            )
+                            checked = validate_impacts(
+                                output.value,
+                                assets,
+                                {rule.id for rule in matched},
+                                settings.impacts.max_impacts_per_story,
+                            )
+                            model_calls = checked.impacts
+                            disagreements = checked.disagreements
+                            report.llm_impact_calls += 1
+                            report.llm_notes += [
+                                f"story {story_id}: {note}" for note in checked.dropped
+                            ]
+                        except LLMQuotaError as exc:
+                            llm_budget = 0
+                            report.errors.append(
+                                {"stage": "impacts", "error": f"llm layer stopped: {exc}"}
+                            )
+                        except LLMError as exc:
+                            report.errors.append(
+                                {"stage": "impacts", "story_id": story_id, "error": str(exc)}
+                            )
+                    merged = merge_impacts(
+                        calls_in, model_calls, {d.rule_id for d in disagreements}
+                    )
+                    created = store_calls(session, story, event, merged, now)
+                    for disagreement in disagreements:
+                        session.add(
+                            RuleDisagreementRow(
+                                story_id=story.id,
+                                event_id=event.id,
+                                rule_id=disagreement.rule_id,
+                                reason=disagreement.reason,
+                                model=settings.llm.summary_model,
+                                prompt_version=IMPACT_PROMPT_VERSION,
+                                created_at=now,
+                            )
+                        )
+                    report.llm_disagreements += len(disagreements)
                     report.stories_analyzed += 1
                     report.impacts_created += len(created)
+                    report.llm_impacts_added += sum(
+                        1 for impact in created if impact.origin == "llm"
+                    )
                     for impact in created:
                         if impact.rule_id:
                             report.impact_rules[impact.rule_id] = (
                                 report.impact_rules.get(impact.rule_id, 0) + 1
                             )
-                session.commit()
+                    # Commit before the next story's LLM call: holding a write transaction
+                    # across a network call locks the database against the rate limiter,
+                    # which writes from its own session.
+                    session.commit()
 
                 stage = "prices"
                 # New impacts need a reference price; the ones heading for the next digest
@@ -684,6 +789,8 @@ def run_once(settings: Settings, session_factory: sessionmaker[Session]) -> list
             else ""
         ),
         f"impacts: {report.impacts_created} from {report.stories_analyzed} analyzed "
+        f"({report.llm_impact_calls} LLM calls, {report.llm_impacts_added} added by the model, "
+        f"{report.llm_disagreements} rule disagreements) "
         + (
             "stories (" + ", ".join(f"{rule} {n}" for rule, n in report.impact_rules.items()) + ")"
             if report.impact_rules
@@ -714,6 +821,9 @@ def run_once(settings: Settings, session_factory: sessionmaker[Session]) -> list
                 else "left out (no matching story)"
             )
             lines.append(f"  [{entry['reason']}] {entry['title']} ({entry['source']}) → {where}")
+    if report.llm_notes:
+        lines.append(f"impact-layer notes ({len(report.llm_notes)}):")
+        lines += [f"  {note}" for note in report.llm_notes]
     if report.event_notes:
         lines.append(f"event notes ({len(report.event_notes)}):")
         lines += [f"  {note}" for note in report.event_notes]

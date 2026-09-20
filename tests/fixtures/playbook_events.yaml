@@ -150,3 +150,15 @@ us_tariffs_on_india:
       event: {event_type: sanctions_trade_policy, countries: [United States, India], channels: [tariffs_trade], severity: de_escalation}
     - about: US tariffs on someone else (countries_all needs both)
       event: {event_type: sanctions_trade_policy, countries: [United States, China], channels: [tariffs_trade], severity: escalation}
+
+visa_policy_india_it:
+  match:
+    - about: the US extends a $100,000 H-1B visa fee (story 616)
+      event: {event_type: regulation_sector, countries: [United States, India], channels: [immigration_visas, sector_specific], severity: escalation}
+  no_match:
+    - about: the same fee being cut, which helps the same companies
+      event: {event_type: regulation_sector, countries: [United States, India], channels: [immigration_visas], severity: de_escalation}
+    - about: US immigration rules with no Indian exposure
+      event: {event_type: regulation_sector, countries: [United States], channels: [immigration_visas], severity: escalation}
+    - about: other sector regulation, without the visa channel
+      event: {event_type: regulation_sector, countries: [United States, India], channels: [sector_specific], severity: escalation}

@@ -6,7 +6,10 @@ llm:
   # /pricing: both are stable models whose standard tier lists input and output as
   # "Free of charge" on the free tier. Free-tier content is used to improve Google's products.
   summary_model: gemini-3.5-flash-lite # cheap: summaries + event extraction
-  reasoning_model: gemini-3.8-flash # stronger: impact mapping, reranking (Phase 5)
+  # gemini-3.8-flash is listed by the API but has no quota on this project (it isn't on
+  # the AI Studio rate-limit page), the same as gemini-3.1-pro-preview. 3.6 Flash is the
+  # strongest model this project can actually call.
+  reasoning_model: gemini-3.6-flash # stronger, but only 20 requests a day here
   # To use Anthropic instead: provider: anthropic, summary_model: claude-haiku-4-5,
   # reasoning_model: claude-sonnet-5, temperature: {claude-haiku-4-5: 0.2}, and set
   # ANTHROPIC_API_KEY. (claude-sonnet-5 rejects temperature, so leave it out.)
@@ -29,6 +32,13 @@ llm:
       # 70% of the quota for new work; the remaining 150 are kept for retries. When the budget
       # is used up, the rest of the run's summaries are skipped and done on a later run.
       requests_per_day_budget: 350
+    gemini-3.6-flash: # the user's project limits, provided 2026-09-20
+      requests_per_minute: 5
+      input_tokens_per_minute: 250000
+      requests_per_day: 20
+      # 20 a day is too little for per-story work; this model is for the once-a-run rerank
+      # (8 calls a day at the 3-hourly schedule), so the budget leaves room for retries.
+      requests_per_day_budget: 15
   rate_limit_day_timezone: America/Los_Angeles
 
 http:
@@ -42,6 +52,10 @@ pipeline:
   story_attach_window_hours: 36
   max_stories_per_run: 20
   max_articles_per_story_for_llm: 5
+  # The reasoning model reorders this many top stories by real-world significance
+  # before summarizing (SPEC 7.4). It decides which stories are summarized and which
+  # get an LLM impact call. If the call fails, the importance order is kept.
+  rerank_candidates: 40
   snippet_max_chars: 500
 
 dedupe:
@@ -105,6 +119,10 @@ impacts:
   # than a normal closure: Friday close to Monday open is ~2.7 days, and a holiday Monday
   # makes it ~3.7, so 3 would flag healthy weekends.
   price_stale_days: 5
+  # The LLM impact layer runs on the top stories of each run only: the digest shows 15
+  # stories twice a day, so calls on the rest would buy little. 5 a run is 40 a day,
+  # which keeps summaries + extraction + layer B inside the 350 budget on busy days.
+  llm_max_stories_per_run: 5
 
 scoring:
   horizons_trading_days: [1, 5]

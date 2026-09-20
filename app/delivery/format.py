@@ -17,6 +17,8 @@ UP, DOWN, MIXED = "\u25b2", "\u25bc", "\u2195"
 _ORDER_RANK = {"first": 0, "second": 1}
 _CONFIDENCE_RANK = {"high": 0, "medium": 1, "low": 2}
 _ORDER_LABEL = {"first": "1st", "second": "2nd"}
+# Where the call came from: the rules, the model, or both agreeing.
+_ORIGIN_LABEL = {"playbook": "playbook", "llm": "LLM", "both": "both"}
 FOOTER = "<i>Research notes, not financial advice.</i>"
 STORY_SEPARATOR = "\n\n"
 
@@ -114,11 +116,13 @@ def impact_lines(
 
     names_by_line: dict[tuple[str, str, str, str], list[str]] = {}
     rules_by_line: dict[tuple[str, str, str, str], int] = {}
+    origins_by_line: dict[tuple[str, str, str, str], set[str]] = {}
     priced_lines: set[tuple[str, str, str, str]] = set()
     for impact, rule_count in shown:
         key = (impact.direction, impact.order, impact.confidence, impact.mechanism)
         names_by_line.setdefault(key, []).append(_entry(impact, assets, labels))
         rules_by_line[key] = max(rules_by_line.get(key, 0), rule_count)
+        origins_by_line.setdefault(key, set()).add(impact.origin)
         if impact.move_at_detection_pct is not None and impact.reference_price is not None:
             priced_lines.add(key)
     for key, names in names_by_line.items():
@@ -126,10 +130,11 @@ def impact_lines(
         agree = f" · {rules_by_line[key]} rules" if rules_by_line[key] > 1 else ""
         # Say which window the move covers: the track-record line uses a different one.
         window = " · since news" if key in priced_lines else ""
+        origin = "+".join(_ORIGIN_LABEL.get(name, name) for name in sorted(origins_by_line[key]))
         arrow = UP if direction == "up" else DOWN
         lines.append(
             f"{arrow} {_text(', '.join(names))}{window} · {_ORDER_LABEL[order]} · "
-            f"{confidence}{agree} — {_text(mechanism)}"
+            f"{confidence} · {origin}{agree} — {_text(mechanism)}"
         )
     if extra:
         rest = ", ".join(

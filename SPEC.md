@@ -211,6 +211,8 @@ Impacts are written once and never edited: each one is the call as it was made, 
 
 **impact_scores**: id, impact_id, horizon_days, asset_return, benchmark_symbol, benchmark_return, excess_return, threshold, outcome (`hit` | `miss` | `no_move` | `unscorable`), scored_at. Unique on (impact_id, horizon_days).
 
+**rule_disagreements** (added in Phase 5): id, story_id, event_id, rule_id, reason, model, prompt_version, created_at. Where the LLM impact layer said a playbook rule doesn't fit an event (7.7). The rule's impacts are still written, at low confidence when they are written in the same run.
+
 **price_cache**: symbol, interval, ts (bar start, stored UTC), open, high, low, close, **volume** (added in Phase 3). Unique on (symbol, interval, ts). Intervals in use: `60m` for reference prices and the latest price, `1d` for the volatility baseline. Volume is needed because a zero-volume daily bar is how Yahoo marks an exchange holiday for `.NS` stocks, and those bars must be kept out of the baseline.
 
 **runs**: id, kind (`pipeline` | `digest` | `score`), started_at, finished_at, articles_fetched, stories_processed, input_tokens, output_tokens, errors (JSON).
@@ -279,6 +281,8 @@ importance = w_sources * log(1 + distinct_independent_sources)
 Select the top `max_stories_per_run`.
 
 **Phase 5 addition:** LLM rerank of the top ~40 with the reasoning model, prompt: rank by real-world significance for a reader following the US, India, and global affairs and markets; demote celebrity, sports, and viral stories that are widely covered but not significant. Return ordered story IDs as JSON.
+
+As built: `pipeline.rerank_candidates` (40) sets how many are reordered, and the result decides both what gets summarized and which stories layer B spends a call on. Ids the model invents are dropped and stories it leaves out keep their importance order; any failure (including a used-up quota) keeps the computed order and is recorded in `runs.errors`.
 
 ### 7.5 Summarize
 
@@ -419,6 +423,15 @@ USER:
 ```
 
 **Validation:** drop any impact whose symbol isn't in the universe and log it; enforce the second-order confidence cap in code too.
+
+**As built (Phase 5):**
+
+- **Layer B runs on `summary_model`, not `reasoning_model`.** This project's reasoning model (`gemini-3.6-flash`) allows 20 requests a day, which cannot carry a per-story call; `gemini-3.8-flash` is listed by the API but has no quota here. Flash-Lite also read the fixtures better in the quality gate.
+- **It runs on the top `impacts.llm_max_stories_per_run` (5) stories of each run**, in the order the rerank produced, and only on events the playbook step would map at all. The digest shows 15 stories twice a day, so calls on the rest buy little. That keeps summaries + extraction + layer B at about 246 calls on a typical day and 312 on a busy one, inside the 350 budget.
+- **The reasoning model keeps the rerank** (one call per run, its own quota). When it fails or runs out, the computed importance order is kept and the run continues.
+- **Merging happens before anything is written**, so impacts stay written-once: a call agreed by both layers is stored once with `origin=both` and its rule id.
+- **A rule disagreement only demotes calls written in the same run.** If the story was analyzed earlier, the disagreement is recorded in `rule_disagreements` but the existing impacts keep their confidence, because an impact is the call as it was made.
+- **Quality gate first:** `scripts/impact_gate.py` runs layer B over the stored event fixtures and reports invented symbols, capped confidences, disagreements and the `no_clear_impact` rate, without writing anything.
 
 **Merge (`merge_impacts.py`):**
 
@@ -737,12 +750,12 @@ Done when:
 - ~~`score` is idempotent (test it)~~: tested, and checked live (a second run wrote nothing)
 - ~~digest shows track record lines once n ≥ min samples~~: checked in a live dry run
 
-**Phase 5: LLM impact layer + LLM rerank** (embedding clustering moved to the Phase 1 fixes)
+**Phase 5: LLM impact layer + LLM rerank** (embedding clustering moved to the Phase 1 fixes) — complete 2026-09-20.
 Done when:
 
-- LLM impacts are validated against the universe (invalid symbols logged and dropped, tested)
-- merge logic is tested (agree, conflict, rule disagreement)
-- track record can be split by origin so I can compare playbook vs LLM
+- ~~LLM impacts are validated against the universe (invalid symbols logged and dropped, tested)~~
+- ~~merge logic is tested (agree, conflict, rule disagreement)~~
+- ~~track record can be split by origin so I can compare playbook vs LLM~~: `origin` is a track-record group, and live runs now produce `both` rows
 - ~~embedding grouping examples shown to me and threshold approved~~: done in the Phase 1 fixes (threshold 0.55 approved 2026-09-19)
 
 **Phase 6: Web UI**

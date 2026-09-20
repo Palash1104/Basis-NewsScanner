@@ -173,12 +173,17 @@ class SqlMinuteWindow:
     def __init__(self, session_factory: sessionmaker[Session], provider: str) -> None:
         self._session_factory = session_factory
         self._provider = provider
+        self._pruned_at: float | None = None
 
     def reserve(self, model: str, at: float, input_tokens: float) -> int:
         with self._session_factory() as session:
-            session.execute(
-                delete(LLMRequest).where(LLMRequest.requested_at < _utc(at - KEEP_SECONDS))
-            )
+            # Pruning is housekeeping, not per-request work: doing it on every reservation
+            # means a write on every LLM call, which fights the pipeline for the database.
+            if self._pruned_at is None or at - self._pruned_at > KEEP_SECONDS:
+                session.execute(
+                    delete(LLMRequest).where(LLMRequest.requested_at < _utc(at - KEEP_SECONDS))
+                )
+                self._pruned_at = at
             row = LLMRequest(
                 provider=self._provider,
                 model=model,

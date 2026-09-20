@@ -17,6 +17,7 @@ from app.pipeline.playbook import (
     matches,
     matching_rules,
     phrase_matches,
+    stories_awaiting_impacts,
 )
 from tests.conftest import FIXTURES, NOW
 
@@ -62,8 +63,8 @@ def _ids(cases: list[tuple[str, str, SimpleNamespace]]) -> list[str]:
 
 
 def test_playbook_loads_and_every_symbol_is_in_the_universe() -> None:
-    assert len(RULES) == 15
-    assert sum(len(rule.impacts) for rule in RULES.values()) == 72
+    assert len(RULES) == 16
+    assert sum(len(rule.impacts) for rule in RULES.values()) == 77
 
 
 def test_every_rule_has_a_match_and_a_no_match_fixture() -> None:
@@ -315,11 +316,13 @@ def test_opposite_calls_on_one_asset_are_marked_as_a_conflict(session: Session) 
         (63, ["fed_hawkish"]),  # not rbi_hawkish (the actor is the Fed), not rupee_sharp_fall
         (612, []),  # Greenland: a de-escalation must not buy defence stocks
         (317, ["oil_supply_easing"]),  # shipping-route de-escalation
-        # v2 tags the Russian-oil sanctions law with an oil_supply channel as well, so the
-        # supply rule fires too.
+        # The Russian-oil sanctions law carries an oil_supply channel as well, so the supply
+        # rule fires too.
         (2, ["oil_supply_shock", "us_tariffs_on_india"]),
         (111, ["oil_supply_shock", "geopolitical_risk_off"]),
-        (700, ["us_nato_defense_spending"]),
+        # v3 rates the $2.7bn arms package as escalation, so the risk-off rule fires too.
+        (700, ["geopolitical_risk_off", "us_nato_defense_spending"]),
+        (616, ["visa_policy_india_it"]),  # the gap the impact-layer gate found
         (39, []),  # the rupee recovered: no rule
         (121, []),  # Fiji HIV: no market channel
         (716, []),  # analysis piece: not a new development
@@ -329,3 +332,16 @@ def test_rules_against_real_extracted_events(story_id: int, expected: list[str])
     item = REAL_EVENTS[story_id]
     fired = [rule.id for rule in matching_rules(list(RULES.values()), event(**item["event"]))]
     assert fired == expected, f"{item['label']} fired {fired}"
+
+
+def test_an_event_left_unanalyzed_by_an_interrupted_run_is_picked_up(session: Session) -> None:
+    """A run that stops between extraction and impacts leaves an event with no analysis; the
+    next run must find it, or the story keeps its event and never gets impacts."""
+    story, row = _story_with_event(session, event_type="public_health", channels=["none"])
+    session.flush()
+    cutoff = NOW - timedelta(hours=12)
+    assert [s.id for s in stories_awaiting_impacts(session, cutoff)] == [story.id]
+
+    apply_rules(session, story, row, list(RULES.values()), NOW)
+    session.flush()
+    assert stories_awaiting_impacts(session, cutoff) == []  # analyzed now, so not picked up
