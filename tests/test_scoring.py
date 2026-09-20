@@ -359,4 +359,4 @@ def test_the_digest_line_appears_only_for_a_rule_with_enough_calls(session: Sess
     _scored(session, "oil_supply_shock", MISS)
     rows = track_record(session, "rule_id")
     line = story_track_line(story, rows, minimum=5)
-    assert line == "Track record: oil_supply_shock right 4 of 5 (1d, 5 stories)"
+    assert line == "Track record: oil_supply_shock right 4 of 5 (1d close, 5 stories)"

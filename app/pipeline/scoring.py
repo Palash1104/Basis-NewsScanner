@@ -394,7 +394,8 @@ def story_track_line(
         return None
     best = max(qualifying, key=lambda row: row.judged)
     name = (display or {}).get(best.key, best.key)
+    # "close" marks the window: this is the close N trading days on, not the move since news.
     return (
         f"Track record: {name} right {best.hits} of {best.judged} "
-        f"({best.horizon_days}d, {len(best.stories)} stories)"
+        f"({best.horizon_days}d close, {len(best.stories)} stories)"
     )

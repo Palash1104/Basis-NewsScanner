@@ -114,17 +114,22 @@ def impact_lines(
 
     names_by_line: dict[tuple[str, str, str, str], list[str]] = {}
     rules_by_line: dict[tuple[str, str, str, str], int] = {}
+    priced_lines: set[tuple[str, str, str, str]] = set()
     for impact, rule_count in shown:
         key = (impact.direction, impact.order, impact.confidence, impact.mechanism)
         names_by_line.setdefault(key, []).append(_entry(impact, assets, labels))
         rules_by_line[key] = max(rules_by_line.get(key, 0), rule_count)
+        if impact.move_at_detection_pct is not None and impact.reference_price is not None:
+            priced_lines.add(key)
     for key, names in names_by_line.items():
         direction, order, confidence, mechanism = key
         agree = f" · {rules_by_line[key]} rules" if rules_by_line[key] > 1 else ""
+        # Say which window the move covers: the track-record line uses a different one.
+        window = " · since news" if key in priced_lines else ""
         arrow = UP if direction == "up" else DOWN
         lines.append(
-            f"{arrow} {_text(', '.join(names))} · {_ORDER_LABEL[order]} · {confidence}{agree}"
-            f" — {_text(mechanism)}"
+            f"{arrow} {_text(', '.join(names))}{window} · {_ORDER_LABEL[order]} · "
+            f"{confidence}{agree} — {_text(mechanism)}"
         )
     if extra:
         rest = ", ".join(

@@ -387,5 +387,5 @@ def test_prices_reach_the_digest_as_moves_and_labels(
 
     dry = run_digest(db, settings, send=False, now=NOW + timedelta(minutes=5))
     text = "\n".join(dry.messages)
-    assert "▼ Nifty 50 -0.3% (already moved)" in text
+    assert "▼ Nifty 50 -0.3% (already moved) · since news · 2nd" in text
     assert "▲ USD/INR (rupee weaker) +0.0%" in text  # priced, but nothing worth flagging

@@ -306,7 +306,9 @@ def test_impact_line_shows_the_move_and_the_label() -> None:
         _impact("CL=F", "up", id=2, reference_price=100.0, move_at_detection_pct=1.9),
     ]
     (line,) = impact_lines(impacts, ASSETS, limit=6, labels={1: "already moved"})
-    assert line.startswith("▲ Brent crude +2.4% (already moved), WTI crude +1.9% · 1st · medium")
+    assert line.startswith(
+        "▲ Brent crude +2.4% (already moved), WTI crude +1.9% · since news · 1st · medium"
+    )
 
 
 def test_yield_moves_are_shown_in_points_with_the_unit() -> None:
