@@ -7,8 +7,9 @@ price checks and a track record (see `SPEC.md`).
 
 Research notes, not financial advice.
 
-**Status:** Phase 3 complete (fetch → group → rank → summarize → extract the event → apply
-the playbook → check whether the market already moved → Telegram digest). Market
+**Status:** Phase 4 complete (fetch → group → rank → summarize → extract the event → apply
+the playbook → check whether the market already moved → score the calls afterwards →
+Telegram digest). Market
 impact notes start in Phase 2.
 
 ## Setup
@@ -51,6 +52,7 @@ but skips summaries and records why. The digest only includes summarized stories
 | `uv run newsdesk digest --send` | Send that digest to Telegram. |
 | `uv run newsdesk scheduler` | Keep running: a pipeline pass every `schedule.pipeline_every_hours` (every 3 hours), and a digest at each `delivery.digest_times` (07:30 and 19:30 IST). Stop with Ctrl+C; restart it after editing `settings.yaml`. |
 | `uv run python scripts/verify_feeds.py [--include-disabled]` | Check every feed responds and has recent entries. |
+| `uv run newsdesk score` | Judge every call whose horizon is complete and print the track record. Safe to re-run: scores are written once. |
 | `uv run newsdesk validate-tickers` | Check every symbol in `config/assets.yaml` has recent prices on Yahoo (writes `data/ticker_report.md`). |
 | `uv run python scripts/embedding_report.py [--refresh]` | Compare embedding grouping thresholds on real samples and the regression fixtures (writes `data/embedding_report.md`). |
 | `uv run python scripts/regroup.py [--dry-run]` | Regroup every stored article with embeddings (no LLM calls). Changed stories that had a summary become `needs_resummary`. |
@@ -150,6 +152,11 @@ used to improve Google's products. On Anthropic, `claude-haiku-4-5` costs a few 
 - **Explainers, roundups and live blogs** are detected by headline patterns. They can attach to
   a story but never start one or count as a source. Each run prints every flagged headline, so
   misfires are visible.
+- **The track record is a sanity check, not a backtest.** Overlapping news on the same asset
+  makes attribution noisy: when two stories touch crude on the same day, neither can claim the
+  move. Worse, n counts asset-calls rather than events — one story can produce a dozen
+  correlated impacts — so the digest and the tables report how many distinct stories are behind
+  each number. Read a hit rate as a hint about a rule, not a measurement.
 - **Moves need an open market.** News that breaks after a close has no reference price until
   the next session, so those impacts show no move until then. That is normal, not an error.
 - **Market impacts come from hand-written rules** (`config/playbook.yaml`), not from a model,

@@ -469,6 +469,17 @@ Aggregate track records by: rule_id, event_type, origin (playbook / llm / both),
 
 Add a short note in the README that overlapping news on the same asset makes attribution noisy; this is a sanity check, not a rigorous backtest.
 
+**As built (Phase 4):**
+
+- **Trading days come from each asset's own sessions**, dated in its exchange's time zone (`timezone` in assets.yaml, verified by validate-tickers). A session is a daily bar that isn't an exchange-holiday filler: zero volume where the type reports volume, or a zero-range bar with no volume. No calendar table is needed, and NSE and US holidays are handled separately.
+- **Horizon N** is the Nth session on or after the reference session, so a story that breaks mid-session is judged from that session's close and an overnight story from the next one's.
+- **The benchmark is measured from the same instant over the same sessions**, using the same reference rule as the asset, so both sides cover the same window.
+- **Volatility is measured before the reference session**, so the move being judged can't raise its own threshold. Fewer than `impacts.vol_min_returns` usable returns → `unscorable`, and that never becomes scorable since the history can't grow.
+- **Idempotence:** `impact_scores` is unique on (impact_id, horizon_days), and a row is written only when every input is present. A late bar just means the next run writes it; existing rows are never rewritten except by `newsdesk score --rescore`.
+- **Giving up:** an impact with no reference price after `scoring.reference_grace_days` (7) becomes `unscorable`, as does a horizon whose data hasn't arrived `scoring.score_grace_days` (7) days past its expected completion. Both are final, so the daily job stops retrying.
+- **n counts asset-calls, not independent events.** One story can produce a dozen correlated impacts, so the track record reports the number of distinct stories next to n.
+- Scoring runs daily at `schedule.score_time` (03:30 IST, after the US close) and is also available as `newsdesk score`.
+
 ---
 
 ## 8. Asset universe (`config/assets.yaml`)
@@ -660,7 +671,7 @@ If you think a rule is badly specified or a condition can't be expressed cleanly
 - Order impacts: first-order before second-order, then by confidence.
 - Footer on every digest: "Research notes, not financial advice."
 - `--dry-run` prints the formatted digest to the terminal instead of sending.
-- Breaking alerts (Phase 4, off by default): if a new story's importance exceeds `breaking_importance_threshold`, send it immediately, max one alert per story.
+- Breaking alerts: **deferred** (moved out of Phase 4 on 2026-09-20). To be scheduled as a later phase or a standalone task, once real importance scores have been watched for a few weeks. When built: if a new story's importance exceeds `breaking_importance_threshold`, send it immediately, max one alert per story; off by default.
 
 ---
 
@@ -719,12 +730,12 @@ Done when:
 - ~~tests cover a story published outside NSE hours (reference is next session) and missing data~~: plus the weekend case, provider failures, stale data and holiday filler bars
 - ~~digest shows "already moved" / "moving against this call" labels~~: checked in a live dry run
 
-**Phase 4: Scoring + track record + breaking alerts**
+**Phase 4: Scoring + track record** — complete 2026-09-20.
 Done when:
 
-- unit tests with synthetic price series cover hit, miss, no_move, unscorable, and benchmark adjustment
-- `score` is idempotent (test it)
-- digest shows track record lines once n ≥ min samples
+- ~~unit tests with synthetic price series cover hit, miss, no_move, unscorable, and benchmark adjustment~~
+- ~~`score` is idempotent (test it)~~: tested, and checked live (a second run wrote nothing)
+- ~~digest shows track record lines once n ≥ min samples~~: checked in a live dry run
 
 **Phase 5: LLM impact layer + LLM rerank** (embedding clustering moved to the Phase 1 fixes)
 Done when:

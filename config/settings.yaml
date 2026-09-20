@@ -109,8 +109,15 @@ impacts:
 scoring:
   horizons_trading_days: [1, 5]
   vol_lookback_days: 20
+  # A call is a hit or a miss only if the excess return reaches this multiple of the asset's
+  # daily volatility (times the square root of the horizon). Separate from
+  # impacts.moved_vol_multiple (1.0), which is about whether the news is already priced in.
   hit_threshold_vol_multiple: 0.5
+  # Hit rates are hidden below this many judged calls. Note n counts asset-calls, not
+  # independent events: one story can produce a dozen correlated impacts.
   min_samples_to_show_rate: 5
+  reference_grace_days: 7   # no reference price this long after the story: unscorable
+  score_grace_days: 7       # extra days to wait for a horizon's data before giving up
 
 schedule:
   # `newsdesk scheduler` runs the pipeline every N hours, on the hour. Runs line up with the
@@ -121,6 +128,8 @@ schedule:
   # every 2 hours 218 / 336, every 3 hours 206 / 272, against the 350 budget. Digests are
   # just as fresh: a run still happens 30 minutes before each one.
   pipeline_every_hours: 3
+  # Daily scoring, after the US close (03:30 IST is 18:00 New York the evening before).
+  score_time: "03:30"
 
 delivery:
   digest_times: ["07:30", "19:30"]

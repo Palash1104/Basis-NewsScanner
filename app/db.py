@@ -44,6 +44,10 @@ ADDED_COLUMNS: dict[str, dict[str, str]] = {
         # Added with event prompt v2, after the first extractions had been stored.
         "policy_actor": "VARCHAR(64)",
     },
+    "ticker_checks": {
+        # Added in Phase 4: trading-day counting needs each exchange's time zone.
+        "timezone": "VARCHAR(48)",
+    },
 }
 
 

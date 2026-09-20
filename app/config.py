@@ -148,8 +148,14 @@ class ImpactSettings(_Strict):
 class ScoringSettings(_Strict):
     horizons_trading_days: list[int]
     vol_lookback_days: int
+    # How far the excess return must move to count as a hit or a miss. Not the same as
+    # impacts.moved_vol_multiple, which asks whether the news is already in the price.
     hit_threshold_vol_multiple: float
     min_samples_to_show_rate: int
+    # An impact that still has no reference price this long after its story is unscorable.
+    reference_grace_days: int = Field(default=7, gt=0)
+    # Extra days beyond a horizon's expected completion before giving up on its data.
+    score_grace_days: int = Field(default=7, gt=0)
 
 
 class DeliverySettings(_Strict):
@@ -174,6 +180,15 @@ class ScheduleSettings(_Strict):
     starts in the same hour as each digest time."""
 
     pipeline_every_hours: int
+    # Daily scoring, after the US close (SPEC 7.9), in settings.timezone.
+    score_time: str = "03:30"
+
+    @field_validator("score_time")
+    @classmethod
+    def _check_score_time(cls, value: str) -> str:
+        if not re.fullmatch(r"([01]\d|2[0-3]):[0-5]\d", value):
+            raise ValueError(f"score_time must be HH:MM, got {value!r}")
+        return value
 
     @field_validator("pipeline_every_hours")
     @classmethod
@@ -277,9 +292,11 @@ class AssetConfig(_Strict):
     country: str
     sector: Sector
     tags: list[str] = Field(default_factory=list)
-    # Yahoo's exchange code (e.g. NSI) and currency, copied from the validate-tickers report.
+    # Yahoo's exchange code (e.g. NSI), currency and exchange time zone, copied from the
+    # validate-tickers report. The time zone makes trading-day counting exact (SPEC 7.9).
     exchange: str | None = None
     currency: str | None = None
+    timezone: str | None = None
     up_means: str | None = None  # e.g. "rupee weaker" for USD/INR
     # Yahoo names a person confirmed are this asset, so the name check stops flagging them.
     approved_yahoo_names: list[str] = Field(default_factory=list)

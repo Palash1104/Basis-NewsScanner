@@ -147,6 +147,30 @@ class Impact(Base):
 
     story: Mapped[Story] = relationship(back_populates="impacts")
     event: Mapped[Event | None] = relationship(back_populates="impacts")
+    scores: Mapped[list["ImpactScore"]] = relationship(
+        back_populates="impact", cascade="all, delete-orphan"
+    )
+
+
+class ImpactScore(Base):
+    """How one call turned out at one horizon (SPEC 7.9). Written once, when every input is
+    present; a late bar just means the next run writes it."""
+
+    __tablename__ = "impact_scores"
+    __table_args__ = (UniqueConstraint("impact_id", "horizon_days"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    impact_id: Mapped[int] = mapped_column(ForeignKey("impacts.id"), index=True)
+    horizon_days: Mapped[int] = mapped_column(Integer)  # trading days after the reference
+    asset_return: Mapped[float | None] = mapped_column(Float)
+    benchmark_symbol: Mapped[str | None] = mapped_column(String(32))
+    benchmark_return: Mapped[float | None] = mapped_column(Float)
+    excess_return: Mapped[float | None] = mapped_column(Float)
+    threshold: Mapped[float | None] = mapped_column(Float)
+    outcome: Mapped[str] = mapped_column(String(16))  # hit | miss | no_move | unscorable
+    scored_at: Mapped[datetime] = mapped_column(UTCDateTime)
+
+    impact: Mapped["Impact"] = relationship(back_populates="scores")
 
 
 class PriceBar(Base):
@@ -251,6 +275,7 @@ class TickerCheck(Base):
     yahoo_name: Mapped[str | None] = mapped_column(Text)
     currency: Mapped[str | None] = mapped_column(String(8))
     exchange: Mapped[str | None] = mapped_column(String(16))
+    timezone: Mapped[str | None] = mapped_column(String(48))  # the exchange's time zone
     instrument_type: Mapped[str | None] = mapped_column(String(16))
     error: Mapped[str | None] = mapped_column(Text)
     flags: Mapped[list[str]] = mapped_column(JSON, default=list)  # review items, not failures

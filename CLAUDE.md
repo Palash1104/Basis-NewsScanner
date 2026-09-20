@@ -30,6 +30,15 @@ between phases.
 - The minute window is shared across processes via `llm_requests`.
 - Run 9: 16 new articles, 1 call.
 
+**Phase 4 complete (2026-09-20):** scoring and track record (SPEC 7.9).
+- 354 tests pass.
+- First live scoring: 24 calls judged at horizon 1 (3 hit, 11 miss, 10 no-move); horizon 5
+  not due yet. A second run wrote nothing (idempotent).
+- The digest shows track-record lines for `geopolitical_risk_off` (n=7); rules at n=4 and
+  n=3 show none.
+- Breaking alerts were moved out of Phase 4 (user, 2026-09-20): a later phase or a
+  standalone task, once real importance scores have been watched for a few weeks.
+
 **Phase 3 complete (2026-09-20):** price check (SPEC 7.8).
 - 336 tests pass.
 - First live run: 24 of 90 impacts priced, 66 waiting for Monday's open (the news broke over
@@ -44,7 +53,7 @@ between phases.
 - Run 12: 16 events extracted, 90 impacts from 4 rules; 56/500 requests used that day.
 - 20 real extractions are kept as fixtures (`tests/fixtures/event_extractions.json`).
 
-Phase 4 has not started; wait for the user.
+Phase 5 has not started; wait for the user.
 
 Since then (2026-09-17):
 - Real rate limits for `gemini-3.5-flash-lite` are set (15 RPM, 250k input TPM, 500 RPD), with
@@ -99,6 +108,7 @@ uv run python scripts/embedding_report.py [--refresh] [--candidate 0.55]   # emb
 uv run python scripts/regroup.py [--dry-run]    # regroup all stored articles, no LLM calls
 uv run python scripts/grouping_report.py [--refresh --lookback-hours 24] [--detail title_token_set:64]
 uv run python scripts/event_fixtures.py [story_ids...]   # live extractions -> test fixtures
+uv run newsdesk score [--rescore]              # judge due calls, print the track record
 ```
 
 ## Layout
@@ -125,6 +135,7 @@ uv run python scripts/event_fixtures.py [story_ids...]   # live extractions -> t
 - `app/pipeline/playbook.py` rule models, loading and validation, matching, storing impacts
 - `app/pipeline/prices.py` `PriceProvider` + yfinance, the price cache, reference selection,
   volatility baseline, move labels
+- `app/pipeline/scoring.py` sessions and trading-day counting, scoring, the track record
 - `app/llm/client.py` `LLMClient` (the only thing the pipeline calls: rate limiting, transient
   retries, validation retry, token counts), the `LLMProvider` protocol, `GeminiProvider` (REST
   via httpx), `AnthropicProvider` (SDK), `make_llm_client` factory
@@ -325,6 +336,24 @@ uv run python scripts/event_fixtures.py [story_ids...]   # live extractions -> t
   - `price_stale_days` (5) must exceed a normal closure (Friday to Monday is ~2.7 days, ~3.7
     with a holiday Monday).
   - `run_pipeline` only prices when a provider is passed, so tests never reach the network.
+- Scoring (SPEC 7.9, `newsdesk score`, daily at `schedule.score_time` 03:30 IST):
+  - Trading days are the asset's own sessions, dated in its exchange's time zone
+    (`timezone` in assets.yaml). Holiday filler bars are excluded the same way as in Phase 3.
+  - Horizon N is the Nth session on or after the reference session: a mid-session story is
+    judged from that session's close.
+  - The benchmark uses the same reference rule and the same sessions, so both sides cover the
+    same window. Only stocks have one.
+  - Volatility comes from the sessions *before* the reference, so the judged move can't raise
+    its own threshold. Too little history is `unscorable` immediately, since it can't grow.
+  - Idempotent: unique (impact_id, horizon_days); rows are written only when every input is
+    present, and never rewritten except by `--rescore`. A late bar is picked up next run.
+  - Giving up is explicit: no reference after `reference_grace_days`, or a horizon overdue by
+    `score_grace_days`, becomes a final `unscorable` row so the job stops retrying.
+  - The track record groups by rule_id, event_type, origin, confidence, horizon_days and
+    prompt_version (the last two come through `impacts.event_id`). Rates are hidden below
+    `min_samples_to_show_rate` (5) judged calls.
+  - n counts asset-calls, not independent events, so the distinct story count is reported
+    next to it. The digest shows at most one track-record line per story.
 - Ticker validation (`newsdesk validate-tickers`):
   - One yfinance `history(period="5d")` call per symbol. Yahoo's name, currency, exchange and
     instrument type come from the same request's metadata.

@@ -106,6 +106,7 @@ class TickerResult:
     yahoo_name: str | None = None
     currency: str | None = None
     exchange: str | None = None
+    timezone: str | None = None
     instrument_type: str | None = None
     error: str | None = None
     flags: list[str] = field(default_factory=list)
@@ -146,6 +147,8 @@ def review_flags(asset: AssetConfig, result: TickerResult, metadata: dict[str, A
         flags.append(f"currency: assets.yaml {asset.currency}, Yahoo {result.currency}")
     if asset.exchange and result.exchange and asset.exchange != result.exchange:
         flags.append(f"exchange: assets.yaml {asset.exchange}, Yahoo {result.exchange}")
+    if asset.timezone and result.timezone and asset.timezone != result.timezone:
+        flags.append(f"timezone: assets.yaml {asset.timezone}, Yahoo {result.timezone}")
     if not result.currency or not result.exchange:
         flags.append("metadata: Yahoo returned no currency or exchange")
     return flags
@@ -188,6 +191,7 @@ def check_ticker(
         yahoo_name=meta.get("longName") or meta.get("shortName"),
         currency=meta.get("currency"),
         exchange=meta.get("exchangeName"),
+        timezone=meta.get("exchangeTimezoneName"),
         instrument_type=meta.get("instrumentType"),
     )
     if not sample.closes:
@@ -226,6 +230,7 @@ def record_checks(session: Session, results: Sequence[TickerResult], now: dateti
             yahoo_name=result.yahoo_name,
             currency=result.currency,
             exchange=result.exchange,
+            timezone=result.timezone,
             instrument_type=result.instrument_type,
             error=result.error,
             flags=result.flags,
@@ -329,6 +334,7 @@ def report_rows(
             result.yahoo_name or "",
             result.currency or "",
             result.exchange or "",
+            result.timezone or "",
             result.instrument_type or "",
             "; ".join(filter(None, [result.error, *result.flags])),
         ]
@@ -346,6 +352,7 @@ REPORT_HEADER = [
     "Yahoo name",
     "ccy",
     "exchange",
+    "time zone",
     "Yahoo type",
     "notes",
 ]

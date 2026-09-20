@@ -36,6 +36,7 @@ class DigestItem:
     disagreement_note: str | None
     sources: list[SourceLink]
     impacts: list[str] = field(default_factory=list)  # formatted impact lines
+    track_record: str | None = None  # only when a contributing rule has enough judged calls
 
 
 def pick_sources(articles: Sequence[Article], limit: int = MAX_SOURCE_LINKS) -> list[SourceLink]:
@@ -140,6 +141,7 @@ def digest_item(
     assets: dict[str, AssetConfig] | None = None,
     max_impacts: int = 6,
     labels: dict[int, str] | None = None,
+    track_record: str | None = None,
 ) -> DigestItem:
     return DigestItem(
         headline=story.headline,
@@ -149,6 +151,7 @@ def digest_item(
         disagreement_note=story.disagreement_note if story.sources_disagree else None,
         sources=pick_sources(story.articles),
         impacts=impact_lines(story.impacts, assets, max_impacts, labels) if assets else [],
+        track_record=track_record,
     )
 
 
@@ -169,6 +172,8 @@ def format_story(item: DigestItem) -> str:
         lines.append(f"<i>{_text(meta)}</i>")
     lines.append(_text(item.summary))
     lines += item.impacts
+    if item.track_record:
+        lines.append(f"<i>{_text(item.track_record)}</i>")
     if item.disagreement_note:
         lines.append(f"<i>Sources disagree:</i> {_text(item.disagreement_note)}")
     if item.sources:

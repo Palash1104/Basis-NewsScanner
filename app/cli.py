@@ -59,6 +59,7 @@ from app.pipeline.prices import (
     DAILY,
     DAILY_LEAD,
     PriceProvider,
+    PriceReport,
     YahooPrices,
     cached_bars,
     impacts_to_price,
@@ -66,6 +67,14 @@ from app.pipeline.prices import (
     price_impacts,
 )
 from app.pipeline.rank import pending_stories, rank_stories
+from app.pipeline.scoring import (
+    ScoreReport,
+    mark_unreferenced,
+    score_impacts,
+    story_track_line,
+    track_record,
+    unpriced_impacts,
+)
 from app.pipeline.summarize import summarize_stories
 
 log = logging.getLogger("newsdesk")
@@ -497,8 +506,16 @@ def run_digest(
         stories, since = select_digest_stories(session, settings, now)
         assets = _assets()
         labels = move_labels(session, stories, assets, settings, now)
+        rules = track_record(session, "rule_id")
+        names = {asset.symbol: asset.display_name for asset in assets.values()}
         items = [
-            digest_item(story, assets, settings.delivery.max_impacts_in_digest, labels)
+            digest_item(
+                story,
+                assets,
+                settings.delivery.max_impacts_in_digest,
+                labels,
+                story_track_line(story, rules, settings.scoring.min_samples_to_show_rate, names),
+            )
             for story in stories
         ]
         messages = format_digest(items, now, settings.tz)
@@ -753,6 +770,109 @@ def digest(
         typer.echo(message)
 
 
+# ---------------------------------------------------------------- scoring
+
+
+@dataclass
+class ScoreRunReport:
+    run_id: int
+    prices: PriceReport
+    scores: ScoreReport
+    unreferenced: int = 0
+
+
+def run_score(
+    session_factory: sessionmaker[Session],
+    settings: Settings,
+    prices: PriceProvider,
+    now: datetime | None = None,
+    rescore: bool = False,
+) -> ScoreRunReport:
+    """Fill in any reference prices still missing, then judge every call whose horizon is
+    complete (SPEC 7.9). Safe to run repeatedly: scores are written once."""
+    now = now or utcnow()
+    assets = _assets()
+    with session_factory() as session:
+        run = Run(kind="score", started_at=utcnow(), errors=[])
+        session.add(run)
+        session.commit()
+        # 1. Impacts whose market had not opened when they were created.
+        waiting = unpriced_impacts(session)
+        priced = price_impacts(session, waiting, assets, prices, settings, now)
+        # 2. Anything still without a reference after the grace period is unscorable.
+        unreferenced = mark_unreferenced(session, settings, now)
+        # 3. Judge the calls whose horizons are complete.
+        scores = score_impacts(session, assets, prices, settings, now, rescore=rescore)
+
+        errors = [
+            {"stage": "prices", "symbol": symbol, "error": reason}
+            for symbol, reason in priced.unusable
+        ] + [
+            {"stage": "score", "symbol": symbol, "error": reason}
+            for symbol, reason in scores.problems
+        ]
+        run.finished_at = utcnow()
+        run.stories_processed = scores.total_scored
+        run.errors = errors
+        session.commit()
+        return ScoreRunReport(run.id, priced, scores, unreferenced)
+
+
+def track_record_lines(session: Session, settings: Settings) -> list[str]:
+    """The track-record tables. Counts are always shown; rates only once there are enough
+    judged calls to mean anything."""
+    minimum = settings.scoring.min_samples_to_show_rate
+    lines = []
+    for group in ("rule_id", "event_type", "origin", "confidence", "horizon_days"):
+        rows = track_record(session, group)
+        if not rows:
+            continue
+        lines.append(f"\nby {group}:")
+        lines.append(
+            f"  {'key':<28} {'horizon':>7} {'hit':>4} {'miss':>5} {'no move':>8} "
+            f"{'unscorable':>11} {'stories':>8}  rate"
+        )
+        for row in rows:
+            rate = (
+                f"{row.rate:.0%}"
+                if row.rate is not None and row.shows_rate(minimum)
+                else f"n={row.judged} too small"
+            )
+            lines.append(
+                f"  {row.key[:28]:<28} {row.horizon_days:>6}d {row.hits:>4} {row.misses:>5} "
+                f"{row.no_move:>8} {row.unscorable:>11} {len(row.stories):>8}  {rate}"
+            )
+    return lines
+
+
+@app.command()
+def score(
+    rescore: Annotated[
+        bool, typer.Option("--rescore", help="Recompute scores that already exist.")
+    ] = False,
+) -> None:
+    """Score every call whose horizon is complete, and print the track record."""
+    settings, session_factory = _bootstrap()
+    report = run_score(
+        session_factory, settings, YahooPrices(settings.http.timeout_seconds), rescore=rescore
+    )
+    typer.echo(
+        f"score run {report.run_id}: {report.prices.priced} reference prices filled in, "
+        f"{report.prices.waiting} still waiting for their market, "
+        f"{report.unreferenced} gave up (no reference in time)"
+    )
+    outcomes = ", ".join(f"{count} {name}" for name, count in sorted(report.scores.scored.items()))
+    typer.echo(
+        f"scored {report.scores.total_scored} calls ({outcomes or 'none'}); "
+        f"{report.scores.not_due} not due yet, over {report.scores.symbols} symbols"
+    )
+    for symbol, reason in report.prices.unusable + report.scores.problems:
+        typer.echo(f"  {symbol}: {reason}")
+    with session_factory() as session:
+        for line in track_record_lines(session, settings):
+            typer.echo(line)
+
+
 # ---------------------------------------------------------------- tickers
 
 
@@ -802,7 +922,7 @@ def ticker_report_lines(validation: TickerValidation, settings: Settings) -> lis
         when = validation.previous_check_at.astimezone(settings.tz).strftime("%d %b %Y %H:%M %Z")
         stale = " (older than 30 days)" if age > 30 else ""
         lines.append(f"previous check: {when}, {age} days ago{stale}")
-    widths = [14, 6, 10, 12, 42, 4, 8, 10]
+    widths = [14, 6, 10, 12, 34, 4, 8, 18, 8]
     lines.append("  ".join(h.ljust(w) for h, w in zip(REPORT_HEADER, widths, strict=False)))
     for row in report_rows(validation.results):
         cells = [cell[:w].ljust(w) for cell, w in zip(row, widths, strict=False)]
@@ -847,6 +967,7 @@ def build_scheduler(
     settings: Settings,
     pipeline_job: Callable[[], None],
     digest_job: Callable[[], None],
+    score_job: Callable[[], None] | None = None,
 ) -> BlockingScheduler:
     tz = settings.tz
     scheduler = BlockingScheduler(timezone=tz)
@@ -870,6 +991,17 @@ def build_scheduler(
             max_instances=1,
             coalesce=True,
             misfire_grace_time=30 * 60,
+        )
+    if score_job is not None:
+        hour, minute = (int(part) for part in settings.schedule.score_time.split(":"))
+        scheduler.add_job(
+            score_job,
+            CronTrigger(hour=hour, minute=minute, timezone=tz),
+            id="score",
+            name=f"score {settings.schedule.score_time}",
+            max_instances=1,
+            coalesce=True,
+            misfire_grace_time=60 * 60,
         )
     return scheduler
 
@@ -900,7 +1032,20 @@ def scheduler() -> None:
         except Exception:
             log.exception("scheduled digest failed")
 
-    jobs = build_scheduler(settings, pipeline_job, digest_job)
+    def score_job() -> None:
+        try:
+            report = run_score(
+                session_factory, settings, YahooPrices(settings.http.timeout_seconds)
+            )
+            log.info(
+                "scheduled score: %d calls judged, %d references filled",
+                report.scores.total_scored,
+                report.prices.priced,
+            )
+        except Exception:
+            log.exception("scheduled scoring failed")
+
+    jobs = build_scheduler(settings, pipeline_job, digest_job, score_job)
     warning = asset_warning(session_factory)
     if warning:
         log.warning(warning)
