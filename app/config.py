@@ -137,6 +137,12 @@ class RankingSettings(_Strict):
 
 class ImpactSettings(_Strict):
     max_impacts_per_story: int = Field(gt=0)
+    # "Already moved" (SPEC 7.8): the move must be at least this many times the asset's
+    # typical daily move. Deliberately separate from scoring.hit_threshold_vol_multiple,
+    # which answers a different question (was the call right).
+    moved_vol_multiple: float = Field(default=1.0, gt=0)
+    vol_min_returns: int = Field(default=10, gt=0)  # fewer usable days: show the move, no label
+    price_stale_days: int = Field(default=5, gt=0)  # newest bar older than this: unusable
 
 
 class ScoringSettings(_Strict):

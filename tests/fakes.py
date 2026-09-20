@@ -4,7 +4,7 @@ and small RSS builders."""
 import json
 import re
 from collections.abc import Callable
-from datetime import datetime
+from datetime import datetime, timedelta
 from email.utils import format_datetime
 from html import escape
 from types import SimpleNamespace
@@ -174,3 +174,40 @@ class FakeEmbedder:
                     vectors[row, hash(word) % 256] += 1.0
         norms = np.linalg.norm(vectors, axis=1, keepdims=True)
         return vectors / np.where(norms == 0, 1, norms)
+
+
+class FakePrices:
+    """A PriceProvider over hand-made bars: {symbol: {interval: [Bar, ...]}}. Records the
+    (symbol, interval) of every request so tests can check the cache avoids re-fetching."""
+
+    def __init__(self, series: dict[str, dict[str, list[Any]]] | None = None) -> None:
+        self.series = series or {}
+        self.calls: list[tuple[str, str]] = []
+        self.fail: set[str] = set()
+
+    def bars(self, symbol: str, interval: str, start: datetime, end: datetime) -> list[Any]:
+        from app.pipeline.prices import PriceUnavailable
+
+        self.calls.append((symbol, interval))
+        if symbol in self.fail:
+            raise PriceUnavailable("HTTPError: 429 too many requests")
+        bars = self.series.get(symbol, {}).get(interval, [])
+        return [bar for bar in bars if start <= bar.ts <= end]
+
+
+def bar_series(
+    start: datetime,
+    count: int,
+    step: timedelta,
+    price: float,
+    volume: float = 1000.0,
+    drift: float = 1.0,
+) -> list[Any]:
+    """`count` bars from `start`, each `drift` times the previous close."""
+    from app.pipeline.prices import Bar
+
+    bars = []
+    for index in range(count):
+        close = price * (drift**index)
+        bars.append(Bar(start + step * index, close, close, close, close, volume))
+    return bars

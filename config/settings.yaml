@@ -94,6 +94,17 @@ ranking:
 
 impacts:
   max_impacts_per_story: 8
+  # Price check (SPEC 7.8). A move counts as "already moved" (or "moving against this call")
+  # once it reaches this multiple of the asset's typical daily move, measured as the standard
+  # deviation of the last scoring.vol_lookback_days daily returns (daily point changes for
+  # yields). This is NOT scoring.hit_threshold_vol_multiple: that one (0.5) decides whether a
+  # call was right days later, this one (1.0) decides whether the news is already in the price.
+  moved_vol_multiple: 1.0
+  vol_min_returns: 10   # below this many usable daily returns, show the move without a label
+  # If the newest bar is older than this, the data itself looks broken. It must be longer
+  # than a normal closure: Friday close to Monday open is ~2.7 days, and a holiday Monday
+  # makes it ~3.7, so 3 would flag healthy weekends.
+  price_stale_days: 5
 
 scoring:
   horizons_trading_days: [1, 5]

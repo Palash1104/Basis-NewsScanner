@@ -30,6 +30,13 @@ between phases.
 - The minute window is shared across processes via `llm_requests`.
 - Run 9: 16 new articles, 1 call.
 
+**Phase 3 complete (2026-09-20):** price check (SPEC 7.8).
+- 336 tests pass.
+- First live run: 24 of 90 impacts priced, 66 waiting for Monday's open (the news broke over
+  the weekend), 0 errors, 22 symbols, 2,330 bars cached.
+- The digest shows moves and labels, e.g. Brent -5.3% (moving against this call) on the
+  Houthi story, Gold +1.9% (already moved).
+
 **Phase 2 complete (2026-09-20):** event extraction, asset universe, playbook.
 - All three SPEC §13 criteria checked: 82/82 symbols validate; all 15 rules have match and
   near-miss tests; the digest shows impacts with mechanisms in a live dry run.
@@ -37,7 +44,7 @@ between phases.
 - Run 12: 16 events extracted, 90 impacts from 4 rules; 56/500 requests used that day.
 - 20 real extractions are kept as fixtures (`tests/fixtures/event_extractions.json`).
 
-Phase 3 has not started; wait for the user.
+Phase 4 has not started; wait for the user.
 
 Since then (2026-09-17):
 - Real rate limits for `gemini-3.5-flash-lite` are set (15 RPM, 250k input TPM, 500 RPD), with
@@ -50,7 +57,7 @@ Since then (2026-09-17):
   Pro has a limit of 0. Nothing from that test is stored.
 
 Open follow-ups (not Phase 1 criteria):
-- Phase 3 inputs from Yahoo daily data (checked 2026-09-19):
+- Phase 3 handled these Yahoo quirks (kept here because Phase 4 scoring hits them again):
   - Daily bars are stamped at exchange-local midnight. Friday's NSE bar is 00:00 IST on 18 Sep,
     which is 17 Sep 18:30 UTC. Take trading dates in the exchange's time zone, never after
     converting to UTC. The Stop 1 report had this bug and showed every NSE bar a day early.
@@ -59,6 +66,8 @@ Open follow-ups (not Phase 1 criteria):
     0 and open = close = the previous close. Indices have no filler bar. The reference-bar
     and trading-day logic must skip zero-volume filler bars, or holidays count as sessions.
   - There was no Yahoo lag on `.NS`: Friday's bar was there when validation first ran.
+  - Intraday bars are the reliable "was there a session?" test. Zero volume is not: FX, rates
+    and indices report zero volume every day.
 - Grouping drift: the seed check (0.45) splits the troop-deaths reports from the war-crimes
   story and keeps unrelated IPO pieces out of the NSE IPO story. It does not separate "Hero
   Motors, NSE…" or "Tata Sons IPO…" from NSE; 0.50+ would, but breaks case (a).
@@ -114,6 +123,8 @@ uv run python scripts/event_fixtures.py [story_ids...]   # live extractions -> t
 - `app/pipeline/extract_event.py` event extraction (SPEC 7.6), normalization, pending handling
 - `app/pipeline/countries.py` canonical country names and aliases for event matching
 - `app/pipeline/playbook.py` rule models, loading and validation, matching, storing impacts
+- `app/pipeline/prices.py` `PriceProvider` + yfinance, the price cache, reference selection,
+  volatility baseline, move labels
 - `app/llm/client.py` `LLMClient` (the only thing the pipeline calls: rate limiting, transient
   retries, validation retry, token counts), the `LLMProvider` protocol, `GeminiProvider` (REST
   via httpx), `AnthropicProvider` (SDK), `make_llm_client` factory
@@ -296,6 +307,24 @@ uv run python scripts/event_fixtures.py [story_ids...]   # live extractions -> t
   - An asset called both ways on one story is marked `conflict` and shown as "mixed signals".
   - Rules with an `UNSURE` comment (bank stocks on RBI moves, TSMC on chip risk, Tata Steel on
     Chinese stimulus) are held at low confidence on purpose.
+- Price check (SPEC 7.8):
+  - 60-minute bars for the reference and latest price, daily bars for the volatility baseline.
+    Bars carry the exchange's time zone and only exist for real sessions, so reference
+    selection needs no market-hours table: a 23:00 IST story references the next NSE morning,
+    but the next hourly bar for crude.
+  - `reference_time` is the first bar at or after the story; `reference_price` is the close of
+    the bar before it.
+  - "Waiting for their market to open" (no bar after the story yet) is counted separately from
+    failures and is not an error: the first run after the open prices it.
+  - `impacts.moved_vol_multiple` (1.0) must stay separate from
+    `scoring.hit_threshold_vol_multiple` (0.5): different questions, deliberately different.
+  - Rates are judged and shown in points ("+0.10 pts"), with the unit always printed; their
+    typical move is the standard deviation of daily point changes.
+  - Grains quote in US cents (`USX`): percentages and volatility are unit-free, so nothing
+    converts. `reference_price` is stored in the asset's native unit.
+  - `price_stale_days` (5) must exceed a normal closure (Friday to Monday is ~2.7 days, ~3.7
+    with a holiday Monday).
+  - `run_pipeline` only prices when a provider is passed, so tests never reach the network.
 - Ticker validation (`newsdesk validate-tickers`):
   - One yfinance `history(period="5d")` call per symbol. Yahoo's name, currency, exchange and
     instrument type come from the same request's metadata.

@@ -211,7 +211,7 @@ Impacts are written once and never edited: each one is the call as it was made, 
 
 **impact_scores**: id, impact_id, horizon_days, asset_return, benchmark_symbol, benchmark_return, excess_return, threshold, outcome (`hit` | `miss` | `no_move` | `unscorable`), scored_at. Unique on (impact_id, horizon_days).
 
-**price_cache**: symbol, interval, ts, open, high, low, close. Unique on (symbol, interval, ts).
+**price_cache**: symbol, interval, ts (bar start, stored UTC), open, high, low, close, **volume** (added in Phase 3). Unique on (symbol, interval, ts). Intervals in use: `60m` for reference prices and the latest price, `1d` for the volatility baseline. Volume is needed because a zero-volume daily bar is how Yahoo marks an exchange holiday for `.NS` stocks, and those bars must be kept out of the baseline.
 
 **runs**: id, kind (`pipeline` | `digest` | `score`), started_at, finished_at, articles_fetched, stories_processed, input_tokens, output_tokens, errors (JSON).
 
@@ -434,9 +434,19 @@ USER:
 - **reference_price** = last close/bar before the reference time (the "before news" price).
 - **move_at_detection_pct** = latest price vs reference_price.
 - Label in output:
-  - move in the expected direction ≥ 1× the asset's typical daily move (20-day std of daily returns) → "already moved"
+  - move in the expected direction ≥ `impacts.moved_vol_multiple` × the asset's typical daily move (20-day std of daily returns) → "already moved"
   - move against the expected direction by the same amount → "moving against this call"
   - otherwise → show the % only
+
+**As built (Phase 3):**
+
+- **60-minute bars** decide the reference; daily bars give the volatility baseline. Yahoo stamps bars in the exchange's own time zone and writes them only for sessions that happened, so no market-hours table or holiday calendar is needed. One story at 11:15 IST got three different reference times in the first live run: the next hourly bar for crude (15 minutes later), the next NSE hourly bar for Indian stocks, and the next New York open for US equities.
+- **Waiting is not failure.** News breaking after a close has no bar at or after it yet; those impacts stay unpriced and are priced by the first run after the open. The run output counts them separately from real problems ("waiting for their market to open"). In the first live run, 24 of 90 impacts were priced and 66 were waiting for Monday, with no errors.
+- **`impacts.moved_vol_multiple` (1.0) is deliberately separate from `scoring.hit_threshold_vol_multiple` (0.5)**: this one asks whether the news is already in the price, scoring asks whether the call was right. They must not be tied together.
+- **Rates are handled in points**, not percent: a yield moving 4.00 → 4.10 is "+0.10 pts", and its typical move is the standard deviation of daily point changes, so the threshold and the display use the same unit. The unit is always printed.
+- **Fewer than `impacts.vol_min_returns` (10) usable daily returns** → show the move, no label.
+- **Caching:** only the missing tail is fetched, plus an overlap so the latest (still moving) bar is refreshed; nothing is fetched at all when the current bar is already cached. Prices are never invented, and a symbol that can't be fetched is reported once, not once per impact.
+- **Stale** means the newest bar is older than `impacts.price_stale_days` (5). That has to be longer than a normal closure: Friday close to Monday open is about 2.7 days, and a holiday Monday makes it 3.7.
 
 ### 7.9 Scoring
 
@@ -702,12 +712,12 @@ Done when:
 - ~~each playbook rule has passing match/no-match tests~~: 15 rules, each with match and near-miss fixtures in `tests/fixtures/playbook_events.yaml`
 - ~~digest shows playbook impacts with mechanisms~~: checked in a live dry run
 
-**Phase 3: Price check**
+**Phase 3: Price check** — complete 2026-09-20.
 Done when:
 
-- impacts store reference_time, reference_price, move_at_detection_pct
-- tests cover a story published outside NSE hours (reference is next session) and missing data
-- digest shows "already moved" / "moving against this call" labels
+- ~~impacts store reference_time, reference_price, move_at_detection_pct~~: filled by the price step, checked in a live run
+- ~~tests cover a story published outside NSE hours (reference is next session) and missing data~~: plus the weekend case, provider failures, stale data and holiday filler bars
+- ~~digest shows "already moved" / "moving against this call" labels~~: checked in a live dry run
 
 **Phase 4: Scoring + track record + breaking alerts**
 Done when:

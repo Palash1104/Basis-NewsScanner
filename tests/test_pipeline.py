@@ -17,8 +17,15 @@ from app.delivery.telegram import TelegramError
 from app.llm.client import LLMClient
 from app.llm.ratelimit import MemoryDailyUsageStore, RateLimiter
 from app.models import Article, Event, Run, Story
+from app.pipeline.prices import Bar
 from tests.conftest import NOW, make_feed
-from tests.fakes import FakeEmbedder, FakeProvider, echo_summary_responder, rss
+from tests.fakes import (
+    FakeEmbedder,
+    FakePrices,
+    FakeProvider,
+    echo_summary_responder,
+    rss,
+)
 
 US_FEED = make_feed(name="Paper US", url="https://us.example.com/rss", region="US", weight=2)
 IN_FEED = make_feed(name="Paper IN", url="https://in.example.com/rss", region="IN", weight=3)
@@ -339,3 +346,46 @@ def test_run_logs_borderline_matches_and_non_news(
     assert len(lines) == report.borderline_logged > 0
     row = json.loads(lines[0])
     assert {"score", "decision", "article", "nearest_story", "threshold"} <= set(row)
+
+
+def test_prices_reach_the_digest_as_moves_and_labels(
+    db: sessionmaker[Session], settings: Settings
+) -> None:
+    """End to end: the playbook's impacts get a reference price, and the digest shows the move
+    so far with an "already moved" label where the move is big enough."""
+    hourly = [NOW - timedelta(hours=n) for n in range(48, -1, -1)]
+    daily = [NOW - timedelta(days=n) for n in range(30, -1, -1)]
+
+    def series(intraday_closes: list[float], daily_closes: list[float]) -> dict:
+        return {
+            "60m": [
+                Bar(ts, c, c, c, c, 1000.0) for ts, c in zip(hourly, intraday_closes, strict=True)
+            ],
+            "1d": [Bar(ts, c, c, c, c, 1000.0) for ts, c in zip(daily, daily_closes, strict=True)],
+        }
+
+    # The Nifty drifts down 0.1% an hour (a big move by its own standards); USD/INR barely moves.
+    nifty_intraday = [24000 * (0.999**n) for n in range(len(hourly))]
+    steady = [24000 + (50 if n % 2 else 0) for n in range(len(daily))]
+    inr_intraday = [88.0] * len(hourly)
+    prices = FakePrices(
+        {
+            "^NSEI": series(nifty_intraday, steady),
+            "INR=X": series(
+                inr_intraday, [88.0 + (0.2 if n % 2 else 0) for n in range(len(daily))]
+            ),
+        }
+    )
+    llm, _ = _llm(settings)
+    report = run_pipeline(
+        db, settings, FEEDS, llm, now=NOW, transport=FeedServer().transport, prices=prices
+    )
+
+    assert report.impacts_created == 6 and report.impacts_priced == 6
+    assert report.price_symbols == 2 and report.price_unusable == {}
+    assert ("^NSEI", "60m") in prices.calls and ("^NSEI", "1d") in prices.calls
+
+    dry = run_digest(db, settings, send=False, now=NOW + timedelta(minutes=5))
+    text = "\n".join(dry.messages)
+    assert "▼ Nifty 50 -0.3% (already moved)" in text
+    assert "▲ USD/INR (rupee weaker) +0.0%" in text  # priced, but nothing worth flagging

@@ -9,6 +9,7 @@ from zoneinfo import ZoneInfo
 from app.config import AssetConfig
 from app.models import Article, Impact, Story
 from app.pipeline.dedupe import normalize_source
+from app.pipeline.prices import format_move
 
 TELEGRAM_LIMIT = 4096
 MAX_SOURCE_LINKS = 3
@@ -69,12 +70,28 @@ def _rank(impact: Impact) -> tuple[int, int]:
     return _ORDER_RANK[impact.order], _CONFIDENCE_RANK[impact.confidence]
 
 
+def _entry(impact: Impact, assets: dict[str, AssetConfig], labels: dict[int, str]) -> str:
+    """The asset, its move so far, and the "already moved" label where one applies. An impact
+    with no price yet shows the name alone (SPEC 7.8's "price unavailable")."""
+    name = _display(impact.symbol, assets, impact.direction)
+    asset = assets.get(impact.symbol)
+    if asset is None or impact.reference_price is None or impact.move_at_detection_pct is None:
+        return name
+    move = format_move(asset, impact.reference_price, impact.move_at_detection_pct)
+    label = labels.get(impact.id)
+    return f"{name} {move}" + (f" ({label})" if label else "")
+
+
 def impact_lines(
-    impacts: Sequence[Impact], assets: dict[str, AssetConfig], limit: int
+    impacts: Sequence[Impact],
+    assets: dict[str, AssetConfig],
+    limit: int,
+    labels: dict[int, str] | None = None,
 ) -> list[str]:
     """Impact lines for one story: first-order before second-order, then by confidence.
     Impacts sharing a mechanism share a line, an asset called both ways becomes one "mixed
     signals" line, and anything past `limit` is summarized as "+N more"."""
+    labels = labels or {}
     conflicted = sorted({impact.symbol for impact in impacts if impact.conflict})
     lines = []
     for symbol in conflicted:
@@ -98,7 +115,7 @@ def impact_lines(
     rules_by_line: dict[tuple[str, str, str, str], int] = {}
     for impact, rule_count in shown:
         key = (impact.direction, impact.order, impact.confidence, impact.mechanism)
-        names_by_line.setdefault(key, []).append(_display(impact.symbol, assets, impact.direction))
+        names_by_line.setdefault(key, []).append(_entry(impact, assets, labels))
         rules_by_line[key] = max(rules_by_line.get(key, 0), rule_count)
     for key, names in names_by_line.items():
         direction, order, confidence, mechanism = key
@@ -119,7 +136,10 @@ def impact_lines(
 
 
 def digest_item(
-    story: Story, assets: dict[str, AssetConfig] | None = None, max_impacts: int = 6
+    story: Story,
+    assets: dict[str, AssetConfig] | None = None,
+    max_impacts: int = 6,
+    labels: dict[int, str] | None = None,
 ) -> DigestItem:
     return DigestItem(
         headline=story.headline,
@@ -128,7 +148,7 @@ def digest_item(
         regions=list(story.regions or []),
         disagreement_note=story.disagreement_note if story.sources_disagree else None,
         sources=pick_sources(story.articles),
-        impacts=impact_lines(story.impacts, assets, max_impacts) if assets else [],
+        impacts=impact_lines(story.impacts, assets, max_impacts, labels) if assets else [],
     )
 
 

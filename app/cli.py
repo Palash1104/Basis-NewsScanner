@@ -33,6 +33,7 @@ from app.assets import (
     yahoo_fetch,
 )
 from app.config import (
+    AssetConfig,
     FeedConfig,
     Settings,
     get_secret,
@@ -54,6 +55,16 @@ from app.pipeline.embed import Embedder, load_embedder
 from app.pipeline.extract_event import extract_events, pending_event_stories
 from app.pipeline.fetch import FeedResult, SourceResolver, fetch_all, filter_recent
 from app.pipeline.playbook import Rule, apply_rules, load_playbook
+from app.pipeline.prices import (
+    DAILY,
+    DAILY_LEAD,
+    PriceProvider,
+    YahooPrices,
+    cached_bars,
+    impacts_to_price,
+    label_for,
+    price_impacts,
+)
 from app.pipeline.rank import pending_stories, rank_stories
 from app.pipeline.summarize import summarize_stories
 
@@ -103,6 +114,12 @@ class PipelineReport:
     events_skipped_quota: int = 0
     stories_analyzed: int = 0  # event extracted and the playbook applied
     impacts_created: int = 0
+    impacts_priced: int = 0  # impacts that got a reference price this run
+    impacts_refreshed: int = 0  # impacts whose move so far was updated
+    impacts_waiting: int = 0  # market hasn't opened since the story; priced after the open
+    price_symbols: int = 0
+    price_bars_stored: int = 0
+    price_unusable: dict[str, int] = field(default_factory=dict)  # reason -> symbols
     impact_rules: dict[str, int] = field(default_factory=dict)  # rule id -> impacts written
     # Unmapped country names and other fixes to extracted events, shown in the run output.
     event_notes: list[str] = field(default_factory=list)
@@ -144,6 +161,7 @@ def run_pipeline(
     now: datetime | None = None,
     transport: httpx.AsyncBaseTransport | None = None,
     rules: Sequence[Rule] | None = None,
+    prices: PriceProvider | None = None,
     llm_unavailable: str | None = None,
     embedder: Embedder | None = None,
     embedder_unavailable: str | None = None,
@@ -314,6 +332,31 @@ def run_pipeline(
                                 report.impact_rules.get(impact.rule_id, 0) + 1
                             )
                 session.commit()
+
+                stage = "prices"
+                # New impacts need a reference price; the ones heading for the next digest
+                # need their move kept current. Without a provider the step is skipped, so
+                # nothing reaches the network unless a caller asks for it.
+                since = last_digest_sent_at(session) or now - timedelta(
+                    hours=settings.pipeline.lookback_hours
+                )
+                priced = price_impacts(
+                    session,
+                    impacts_to_price(session, since) if prices else [],
+                    _assets(report.errors),
+                    prices,
+                    settings,
+                    now,
+                )
+                report.impacts_priced = priced.priced
+                report.impacts_refreshed = priced.refreshed
+                report.impacts_waiting = priced.waiting
+                report.price_symbols = priced.symbols
+                report.price_bars_stored = priced.bars_stored
+                report.price_unusable = priced.reasons
+                for symbol, reason in priced.unusable:
+                    report.errors.append({"stage": "prices", "symbol": symbol, "error": reason})
+                session.commit()
         except Exception as exc:
             session.rollback()
             report.errors.append({"stage": stage, "error": f"{type(exc).__name__}: {exc}"})
@@ -452,13 +495,11 @@ def run_digest(
     now = now or utcnow()
     with session_factory() as session:
         stories, since = select_digest_stories(session, settings, now)
-        try:
-            assets = {asset.symbol: asset for asset in load_assets()}
-        except Exception as exc:  # a broken assets.yaml must not stop the digest
-            log.warning("assets.yaml not loaded; impacts show raw symbols: %s", exc)
-            assets = {}
+        assets = _assets()
+        labels = move_labels(session, stories, assets, settings, now)
         items = [
-            digest_item(story, assets, settings.delivery.max_impacts_in_digest) for story in stories
+            digest_item(story, assets, settings.delivery.max_impacts_in_digest, labels)
+            for story in stories
         ]
         messages = format_digest(items, now, settings.tz)
         report = DigestReport(stories=len(items), messages=messages, since=since)
@@ -524,6 +565,38 @@ def _llm_client(
         return None, str(exc)
 
 
+def _assets(errors: list[dict[str, Any]] | None = None) -> dict[str, AssetConfig]:
+    """The asset universe by symbol; a broken assets.yaml is recorded, never fatal."""
+    try:
+        return {asset.symbol: asset for asset in load_assets()}
+    except Exception as exc:
+        log.warning("assets.yaml could not be loaded: %s", exc)
+        if errors is not None:
+            errors.append({"stage": "assets", "error": f"assets.yaml not loaded: {exc}"})
+        return {}
+
+
+def move_labels(
+    session: Session,
+    stories: Sequence[Story],
+    assets: dict[str, AssetConfig],
+    settings: Settings,
+    now: datetime,
+) -> dict[int, str]:
+    """ "already moved" / "moving against this call" per impact, from cached daily bars only
+    (no network at digest time)."""
+    impacts = [impact for story in stories for impact in story.impacts]
+    labels: dict[int, str] = {}
+    daily: dict[str, list] = {}
+    for impact in impacts:
+        if impact.symbol not in daily:
+            daily[impact.symbol] = cached_bars(session, impact.symbol, DAILY, now - DAILY_LEAD)
+        label = label_for(impact, assets.get(impact.symbol), daily[impact.symbol], settings)
+        if label:
+            labels[impact.id] = label
+    return labels
+
+
 def asset_warning(
     session_factory: sessionmaker[Session], now: datetime | None = None
 ) -> str | None:
@@ -554,6 +627,7 @@ def run_once(settings: Settings, session_factory: sessionmaker[Session]) -> list
         llm_unavailable=llm_unavailable,
         embedder=embedder,
         embedder_unavailable=embedder_unavailable,
+        prices=YahooPrices(settings.http.timeout_seconds),
     )
 
     pending = (
@@ -581,6 +655,15 @@ def run_once(settings: Settings, session_factory: sessionmaker[Session]) -> list
         + (
             f", left for next run {report.events_skipped_quota}"
             if report.events_skipped_quota
+            else ""
+        ),
+        f"prices: {report.impacts_priced} impacts got a reference price, "
+        f"{report.impacts_refreshed} moves refreshed, {report.impacts_waiting} waiting for "
+        f"their market to open, over {report.price_symbols} symbols "
+        f"({report.price_bars_stored} bars stored)"
+        + (
+            "; unusable: " + ", ".join(f"{n} {why}" for why, n in report.price_unusable.items())
+            if report.price_unusable
             else ""
         ),
         f"impacts: {report.impacts_created} from {report.stories_analyzed} analyzed "

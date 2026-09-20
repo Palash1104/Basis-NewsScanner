@@ -7,8 +7,8 @@ price checks and a track record (see `SPEC.md`).
 
 Research notes, not financial advice.
 
-**Status:** Phase 2 complete (fetch → group → rank → summarize → extract the event →
-apply the playbook → Telegram digest with market impacts). Market
+**Status:** Phase 3 complete (fetch → group → rank → summarize → extract the event → apply
+the playbook → check whether the market already moved → Telegram digest). Market
 impact notes start in Phase 2.
 
 ## Setup
@@ -150,6 +150,8 @@ used to improve Google's products. On Anthropic, `claude-haiku-4-5` costs a few 
 - **Explainers, roundups and live blogs** are detected by headline patterns. They can attach to
   a story but never start one or count as a source. Each run prints every flagged headline, so
   misfires are visible.
+- **Moves need an open market.** News that breaks after a close has no reference price until
+  the next session, so those impacts show no move until then. That is normal, not an error.
 - **Market impacts come from hand-written rules** (`config/playbook.yaml`), not from a model,
   and they are hypotheses: Phase 4 scores how often each rule is right. A rule that fires on
   most conflicts (`geopolitical_risk_off`) is meant to be judged that way, not trusted yet.

@@ -149,6 +149,25 @@ class Impact(Base):
     event: Mapped[Event | None] = relationship(back_populates="impacts")
 
 
+class PriceBar(Base):
+    """One cached price bar (SPEC section 6 `price_cache`). `volume` is an extra column: a
+    zero-volume daily bar is how Yahoo marks an exchange holiday for stocks, and those bars
+    must be left out of the volatility baseline."""
+
+    __tablename__ = "price_cache"
+    __table_args__ = (UniqueConstraint("symbol", "interval", "ts"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    symbol: Mapped[str] = mapped_column(String(32), index=True)
+    interval: Mapped[str] = mapped_column(String(8))
+    ts: Mapped[datetime] = mapped_column(UTCDateTime)  # bar start, stored UTC
+    open: Mapped[float] = mapped_column(Float)
+    high: Mapped[float] = mapped_column(Float)
+    low: Mapped[float] = mapped_column(Float)
+    close: Mapped[float] = mapped_column(Float)
+    volume: Mapped[float] = mapped_column(Float, default=0.0)
+
+
 class Article(Base):
     __tablename__ = "articles"
 

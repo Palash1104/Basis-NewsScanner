@@ -298,3 +298,31 @@ def test_story_shows_impacts_under_the_summary() -> None:
     assert lines[2] == "Drones struck a terminal. Exports may slow."
     assert lines[3].startswith("▲ Brent crude")
     assert lines[4].startswith("Sources:")
+
+
+def test_impact_line_shows_the_move_and_the_label() -> None:
+    impacts = [
+        _impact("BZ=F", "up", id=1, reference_price=100.0, move_at_detection_pct=2.4),
+        _impact("CL=F", "up", id=2, reference_price=100.0, move_at_detection_pct=1.9),
+    ]
+    (line,) = impact_lines(impacts, ASSETS, limit=6, labels={1: "already moved"})
+    assert line.startswith("▲ Brent crude +2.4% (already moved), WTI crude +1.9% · 1st · medium")
+
+
+def test_yield_moves_are_shown_in_points_with_the_unit() -> None:
+    impact = _impact(
+        "^TNX",
+        "up",
+        id=3,
+        reference_price=4.0,
+        move_at_detection_pct=2.5,
+        mechanism="Tighter policy",
+    )
+    (line,) = impact_lines([impact], ASSETS, limit=6, labels={3: "already moved"})
+    assert "US 10-year yield +0.10 pts (already moved)" in line
+    assert "%" not in line.split("—")[0]
+
+
+def test_impacts_without_a_price_show_the_name_alone() -> None:
+    (line,) = impact_lines([_impact("BZ=F", "up")], ASSETS, limit=6)
+    assert line.startswith("▲ Brent crude · 1st · medium")
