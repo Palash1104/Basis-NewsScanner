@@ -1,16 +1,21 @@
 """Format stories into Telegram HTML messages (SPEC 10)."""
 
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from html import escape
 from zoneinfo import ZoneInfo
 
-from app.models import Article, Story
+from app.config import AssetConfig
+from app.models import Article, Impact, Story
 from app.pipeline.dedupe import normalize_source
 
 TELEGRAM_LIMIT = 4096
 MAX_SOURCE_LINKS = 3
+UP, DOWN, MIXED = "\u25b2", "\u25bc", "\u2195"
+_ORDER_RANK = {"first": 0, "second": 1}
+_CONFIDENCE_RANK = {"high": 0, "medium": 1, "low": 2}
+_ORDER_LABEL = {"first": "1st", "second": "2nd"}
 FOOTER = "<i>Research notes, not financial advice.</i>"
 STORY_SEPARATOR = "\n\n"
 
@@ -29,6 +34,7 @@ class DigestItem:
     regions: list[str]
     disagreement_note: str | None
     sources: list[SourceLink]
+    impacts: list[str] = field(default_factory=list)  # formatted impact lines
 
 
 def pick_sources(articles: Sequence[Article], limit: int = MAX_SOURCE_LINKS) -> list[SourceLink]:
@@ -49,7 +55,72 @@ def pick_sources(articles: Sequence[Article], limit: int = MAX_SOURCE_LINKS) -> 
     return links
 
 
-def digest_item(story: Story) -> DigestItem:
+def _display(symbol: str, assets: dict[str, AssetConfig], direction: str) -> str:
+    """The asset's short name, saying what "up" means where an arrow is easy to misread."""
+    asset = assets.get(symbol)
+    if asset is None:
+        return symbol
+    if direction == "up" and asset.up_means:
+        return f"{asset.display_name} ({asset.up_means})"
+    return asset.display_name
+
+
+def _rank(impact: Impact) -> tuple[int, int]:
+    return _ORDER_RANK[impact.order], _CONFIDENCE_RANK[impact.confidence]
+
+
+def impact_lines(
+    impacts: Sequence[Impact], assets: dict[str, AssetConfig], limit: int
+) -> list[str]:
+    """Impact lines for one story: first-order before second-order, then by confidence.
+    Impacts sharing a mechanism share a line, an asset called both ways becomes one "mixed
+    signals" line, and anything past `limit` is summarized as "+N more"."""
+    conflicted = sorted({impact.symbol for impact in impacts if impact.conflict})
+    lines = []
+    for symbol in conflicted:
+        mechanisms = dict.fromkeys(i.mechanism for i in impacts if i.symbol == symbol)
+        name = assets[symbol].display_name if symbol in assets else symbol
+        lines.append(f"{MIXED} {_text(name)} · mixed signals: {_text(' vs '.join(mechanisms))}")
+
+    # One entry per symbol and direction; rules that agree are counted, not repeated.
+    grouped: dict[tuple[str, str], list[Impact]] = {}
+    for impact in impacts:
+        if impact.symbol not in conflicted:
+            grouped.setdefault((impact.symbol, impact.direction), []).append(impact)
+    entries = [
+        (min(same, key=_rank), len({i.rule_id for i in same if i.rule_id}))
+        for same in grouped.values()
+    ]
+    entries.sort(key=lambda entry: _rank(entry[0]))
+    shown, extra = entries[:limit], entries[limit:]
+
+    names_by_line: dict[tuple[str, str, str, str], list[str]] = {}
+    rules_by_line: dict[tuple[str, str, str, str], int] = {}
+    for impact, rule_count in shown:
+        key = (impact.direction, impact.order, impact.confidence, impact.mechanism)
+        names_by_line.setdefault(key, []).append(_display(impact.symbol, assets, impact.direction))
+        rules_by_line[key] = max(rules_by_line.get(key, 0), rule_count)
+    for key, names in names_by_line.items():
+        direction, order, confidence, mechanism = key
+        agree = f" · {rules_by_line[key]} rules" if rules_by_line[key] > 1 else ""
+        arrow = UP if direction == "up" else DOWN
+        lines.append(
+            f"{arrow} {_text(', '.join(names))} · {_ORDER_LABEL[order]} · {confidence}{agree}"
+            f" — {_text(mechanism)}"
+        )
+    if extra:
+        rest = ", ".join(
+            f"{UP if impact.direction == 'up' else DOWN} "
+            f"{_text(_display(impact.symbol, assets, impact.direction))}"
+            for impact, _ in extra
+        )
+        lines.append(f"+{len(extra)} more: {rest}")
+    return lines
+
+
+def digest_item(
+    story: Story, assets: dict[str, AssetConfig] | None = None, max_impacts: int = 6
+) -> DigestItem:
     return DigestItem(
         headline=story.headline,
         summary=story.summary or "",
@@ -57,6 +128,7 @@ def digest_item(story: Story) -> DigestItem:
         regions=list(story.regions or []),
         disagreement_note=story.disagreement_note if story.sources_disagree else None,
         sources=pick_sources(story.articles),
+        impacts=impact_lines(story.impacts, assets, max_impacts) if assets else [],
     )
 
 
@@ -76,6 +148,7 @@ def format_story(item: DigestItem) -> str:
     if meta:
         lines.append(f"<i>{_text(meta)}</i>")
     lines.append(_text(item.summary))
+    lines += item.impacts
     if item.disagreement_note:
         lines.append(f"<i>Sources disagree:</i> {_text(item.disagreement_note)}")
     if item.sources:
@@ -96,16 +169,7 @@ def _fit_story(item: DigestItem, limit: int) -> str:
         summary = summary[: max(len(summary) - overflow - 20, 0)].rstrip() + "…"
         if len(summary) <= 1:
             summary = ""
-        text = format_story(
-            DigestItem(
-                item.headline,
-                summary,
-                item.category,
-                item.regions,
-                item.disagreement_note,
-                item.sources,
-            )
-        )
+        text = format_story(replace(item, summary=summary))
     return text
 
 

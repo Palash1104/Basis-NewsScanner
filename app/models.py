@@ -73,8 +73,80 @@ class Story(Base):
     # Not in SPEC section 6: set when a summary was skipped because the LLM quota ran out, so the
     # next run summarizes it first even if it has dropped out of the top stories.
     summary_pending: Mapped[bool] = mapped_column(default=False)
+    # Not in SPEC section 6 originally: set when event extraction was skipped (quota, or an API
+    # error), so the next run extracts it first.
+    event_pending: Mapped[bool] = mapped_column(default=False)
 
     articles: Mapped[list["Article"]] = relationship(back_populates="story")
+    events: Mapped[list["Event"]] = relationship(
+        back_populates="story", order_by="Event.id", cascade="all, delete-orphan"
+    )
+    impacts: Mapped[list["Impact"]] = relationship(
+        back_populates="story", order_by="Impact.id", cascade="all, delete-orphan"
+    )
+
+    @property
+    def latest_event(self) -> "Event | None":
+        return self.events[-1] if self.events else None
+
+
+class Event(Base):
+    """One event extraction for a story (SPEC 7.6). A story gets a new row each time it's
+    re-extracted; the latest row is its current event."""
+
+    __tablename__ = "events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    story_id: Mapped[int] = mapped_column(ForeignKey("stories.id"), index=True)
+    event_type: Mapped[str] = mapped_column(String(40))
+    countries: Mapped[list[str]] = mapped_column(JSON, default=list)  # canonical names
+    regions: Mapped[list[str]] = mapped_column(JSON, default=list)  # copied from the story
+    entities: Mapped[list[str]] = mapped_column(JSON, default=list)
+    companies: Mapped[list[str]] = mapped_column(JSON, default=list)
+    channels: Mapped[list[str]] = mapped_column(JSON, default=list)
+    severity: Mapped[str] = mapped_column(String(16))
+    policy_stance: Mapped[str] = mapped_column(String(16))
+    # The authority whose stance policy_stance describes, so a Fed decision can't match an RBI
+    # rule (added with event prompt v2; not in SPEC section 6 originally).
+    policy_actor: Mapped[str | None] = mapped_column(String(64))
+    is_new_development: Mapped[bool] = mapped_column()
+    model: Mapped[str] = mapped_column(String(64))
+    prompt_version: Mapped[str] = mapped_column(String(32))
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime)
+
+    story: Mapped[Story] = relationship(back_populates="events")
+    impacts: Mapped[list["Impact"]] = relationship(back_populates="event")
+
+
+class Impact(Base):
+    """One call on one asset from one story (SPEC 7.7). Written once and never edited: it is
+    the call as it was made, which the scoring phase judges."""
+
+    __tablename__ = "impacts"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    story_id: Mapped[int] = mapped_column(ForeignKey("stories.id"), index=True)
+    # Which extraction produced it: the track record groups by event type and prompt version,
+    # and a story has several events once it is re-extracted. Not in SPEC section 6.
+    event_id: Mapped[int | None] = mapped_column(ForeignKey("events.id"), index=True)
+    symbol: Mapped[str] = mapped_column(String(32), index=True)
+    direction: Mapped[str] = mapped_column(String(8))  # up | down
+    mechanism: Mapped[str] = mapped_column(Text)
+    order: Mapped[str] = mapped_column(String(8))  # first | second
+    confidence: Mapped[str] = mapped_column(String(8))  # high | medium | low
+    # Playbook rules don't state a horizon; the Phase 5 LLM layer does.
+    horizon: Mapped[str | None] = mapped_column(String(16))
+    origin: Mapped[str] = mapped_column(String(16))  # playbook | llm | both
+    rule_id: Mapped[str | None] = mapped_column(String(64), index=True)
+    conflict: Mapped[bool] = mapped_column(default=False)
+    # Filled in by the Phase 3 price check.
+    reference_time: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    reference_price: Mapped[float | None] = mapped_column(Float)
+    move_at_detection_pct: Mapped[float | None] = mapped_column(Float)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime)
+
+    story: Mapped[Story] = relationship(back_populates="impacts")
+    event: Mapped[Event | None] = relationship(back_populates="impacts")
 
 
 class Article(Base):

@@ -16,7 +16,7 @@ from app.db import init_db, make_engine, make_session_factory
 from app.delivery.telegram import TelegramError
 from app.llm.client import LLMClient
 from app.llm.ratelimit import MemoryDailyUsageStore, RateLimiter
-from app.models import Article, Run, Story
+from app.models import Article, Event, Run, Story
 from tests.conftest import NOW, make_feed
 from tests.fakes import FakeEmbedder, FakeProvider, echo_summary_responder, rss
 
@@ -87,15 +87,19 @@ def test_run_twice_does_not_resummarize(db: sessionmaker[Session], settings: Set
     assert (first.feeds_ok, first.feeds_failed) == (2, 1)
     assert first.articles_new == 4
     assert (first.stories_created, first.articles_attached) == (3, 1)  # the EU pair grouped
-    assert first.summarized == 3 and len(fake.calls) == 3
-    assert first.input_tokens == 3 * 120 and first.output_tokens == 3 * 60
+    # Each summary is followed by an event extraction: 3 + 3 calls.
+    assert first.summarized == 3 and first.events_extracted == 3 and len(fake.calls) == 6
+    # The fake event (US/India tariffs, escalating) matches one rule, twice per story.
+    assert first.stories_analyzed == 3 and first.impacts_created == 6
+    assert first.impact_rules == {"us_tariffs_on_india": 6}
+    assert first.input_tokens == 6 * 120 and first.output_tokens == 6 * 60
     assert any(e["stage"] == "fetch" and e["feed"] == "Down" for e in first.errors)
 
     llm, fake = _llm(settings)
     second = run_pipeline(db, settings, FEEDS, llm, now=NOW, transport=server.transport)
     assert second.articles_new == 0 and second.duplicates_dropped == 4
     assert second.summarized == 0 and second.skipped_unchanged == 3
-    assert fake.calls == []
+    assert second.events_extracted == 0 and fake.calls == []
 
     # Two more outlets' articles on the EU story: only that story is summarized again.
     later = NOW + timedelta(hours=1)
@@ -119,15 +123,21 @@ def test_run_twice_does_not_resummarize(db: sessionmaker[Session], settings: Set
     third = run_pipeline(db, settings, FEEDS, llm, now=later, transport=server.transport)
     assert third.articles_new == 2 and third.articles_attached == 2
     assert third.summarized == 1 and third.skipped_unchanged == 2
+    assert third.events_extracted == 1  # re-extracted along with its re-summary
 
     with db() as session:
         runs = session.scalars(select(Run).order_by(Run.id)).all()
         assert [r.kind for r in runs] == ["pipeline"] * 3
         assert [r.stories_processed for r in runs] == [3, 0, 1]
-        assert runs[0].input_tokens == 360 and runs[0].finished_at is not None
+        assert runs[0].input_tokens == 720 and runs[0].finished_at is not None
         assert runs[1].input_tokens == 0
         eu = session.scalars(select(Story).where(Story.processed_article_count == 4)).one()
-        assert eu.status == "summarized" and eu.updated_at == later
+        assert eu.status == "analyzed" and eu.updated_at == later
+        # Re-extraction doesn't duplicate impacts the story already has.
+        assert [(i.symbol, i.rule_id) for i in eu.impacts] == [
+            ("^NSEI", "us_tariffs_on_india"),
+            ("INR=X", "us_tariffs_on_india"),
+        ]
 
 
 def test_missing_api_key_skips_summarization(db: sessionmaker[Session], settings: Settings) -> None:
@@ -154,6 +164,9 @@ def test_digest_dry_run_then_send(db: sessionmaker[Session], settings: Settings)
     assert dry.stories == 3 and not dry.sent
     text = "\n".join(dry.messages)
     assert "Gaza" in text and "Research notes, not financial advice." in text
+    # Playbook impacts appear with their mechanism (SPEC §13, Phase 2).
+    assert "▼ Nifty 50 · 2nd · low — US tariffs threaten Indian exports and growth" in text
+    assert "▲ USD/INR (rupee weaker) · 2nd · low" in text
     with db() as session:
         assert session.scalars(select(Run).where(Run.kind == "digest")).all() == []
 
@@ -230,6 +243,8 @@ def test_quota_runs_out_mid_run_and_next_run_catches_up(
     # Fetching and grouping finished; one summary fit the budget, two were left for later.
     assert first.articles_new == 4 and first.stories_created == 3
     assert first.summarized == 1 and first.skipped_quota == 2 and len(fake.calls) == 1
+    # Its event extraction didn't fit either: left for the next run too.
+    assert first.events_extracted == 0 and first.events_skipped_quota == 1
     stop = next(e for e in first.errors if "stopped early" in e["error"])
     assert "daily budget reached" in stop["error"] and len(stop["left_for_next_run"]) == 2
     with db() as session:
@@ -243,10 +258,15 @@ def test_quota_runs_out_mid_run_and_next_run_catches_up(
     llm, fake = _budget_limited_llm(settings, budget=10)
     second = run_pipeline(db, settings, FEEDS, llm, now=NOW, transport=server.transport)
     assert second.pending_carried == 2
-    assert second.summarized == 2 and second.skipped_quota == 0 and len(fake.calls) == 2
+    assert second.summarized == 2 and second.skipped_quota == 0
+    # The carried-over extraction, then the two new summaries' extractions: 2 + 3 calls.
+    assert second.events_pending_carried == 1 and second.events_extracted == 3
+    assert len(fake.calls) == 5
     with db() as session:
         assert session.scalars(select(Story).where(Story.summary_pending.is_(True))).all() == []
-        assert len(session.scalars(select(Story).where(Story.status == "summarized")).all()) == 3
+        assert session.scalars(select(Story).where(Story.event_pending.is_(True))).all() == []
+        assert len(session.scalars(select(Event)).all()) == 3
+        assert len(session.scalars(select(Story).where(Story.status == "analyzed")).all()) == 3
 
 
 def _summarized_story(session: Session, headline: str, regions: list[str], status: str) -> Story:

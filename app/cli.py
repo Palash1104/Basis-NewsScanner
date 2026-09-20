@@ -51,7 +51,9 @@ from app.pipeline.classify import non_news_reason
 from app.pipeline.cluster import GroupingResult, assign_to_stories
 from app.pipeline.dedupe import dedupe_articles
 from app.pipeline.embed import Embedder, load_embedder
+from app.pipeline.extract_event import extract_events, pending_event_stories
 from app.pipeline.fetch import FeedResult, SourceResolver, fetch_all, filter_recent
+from app.pipeline.playbook import Rule, apply_rules, load_playbook
 from app.pipeline.rank import pending_stories, rank_stories
 from app.pipeline.summarize import summarize_stories
 
@@ -64,6 +66,7 @@ app = typer.Typer(
 )
 
 URL_QUERY_CHUNK = 500
+DIGEST_STATUSES = ("summarized", "analyzed")
 
 
 # ---------------------------------------------------------------- pipeline
@@ -93,6 +96,16 @@ class PipelineReport:
     borderline_logged: int = 0
     pending_carried: int = 0  # stories skipped for quota on an earlier run, done first this run
     skipped_quota: int = 0  # stories left pending because the quota ran out this run
+    events_extracted: int = 0
+    events_failed: int = 0  # invalid output after retry: no event until the next re-summary
+    event_call_errors: int = 0  # API errors: extracted next run
+    events_pending_carried: int = 0
+    events_skipped_quota: int = 0
+    stories_analyzed: int = 0  # event extracted and the playbook applied
+    impacts_created: int = 0
+    impact_rules: dict[str, int] = field(default_factory=dict)  # rule id -> impacts written
+    # Unmapped country names and other fixes to extracted events, shown in the run output.
+    event_notes: list[str] = field(default_factory=list)
     llm_calls: int = 0
     input_tokens: int = 0
     output_tokens: int = 0
@@ -130,6 +143,7 @@ def run_pipeline(
     llm: LLMClient | None,
     now: datetime | None = None,
     transport: httpx.AsyncBaseTransport | None = None,
+    rules: Sequence[Rule] | None = None,
     llm_unavailable: str | None = None,
     embedder: Embedder | None = None,
     embedder_unavailable: str | None = None,
@@ -221,6 +235,8 @@ def run_pipeline(
             session.commit()
 
             stage = "summarize"
+            # Extractions still owed from earlier runs, before this run adds its own.
+            carried = {story.id for story in pending_event_stories(session, settings, now)}
             if llm is None:
                 reason = llm_unavailable or "no LLM client configured"
                 report.errors.append({"stage": "summarize", "error": f"skipped: {reason}"})
@@ -252,6 +268,52 @@ def run_pipeline(
                             "left_for_next_run": summary.skipped_quota,
                         }
                     )
+
+                stage = "extract"
+                # Summarizing marks a story event_pending, so this covers both the stories
+                # summarized just now and any extraction still owed from an earlier run.
+                to_extract = pending_event_stories(session, settings, now)
+                report.events_pending_carried = len(carried & {s.id for s in to_extract})
+                extraction = extract_events(session, to_extract, llm, settings, now)
+                report.events_extracted = len(extraction.extracted)
+                report.events_failed = len(extraction.failed)
+                report.event_call_errors = len(extraction.call_errors)
+                report.events_skipped_quota = len(extraction.skipped_quota)
+                report.event_notes = extraction.notes
+                for story_id, error in extraction.failed + extraction.call_errors:
+                    report.errors.append({"stage": "extract", "story_id": story_id, "error": error})
+                if extraction.stopped:
+                    report.errors.append(
+                        {
+                            "stage": "extract",
+                            "error": f"stopped early: {extraction.stopped}",
+                            "left_for_next_run": extraction.skipped_quota,
+                        }
+                    )
+
+                stage = "impacts"
+                playbook = rules
+                if playbook is None:
+                    try:
+                        playbook = load_playbook(assets=load_assets())
+                    except Exception as exc:  # a broken playbook must not stop the run
+                        playbook = []
+                        report.errors.append(
+                            {"stage": "impacts", "error": f"playbook not loaded: {exc}"}
+                        )
+                for story_id in extraction.extracted:
+                    story = session.get(Story, story_id)
+                    if story is None or story.latest_event is None:
+                        continue
+                    created = apply_rules(session, story, story.latest_event, playbook, now)
+                    report.stories_analyzed += 1
+                    report.impacts_created += len(created)
+                    for impact in created:
+                        if impact.rule_id:
+                            report.impact_rules[impact.rule_id] = (
+                                report.impact_rules.get(impact.rule_id, 0) + 1
+                            )
+                session.commit()
         except Exception as exc:
             session.rollback()
             report.errors.append({"stage": stage, "error": f"{type(exc).__name__}: {exc}"})
@@ -366,7 +428,9 @@ def select_digest_stories(
     since = last_digest_sent_at(session) or now - timedelta(hours=settings.pipeline.lookback_hours)
     stories = session.scalars(
         select(Story)
-        .where(Story.status == "summarized", Story.updated_at > since)
+        # "analyzed": event extracted and playbook applied. "summarized" covers
+        # stories whose extraction failed or hasn't run yet.
+        .where(Story.status.in_(DIGEST_STATUSES), Story.updated_at > since)
         .order_by(Story.importance_score.desc())
         .limit(settings.delivery.max_stories_per_digest)
     ).all()
@@ -388,7 +452,14 @@ def run_digest(
     now = now or utcnow()
     with session_factory() as session:
         stories, since = select_digest_stories(session, settings, now)
-        items = [digest_item(story) for story in stories]
+        try:
+            assets = {asset.symbol: asset for asset in load_assets()}
+        except Exception as exc:  # a broken assets.yaml must not stop the digest
+            log.warning("assets.yaml not loaded; impacts show raw symbols: %s", exc)
+            assets = {}
+        items = [
+            digest_item(story, assets, settings.delivery.max_impacts_in_digest) for story in stories
+        ]
         messages = format_digest(items, now, settings.tz)
         report = DigestReport(stories=len(items), messages=messages, since=since)
         if not send or not items:
@@ -500,6 +571,24 @@ def run_once(settings: Settings, session_factory: sessionmaker[Session]) -> list
         f"top {report.stories_ranked} ranked{pending} · summarized "
         f"{report.summarized}, unchanged {report.skipped_unchanged}, failed {report.failed}, "
         f"LLM errors {report.llm_call_errors}{left}",
+        f"events: extracted {report.events_extracted}"
+        + (
+            f" ({report.events_pending_carried} carried over)"
+            if report.events_pending_carried
+            else ""
+        )
+        + f", failed {report.events_failed}, API errors {report.event_call_errors}"
+        + (
+            f", left for next run {report.events_skipped_quota}"
+            if report.events_skipped_quota
+            else ""
+        ),
+        f"impacts: {report.impacts_created} from {report.stories_analyzed} analyzed "
+        + (
+            "stories (" + ", ".join(f"{rule} {n}" for rule, n in report.impact_rules.items()) + ")"
+            if report.impact_rules
+            else "stories"
+        ),
         f"LLM ({settings.llm.provider}, {settings.llm.summary_model}): {report.llm_calls} calls, "
         f"tokens {report.input_tokens} input, {report.output_tokens} output",
     ]
@@ -525,6 +614,9 @@ def run_once(settings: Settings, session_factory: sessionmaker[Session]) -> list
                 else "left out (no matching story)"
             )
             lines.append(f"  [{entry['reason']}] {entry['title']} ({entry['source']}) → {where}")
+    if report.event_notes:
+        lines.append(f"event notes ({len(report.event_notes)}):")
+        lines += [f"  {note}" for note in report.event_notes]
     warning = asset_warning(session_factory)
     if warning:
         lines.append(f"warning: {warning}")

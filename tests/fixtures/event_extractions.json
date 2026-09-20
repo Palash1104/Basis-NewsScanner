@@ -1,0 +1,1620 @@
+{
+ "_about": "Real event extractions for stored stories, made by scripts/event_fixtures.py. Used to check the event prompt and to test the playbook against real events.",
+ "model": "gemini-3.5-flash-lite",
+ "prompt_version": "event-v2",
+ "extracted_at": "2026-09-20T14:38:57.023028+00:00",
+ "events": [
+  {
+   "story_id": 2,
+   "label": "geopolitics: US sanctions law allowing tariffs on India",
+   "headline": "Trump signs Russia sanctions bill allowing high tariffs on India",
+   "summary": "President Trump signed a new Russia sanctions bill into law. This law gives him the power to impose up to 100 percent tariffs on countries like India that buy Russian oil, which could impact relations and energy security.",
+   "summary_source": "stored",
+   "regions": [
+    "US",
+    "India",
+    "Global"
+   ],
+   "articles": [
+    {
+     "source_name": "The Indian Express",
+     "title": "Trump signs Russia sanction bill into law giving him power to impose 100% tariffs on India",
+     "snippet": "",
+     "published_at": "2026-09-18T23:30:42+00:00"
+    },
+    {
+     "source_name": "BBC",
+     "title": "Trump signs sweeping Russia sanctions bill",
+     "snippet": "The bill is named after the late Senator Lindsey Graham, a staunch advocate of aid for Ukraine.",
+     "published_at": "2026-09-18T22:05:47+00:00"
+    },
+    {
+     "source_name": "CNBC",
+     "title": "Trump gains a tariff weapon against China and India. Will he use it?",
+     "snippet": "U.S. House has paved the way for a legislation that will allow Trump to impose up to 100% tariffs on countries buying Russian oil, giving him leverage against India and China.",
+     "published_at": "2026-09-17T08:46:04+00:00"
+    },
+    {
+     "source_name": "The Hindu",
+     "title": "Trump signs Russia sanctions bill into law",
+     "snippet": "",
+     "published_at": "2026-09-18T21:59:17+00:00"
+    },
+    {
+     "source_name": "Reuters",
+     "title": "India says new US tariffs over Russian oil could hit ties, vows to protect energy security",
+     "snippet": "",
+     "published_at": "2026-09-17T05:19:00+00:00"
+    }
+   ],
+   "event": {
+    "event_type": "sanctions_trade_policy",
+    "countries": [
+     "United States",
+     "India",
+     "Russia",
+     "China"
+    ],
+    "entities": [
+     "U.S. House",
+     "Lindsey Graham"
+    ],
+    "companies": [],
+    "channels": [
+     "tariffs_trade",
+     "oil_supply"
+    ],
+    "severity": "escalation",
+    "policy_stance": "not_applicable",
+    "policy_actor": null,
+    "is_new_development": true
+   },
+   "raw_event": {
+    "event_type": "sanctions_trade_policy",
+    "countries": [
+     "United States",
+     "India",
+     "Russia",
+     "China"
+    ],
+    "entities": [
+     "U.S. House",
+     "Lindsey Graham"
+    ],
+    "companies": [],
+    "channels": [
+     "tariffs_trade",
+     "oil_supply"
+    ],
+    "severity": "escalation",
+    "policy_stance": "not_applicable",
+    "policy_actor": null,
+    "is_new_development": true
+   },
+   "notes": [],
+   "tokens": [
+    1070,
+    143
+   ]
+  },
+  {
+   "story_id": 111,
+   "label": "geopolitics: Saudi-Houthi strikes, Riyadh air-raid alerts",
+   "headline": "Saudi Arabia issues rare air raid alerts for Riyadh",
+   "summary": "Saudi Arabia issued air-raid alerts for Riyadh after explosions were reported in the capital. This marks the first such alert in Riyadh since the height of the US-Iran war.",
+   "summary_source": "stored",
+   "regions": [
+    "Global"
+   ],
+   "articles": [
+    {
+     "source_name": "BBC",
+     "title": "Saudi Arabia issues first air raid alerts for Riyadh since Houthis escalated attacks",
+     "snippet": "Residents later received the all-clear after explosions were reported in the capital.",
+     "published_at": "2026-09-19T04:20:47+00:00"
+    },
+    {
+     "source_name": "The Hindu",
+     "title": "Houthis say Saudi Arabia launched 26 strikes in Yemen over 24 hours",
+     "snippet": "This month, the Houthis, who already held most of Yemen’s populated areas, launched a lightning offensive to take over the country’s entire Red Sea coast, giving them control over the vital Bab al-Mandab strait",
+     "published_at": "2026-09-19T02:55:55+00:00"
+    },
+    {
+     "source_name": "The Indian Express",
+     "title": "Secret Oman meeting: What did Houthis tell US as Saudi Arabia seeks help?",
+     "snippet": "",
+     "published_at": "2026-09-17T08:38:59+00:00"
+    },
+    {
+     "source_name": "Livemint",
+     "title": "Saudi Arabia Issues Rare Air-Raid Alerts for Riyadh",
+     "snippet": "Saudi Arabian authorities issued air-raid alerts for Riyadh early Saturday, the first in the capital since the height of the US-Iran war in March and April.",
+     "published_at": "2026-09-19T06:22:54+00:00"
+    },
+    {
+     "source_name": "Al Jazeera",
+     "title": "Houthis accuse Saudi Arabia of launching 26 attacks in 24 hours",
+     "snippet": "",
+     "published_at": "2026-09-19T05:40:29+00:00"
+    }
+   ],
+   "event": {
+    "event_type": "geopolitical_conflict",
+    "countries": [
+     "Saudi Arabia",
+     "Yemen",
+     "Iran",
+     "United States",
+     "Oman"
+    ],
+    "entities": [
+     "Houthis",
+     "Bab al-Mandab strait",
+     "Riyadh",
+     "Red Sea"
+    ],
+    "companies": [],
+    "channels": [
+     "oil_supply",
+     "shipping_routes",
+     "safe_haven_demand",
+     "risk_sentiment"
+    ],
+    "severity": "escalation",
+    "policy_stance": "not_applicable",
+    "policy_actor": null,
+    "is_new_development": true
+   },
+   "raw_event": {
+    "event_type": "geopolitical_conflict",
+    "countries": [
+     "Saudi Arabia",
+     "Yemen",
+     "Iran",
+     "United States",
+     "Oman"
+    ],
+    "entities": [
+     "Houthis",
+     "Bab al-Mandab strait",
+     "Riyadh",
+     "Red Sea"
+    ],
+    "companies": [],
+    "channels": [
+     "oil_supply",
+     "shipping_routes",
+     "safe_haven_demand",
+     "risk_sentiment"
+    ],
+    "severity": "escalation",
+    "policy_stance": "not_applicable",
+    "policy_actor": null,
+    "is_new_development": true
+   },
+   "notes": [],
+   "tokens": [
+    1104,
+    177
+   ]
+  },
+  {
+   "story_id": 317,
+   "label": "geopolitics: China presses Iran to curb Houthi attacks",
+   "headline": "China Pressures Iran to Help Curb Houthi Attacks",
+   "summary": "China is asking Iran to help stop Houthi attacks following an appeal from Saudi Arabia. This effort could help reduce regional tensions and protect shipping routes.",
+   "summary_source": "stored",
+   "regions": [
+    "Global"
+   ],
+   "articles": [
+    {
+     "source_name": "Reuters",
+     "title": "EXCLUSIVE: China presses Iran to help rein in Houthis after Saudi appeal, sources say",
+     "snippet": "",
+     "published_at": "2026-09-17T13:42:27+00:00"
+    },
+    {
+     "source_name": "The Economic Times",
+     "title": "China presses Iran to help rein in Houthis",
+     "snippet": "",
+     "published_at": "2026-09-17T12:07:16+00:00"
+    }
+   ],
+   "event": {
+    "event_type": "geopolitical_conflict",
+    "countries": [
+     "China",
+     "Iran",
+     "Saudi Arabia"
+    ],
+    "entities": [
+     "Houthis"
+    ],
+    "companies": [],
+    "channels": [
+     "shipping_routes",
+     "risk_sentiment"
+    ],
+    "severity": "de_escalation",
+    "policy_stance": "not_applicable",
+    "policy_actor": null,
+    "is_new_development": true
+   },
+   "raw_event": {
+    "event_type": "geopolitical_conflict",
+    "countries": [
+     "China",
+     "Iran",
+     "Saudi Arabia"
+    ],
+    "entities": [
+     "Houthis"
+    ],
+    "companies": [],
+    "channels": [
+     "shipping_routes",
+     "risk_sentiment"
+    ],
+    "severity": "de_escalation",
+    "policy_stance": "not_applicable",
+    "policy_actor": null,
+    "is_new_development": true
+   },
+   "notes": [],
+   "tokens": [
+    867,
+    127
+   ]
+  },
+  {
+   "story_id": 8,
+   "label": "geopolitics: India-Pakistan naval collision",
+   "headline": "Indian and Pakistani Naval Ships Collide in Arabian Sea",
+   "summary": "An Indian warship and a Pakistani vessel collided in the Arabian Sea, leading both countries to summon each other's diplomats. This incident raises concerns about unintended escalation between the two nations.",
+   "summary_source": "stored",
+   "regions": [
+    "India",
+    "Global"
+   ],
+   "articles": [
+    {
+     "source_name": "The Hindu",
+     "title": "India rejects Pakistan’s allegations regarding collision of Indian, Pak ships in Arabian Sea",
+     "snippet": "The incident happened on the night of September 15, when a Pakistani vessel closed in on a frontline Indian Navy warship that was on a routine surveillance mission in the north Arabian Sea",
+     "published_at": "2026-09-19T01:21:53+00:00"
+    },
+    {
+     "source_name": "BBC",
+     "title": "India and Pakistan summon diplomats after ships collide in international waters",
+     "snippet": "",
+     "published_at": "2026-09-17T06:26:55+00:00"
+    },
+    {
+     "source_name": "The Indian Express",
+     "title": "Naval collision: India says Pak vessel closed in; Islamabad summons envoy",
+     "snippet": "",
+     "published_at": "2026-09-17T13:17:54+00:00"
+    },
+    {
+     "source_name": "Al Jazeera",
+     "title": "India-Pakistan navy ship collision sparks alarm over unintended escalation",
+     "snippet": "Pakistan says an Indian warship entered its EEZ, while India says the collision occurred in international waters.",
+     "published_at": "2026-09-17T13:25:25+00:00"
+    },
+    {
+     "source_name": "The Hindu",
+     "title": "Pakistan Navy vessel collides with Indian warship in Arabian Sea",
+     "snippet": "India summons Pakistan envoy and lodges strong protest over “unacceptable and unprofessional conduct”; Pakistani vessel approached Indian ship at high speed but suffered damage in collision and returned to harbour; Indian warship remains deployed",
+     "published_at": "2026-09-17T03:49:47+00:00"
+    }
+   ],
+   "event": {
+    "event_type": "geopolitical_conflict",
+    "countries": [
+     "India",
+     "Pakistan"
+    ],
+    "entities": [
+     "Arabian Sea",
+     "Indian Navy",
+     "Pakistan Navy"
+    ],
+    "companies": [],
+    "channels": [
+     "risk_sentiment",
+     "defense_spending"
+    ],
+    "severity": "escalation",
+    "policy_stance": "not_applicable",
+    "policy_actor": null,
+    "is_new_development": true
+   },
+   "raw_event": {
+    "event_type": "geopolitical_conflict",
+    "countries": [
+     "India",
+     "Pakistan"
+    ],
+    "entities": [
+     "Arabian Sea",
+     "Indian Navy",
+     "Pakistan Navy"
+    ],
+    "companies": [],
+    "channels": [
+     "risk_sentiment",
+     "defense_spending"
+    ],
+    "severity": "escalation",
+    "policy_stance": "not_applicable",
+    "policy_actor": null,
+    "is_new_development": true
+   },
+   "notes": [],
+   "tokens": [
+    1103,
+    132
+   ]
+  },
+  {
+   "story_id": 612,
+   "label": "geopolitics: US-Denmark security deal on Greenland",
+   "headline": "US and Denmark reach new security deal regarding Greenland",
+   "summary": "The United States and Denmark have reached a security agreement concerning Greenland. The deal gives the US permanent control over security needs without fulfilling annexation plans, though specifics still require parliamentary action.",
+   "summary_source": "stored",
+   "regions": [
+    "US",
+    "Global"
+   ],
+   "articles": [
+    {
+     "source_name": "The Hindu",
+     "title": "U.S. and Denmark reach deal on Greenland: Trump",
+     "snippet": "The office of Danish Prime Minister said the Greenland deal will be signed by three governments next week during the UNGA; however parliamentary action is still needed by the Danish and Greenland governments",
+     "published_at": "2026-09-19T04:17:43+00:00"
+    },
+    {
+     "source_name": "BBC",
+     "title": "US and Denmark reach deal over Greenland after Trump annexation threats",
+     "snippet": "Trump says the agreement will give the US \"permanent control over security, and all other needs, in Greenland\", though specifics have not been confirmed by Danish officials.",
+     "published_at": "2026-09-18T22:58:55+00:00"
+    },
+    {
+     "source_name": "CNBC",
+     "title": "Trump says U.S. to build a 'large Military presence' in Greenland as part of a security deal with it and Denmark",
+     "snippet": "Greenland has maintained it is not for sale, and the European Union earlier this year united to rebuke Trump over his push to acquire the island.",
+     "published_at": "2026-09-18T23:28:06+00:00"
+    },
+    {
+     "source_name": "The Indian Express",
+     "title": "‘Dream come true’: Trump on new US-Denmark deal for Greenland",
+     "snippet": "",
+     "published_at": "2026-09-19T04:04:56+00:00"
+    },
+    {
+     "source_name": "Al Jazeera",
+     "title": "Trump ‘settled for less’ with new US-Denmark Greenland security deal",
+     "snippet": "The US-Denmark Greenland security deal gives Trump an agreement without delivering his ambition to annex the territory.",
+     "published_at": "2026-09-19T07:35:05+00:00"
+    }
+   ],
+   "event": {
+    "event_type": "geopolitical_conflict",
+    "countries": [
+     "United States",
+     "Denmark"
+    ],
+    "entities": [
+     "Greenland",
+     "European Union"
+    ],
+    "companies": [],
+    "channels": [
+     "defense_spending",
+     "risk_sentiment"
+    ],
+    "severity": "de_escalation",
+    "policy_stance": "not_applicable",
+    "policy_actor": null,
+    "is_new_development": true
+   },
+   "raw_event": {
+    "event_type": "geopolitical_conflict",
+    "countries": [
+     "United States",
+     "Denmark"
+    ],
+    "entities": [
+     "Greenland",
+     "European Union"
+    ],
+    "companies": [],
+    "channels": [
+     "defense_spending",
+     "risk_sentiment"
+    ],
+    "severity": "de_escalation",
+    "policy_stance": "not_applicable",
+    "policy_actor": null,
+    "is_new_development": true
+   },
+   "notes": [],
+   "tokens": [
+    1132,
+    128
+   ]
+  },
+  {
+   "story_id": 700,
+   "label": "defence: US clears $2.7bn defence package for Ukraine",
+   "headline": "U.S. Clears $2.7 Billion Defense Package for Ukraine",
+   "summary": "The U.S. State Department approved a $2.7 billion defense and air-defense development package for Ukraine. Ukraine plans to fund the purchase using European contributions and U.S. financing.",
+   "summary_source": "stored",
+   "regions": [
+    "US",
+    "Global"
+   ],
+   "articles": [
+    {
+     "source_name": "The Hindu",
+     "title": "U.S. State Department clears $2.7 billion Ukraine defence package",
+     "snippet": "If the purchase is concluded, Ukraine would finance it using a combination of ‌European contributions and U.S. Foreign Military Financing (FMF) appropriated during the administration of former President Joe ‌Biden, the State Department said in a notification",
+     "published_at": "2026-09-19T03:29:47+00:00"
+    },
+    {
+     "source_name": "Reuters",
+     "title": "US clears way for $2.7 billion sale to Ukraine of air-defense development upgrades",
+     "snippet": "",
+     "published_at": "2026-09-19T02:17:00+00:00"
+    }
+   ],
+   "event": {
+    "event_type": "geopolitical_conflict",
+    "countries": [
+     "United States",
+     "Ukraine"
+    ],
+    "entities": [
+     "U.S. State Department"
+    ],
+    "companies": [],
+    "channels": [
+     "defense_spending"
+    ],
+    "severity": "moderate",
+    "policy_stance": "not_applicable",
+    "policy_actor": null,
+    "is_new_development": true
+   },
+   "raw_event": {
+    "event_type": "geopolitical_conflict",
+    "countries": [
+     "United States",
+     "Ukraine"
+    ],
+    "entities": [
+     "U.S. State Department"
+    ],
+    "companies": [],
+    "channels": [
+     "defense_spending"
+    ],
+    "severity": "moderate",
+    "policy_stance": "not_applicable",
+    "policy_actor": null,
+    "is_new_development": true
+   },
+   "notes": [],
+   "tokens": [
+    935,
+    116
+   ]
+  },
+  {
+   "story_id": 621,
+   "label": "geopolitics: North Korea rejects IAEA criticism",
+   "headline": "North Korea Rejects UN Nuclear Watchdog Criticism and Reaffirms Status",
+   "summary": "North Korea rejected criticism from the United Nations atomic agency and stated that its nuclear status is irreversible. This rejection highlights ongoing tensions regarding international nuclear rules.",
+   "summary_source": "stored",
+   "regions": [
+    "Global"
+   ],
+   "articles": [
+    {
+     "source_name": "The Hindu",
+     "title": "North Korea says nuclear status 'irreversible' after UN atomic agency rebuke",
+     "snippet": "The IAEA’s “biased viewpoint and double standards” are “the fundamental factor causing the collapse of ‌the international nuclear non-proliferation system”, Kim Yo Jong said in a statement ‌in state media KCNA.",
+     "published_at": "2026-09-19T01:11:34+00:00"
+    },
+    {
+     "source_name": "Al Jazeera",
+     "title": "North Korea dismisses UN nuclear watchdog resolution",
+     "snippet": "The country rebukes the UN atomic agency's 'double standards' and says nuclear status is 'irreversible'.",
+     "published_at": "2026-09-19T03:29:54+00:00"
+    },
+    {
+     "source_name": "Hindustan Times",
+     "title": "North Korea rejects UN nuclear watchdog criticism",
+     "snippet": "North Korea rejects UN nuclear watchdog criticism",
+     "published_at": "2026-09-18T22:35:22+00:00"
+    }
+   ],
+   "event": {
+    "event_type": "geopolitical_conflict",
+    "countries": [
+     "North Korea"
+    ],
+    "entities": [
+     "United Nations",
+     "IAEA",
+     "Kim Yo Jong",
+     "KCNA"
+    ],
+    "companies": [],
+    "channels": [
+     "risk_sentiment",
+     "safe_haven_demand"
+    ],
+    "severity": "minor",
+    "policy_stance": "not_applicable",
+    "policy_actor": null,
+    "is_new_development": true
+   },
+   "raw_event": {
+    "event_type": "geopolitical_conflict",
+    "countries": [
+     "North Korea"
+    ],
+    "entities": [
+     "United Nations",
+     "IAEA",
+     "Kim Yo Jong",
+     "KCNA"
+    ],
+    "companies": [],
+    "channels": [
+     "risk_sentiment",
+     "safe_haven_demand"
+    ],
+    "severity": "minor",
+    "policy_stance": "not_applicable",
+    "policy_actor": null,
+    "is_new_development": true
+   },
+   "notes": [],
+   "tokens": [
+    980,
+    135
+   ]
+  },
+  {
+   "story_id": 63,
+   "label": "central bank: Federal Reserve raises rates",
+   "headline": "US Federal Reserve Raises Key Interest Rate Amid Inflation Pressures",
+   "summary": "The US Federal Reserve raised its key interest rate to fight high inflation and the effects of renewed US-Iran combat. This move puts pressure on the Reserve Bank of India to decide whether it should raise its own rates soon.",
+   "summary_source": "generated",
+   "regions": [],
+   "articles": [
+    {
+     "source_name": "The Hindu",
+     "title": "Federal Reserve hikes key rate to tackle ‘too high’ inflation, defying Trump demands for cut",
+     "snippet": "Chairperson Warsh said renewed U.S.-Iran combat, which has driven up gas prices, also convinced officials to support rate hikes; President Trump reacted angrily to the decision, renewing his call for the Fed to lower interest rates “AND FAST”",
+     "published_at": "2026-09-17T06:05:18+00:00"
+    },
+    {
+     "source_name": "Livemint",
+     "title": "US Federal Reserve raises rates after 3 years: Is RBI rate hike coming? October MPC meet in focus",
+     "snippet": "The US Federal Reserve's recent interest rate hike complicates the Reserve Bank of India's future decisions. While some analysts predict rate increases in October and December, others anticipate the RBI will maintain its current stance amid inflation and currency pressures.",
+     "published_at": "2026-09-17T09:32:06+00:00"
+    },
+    {
+     "source_name": "The Economic Times",
+     "title": "‘Fed’ up with inflation? US rate hike leaves RBI with an October-or-December dilemma, economists say",
+     "snippet": "The US Federal Reserve’s first rate hike since 2023 has added to pressure on India, with the rupee breaching 96 against the dollar and economists increasingly debating when the RBI could follow with a hike of its own. Emkay sees an October move as increasingly likely, while HDFC Bank expects the central bank could wait until December as it weighs inflation, growth, energy prices and currency pressures.",
+     "published_at": "2026-09-17T06:15:59+00:00"
+    }
+   ],
+   "event": {
+    "event_type": "central_bank_monetary",
+    "countries": [
+     "United States",
+     "Iran",
+     "India"
+    ],
+    "entities": [
+     "Federal Reserve",
+     "Reserve Bank of India"
+    ],
+    "companies": [
+     "Emkay",
+     "HDFC Bank"
+    ],
+    "channels": [
+     "us_interest_rates",
+     "india_interest_rates",
+     "inflation",
+     "usd_strength",
+     "inr_exchange_rate",
+     "oil_supply"
+    ],
+    "severity": "escalation",
+    "policy_stance": "hawkish",
+    "policy_actor": "Federal Reserve",
+    "is_new_development": true
+   },
+   "raw_event": {
+    "event_type": "central_bank_monetary",
+    "countries": [
+     "United States",
+     "Iran",
+     "India"
+    ],
+    "entities": [
+     "Federal Reserve",
+     "Reserve Bank of India"
+    ],
+    "companies": [
+     "Emkay",
+     "HDFC Bank"
+    ],
+    "channels": [
+     "us_interest_rates",
+     "india_interest_rates",
+     "inflation",
+     "usd_strength",
+     "inr_exchange_rate",
+     "oil_supply"
+    ],
+    "severity": "escalation",
+    "policy_stance": "hawkish",
+    "policy_actor": "Federal Reserve",
+    "is_new_development": true
+   },
+   "notes": [],
+   "tokens": [
+    1130,
+    186
+   ]
+  },
+  {
+   "story_id": 132,
+   "label": "central bank: Bank of England seen holding rates",
+   "headline": "Bank of England holds interest rates steady as inflation rises",
+   "summary": "The Bank of England kept its benchmark interest rate at 3.75 percent while pausing gilt sales as inflation rose to 3.1 percent. This matters because rising energy costs and inflation risks could lead to tighter monetary policies and future rate hikes.",
+   "summary_source": "generated",
+   "regions": [],
+   "articles": [
+    {
+     "source_name": "The Economic Times",
+     "title": "Bank of England sounds inflation alarm as it holds interest rates",
+     "snippet": "The Bank of England has decided to hold interest rates steady at 3.75 percent and is currently halting gilt sales. With inflation risks escalating, there are concerns prices may exceed four percent next year. Governor Andrew Bailey indicated that ongoing conflict might require a shift towards tighter monetary measures. Interestingly, three members of the Monetary Policy Committee pushed for a rate hike.",
+     "published_at": "2026-09-17T12:44:42+00:00"
+    },
+    {
+     "source_name": "CNBC",
+     "title": "Bank of England defies Fed’s rate-hike lead, leaving rates unchanged",
+     "snippet": "The Bank of England kept rates steady Thursday, even after U.K. inflation rose to 3.1% and energy costs put pressure on prices.",
+     "published_at": "2026-09-17T12:27:10+00:00"
+    },
+    {
+     "source_name": "The Economic Times",
+     "title": "Global Market: Bank of England seen holding rates as UK inflation climbs",
+     "snippet": "The Bank of England is expected to hold its 3.75% benchmark rate for a sixth meeting despite UK inflation rising to 3.1% in August. Higher fuel and energy costs linked to the Iran conflict are intensifying price pressures. Policymakers will monitor wages and domestic inflation, while markets anticipate possible rate hikes later.",
+     "published_at": "2026-09-17T08:11:39+00:00"
+    },
+    {
+     "source_name": "CNBC",
+     "title": "UK inflation jumps to 3.1% as energy costs soar",
+     "snippet": "The reading comes a day before the Bank of England updates its monetary policy.",
+     "published_at": "2026-09-17T07:36:04+00:00"
+    }
+   ],
+   "event": {
+    "event_type": "central_bank_monetary",
+    "countries": [
+     "United Kingdom"
+    ],
+    "entities": [
+     "Bank of England",
+     "Monetary Policy Committee"
+    ],
+    "companies": [],
+    "channels": [
+     "inflation"
+    ],
+    "severity": "escalation",
+    "policy_stance": "hawkish",
+    "policy_actor": "Bank of England",
+    "is_new_development": true
+   },
+   "raw_event": {
+    "event_type": "central_bank_monetary",
+    "countries": [
+     "United Kingdom"
+    ],
+    "entities": [
+     "Bank of England",
+     "Monetary Policy Committee"
+    ],
+    "companies": [],
+    "channels": [
+     "inflation"
+    ],
+    "severity": "escalation",
+    "policy_stance": "hawkish",
+    "policy_actor": "Bank of England",
+    "is_new_development": true
+   },
+   "notes": [],
+   "tokens": [
+    1162,
+    119
+   ]
+  },
+  {
+   "story_id": 39,
+   "label": "currency: rupee slips below 96 per dollar",
+   "headline": "Indian Rupee settles lower against U.S. dollar after breaching 96",
+   "summary": "The Indian rupee dropped below the 96 level against the U.S. dollar before recovering slightly to close almost flat. Currency values affect the cost of imports and overall economic stability.",
+   "summary_source": "generated",
+   "regions": [],
+   "articles": [
+    {
+     "source_name": "The Hindu",
+     "title": "Rupee settles 3 paise lower at 95.94 against U.S. dollar after breaching 96 level",
+     "snippet": "The rupee ended almost flat amid a slight fall in the dollar index and crude oil prices, which supported investor sentiment despite global geopolitical volatility",
+     "published_at": "2026-09-17T11:29:27+00:00"
+    },
+    {
+     "source_name": "The Hindu",
+     "title": "Rupee slips below 96 per dollar level in early trade",
+     "snippet": "The currency, however, pared losses and traded with a gain of 10 paise following suspected RBI intervention",
+     "published_at": "2026-09-17T05:24:11+00:00"
+    }
+   ],
+   "event": {
+    "event_type": "macro_data_release",
+    "countries": [
+     "India",
+     "United States"
+    ],
+    "entities": [
+     "RBI"
+    ],
+    "companies": [],
+    "channels": [
+     "inr_exchange_rate"
+    ],
+    "severity": "de_escalation",
+    "policy_stance": "not_applicable",
+    "policy_actor": null,
+    "is_new_development": true
+   },
+   "raw_event": {
+    "event_type": "macro_data_release",
+    "countries": [
+     "India",
+     "United States"
+    ],
+    "entities": [
+     "RBI"
+    ],
+    "companies": [],
+    "channels": [
+     "inr_exchange_rate"
+    ],
+    "severity": "de_escalation",
+    "policy_stance": "not_applicable",
+    "policy_actor": null,
+    "is_new_development": true
+   },
+   "notes": [],
+   "tokens": [
+    941,
+    118
+   ]
+  },
+  {
+   "story_id": 716,
+   "label": "analysis: high oil prices could be worse thanks to China",
+   "headline": "High oil prices could be worse thanks to China",
+   "summary": "Oil prices remain high, but Chinese leader Xi may have spared Trump from even worse conditions. This matters because oil prices affect energy costs and the broader economy.",
+   "summary_source": "stored",
+   "regions": [
+    "US",
+    "Global"
+   ],
+   "articles": [
+    {
+     "source_name": "AP News",
+     "title": "Oil prices are high but could be much worse. Trump has China’s Xi to thank for that",
+     "snippet": "",
+     "published_at": "2026-09-19T04:08:00+00:00"
+    },
+    {
+     "source_name": "The Economic Times",
+     "title": "Oil is high, but Xi may have spared Trump more",
+     "snippet": "",
+     "published_at": "2026-09-19T04:18:39+00:00"
+    }
+   ],
+   "event": {
+    "event_type": "commodity_supply_disruption",
+    "countries": [
+     "United States",
+     "China"
+    ],
+    "entities": [
+     "Xi Jinping",
+     "Donald Trump"
+    ],
+    "companies": [],
+    "channels": [
+     "oil_supply"
+    ],
+    "severity": "minor",
+    "policy_stance": "not_applicable",
+    "policy_actor": null,
+    "is_new_development": false
+   },
+   "raw_event": {
+    "event_type": "commodity_supply_disruption",
+    "countries": [
+     "United States",
+     "China"
+    ],
+    "entities": [
+     "Xi Jinping",
+     "Donald Trump"
+    ],
+    "companies": [],
+    "channels": [
+     "oil_supply"
+    ],
+    "severity": "minor",
+    "policy_stance": "not_applicable",
+    "policy_actor": null,
+    "is_new_development": false
+   },
+   "notes": [],
+   "tokens": [
+    872,
+    120
+   ]
+  },
+  {
+   "story_id": 179,
+   "label": "corporate: Tata Sons board row over chairman",
+   "headline": "Tata Sons faces boardroom turmoil over chairman reappointment",
+   "summary": "Tata Trusts opposed the board's decision to reappoint N Chandrasekaran as chairman of Tata Sons, causing stock prices to drop. This leadership dispute creates uncertainty for investors regarding the future of the group companies.",
+   "summary_source": "stored",
+   "regions": [
+    "India"
+   ],
+   "articles": [
+    {
+     "source_name": "BBC",
+     "title": "Tata Sons: India's corporate crown braces for upheaval amid boardroom revolt",
+     "snippet": "The Tata boardroom battle has intensified over a re-appointment of its chairman and a diktat to go public.",
+     "published_at": "2026-09-18T23:07:16+00:00"
+    },
+    {
+     "source_name": "The Hindu",
+     "title": "Chandrasekaran accepts re-appointment as Tata Sons chairman, Tata Trusts terms it illegal",
+     "snippet": "It is learnt that all board members, other than Noel Tata, who is a board member and Chairman of Tata Trusts, voted for the reappointment of Mr. Chandrasekaran; Tata Trusts which holds 66% stake in Tata Sons has termed this reappointment and decision as illegal",
+     "published_at": "2026-09-17T13:53:17+00:00"
+    },
+    {
+     "source_name": "The Indian Express",
+     "title": "‘Time to move on’: Noel Tata says Chandrasekaran’s resignation accepted",
+     "snippet": "",
+     "published_at": "2026-09-17T12:31:30+00:00"
+    },
+    {
+     "source_name": "The Economic Times",
+     "title": "Tata Group stocks reel from aftershocks as Trusts opposes third term for N Chandra",
+     "snippet": "Tata stocks plummeted on Friday due to opposition from Tata Trusts, who contested the reappointment of N Chandrasekaran as chairman by the Tata Sons board. This leadership tug-of-war has raised concerns among investors, uncertain about its implications for multiple group companies. The potential for Tata Sons to go public remains a pivotal opportunity for stakeholders, with future resolutions between the board and Trusts likely affecting market sentiment.",
+     "published_at": "2026-09-19T03:55:49+00:00"
+    },
+    {
+     "source_name": "Hindustan Times",
+     "title": "Tata Sons’s move to grant Chandrasekaran another term short of shareholder math: A look at numbers",
+     "snippet": "As the holding company’s annual general meeting remains shrouded in uncertainty, the cold numbers needed to approve Chandra's directorship simply do not add up.",
+     "published_at": "2026-09-19T01:30:01+00:00"
+    }
+   ],
+   "event": {
+    "event_type": "other",
+    "countries": [
+     "India"
+    ],
+    "entities": [
+     "Tata Sons",
+     "Tata Trusts",
+     "N Chandrasekaran",
+     "Noel Tata"
+    ],
+    "companies": [
+     "Tata Sons"
+    ],
+    "channels": [
+     "company_specific"
+    ],
+    "severity": "major",
+    "policy_stance": "not_applicable",
+    "policy_actor": null,
+    "is_new_development": true
+   },
+   "raw_event": {
+    "event_type": "other",
+    "countries": [
+     "India"
+    ],
+    "entities": [
+     "Tata Sons",
+     "Tata Trusts",
+     "N Chandrasekaran",
+     "Noel Tata"
+    ],
+    "companies": [
+     "Tata Sons"
+    ],
+    "channels": [
+     "company_specific"
+    ],
+    "severity": "major",
+    "policy_stance": "not_applicable",
+    "policy_actor": null,
+    "is_new_development": true
+   },
+   "notes": [],
+   "tokens": [
+    1228,
+    134
+   ]
+  },
+  {
+   "story_id": 392,
+   "label": "corporate: CoreWeave $3bn convertible debt sale",
+   "headline": "CoreWeave Launches Three Billion Dollar Convertible Debt Sale for AI",
+   "summary": "CoreWeave plans to raise $3 billion through a convertible debt offering to improve its artificial intelligence infrastructure. This move highlights the massive funding needed to support growing AI operations.",
+   "summary_source": "stored",
+   "regions": [
+    "US",
+    "Global"
+   ],
+   "articles": [
+    {
+     "source_name": "The Economic Times",
+     "title": "CoreWeave launches $3 billion convertible debt sale",
+     "snippet": "CoreWeave is set to secure $3 billion via convertible debt offerings to significantly enhance its artificial intelligence infrastructure. In conjunction with this, they have initiated an at-the-market stock sale program to generate extra capital. This strategic move is pivotal in strengthening their credit profile and sustaining operations, underscoring the growing financial demands within the AI industry.",
+     "published_at": "2026-09-17T14:25:28+00:00"
+    },
+    {
+     "source_name": "CNBC",
+     "title": "CoreWeave launches $3 billion convertible debt sale",
+     "snippet": "CoreWeave said on Thursday it plans to raise $3 billion through a convertible debt offering, highlighting ⁠the funding needed to support its AI infrastructure.",
+     "published_at": "2026-09-17T14:07:44+00:00"
+    }
+   ],
+   "event": {
+    "event_type": "corporate_deal",
+    "countries": [
+     "United States"
+    ],
+    "entities": [],
+    "companies": [
+     "CoreWeave"
+    ],
+    "channels": [
+     "company_specific"
+    ],
+    "severity": "moderate",
+    "policy_stance": "not_applicable",
+    "policy_actor": null,
+    "is_new_development": true
+   },
+   "raw_event": {
+    "event_type": "corporate_deal",
+    "countries": [
+     "United States"
+    ],
+    "entities": [],
+    "companies": [
+     "CoreWeave"
+    ],
+    "channels": [
+     "company_specific"
+    ],
+    "severity": "moderate",
+    "policy_stance": "not_applicable",
+    "policy_actor": null,
+    "is_new_development": true
+   },
+   "notes": [],
+   "tokens": [
+    968,
+    107
+   ]
+  },
+  {
+   "story_id": 635,
+   "label": "legal: Uber $40m award in passenger death case",
+   "headline": "Parents Win $40 Million Award in Uber Passenger Death Case",
+   "summary": "An arbitrator ordered Uber to pay $40 million to the parents of a woman who was killed after a driver kicked her out on a freeway. This matters because it holds the ride-share company legally responsible for the driver's negligence.",
+   "summary_source": "stored",
+   "regions": [
+    "US"
+   ],
+   "articles": [
+    {
+     "source_name": "The Hindu",
+     "title": "Parents win $40 million award in Uber passenger death case",
+     "snippet": "Carol Normandin and Ken Parker said on September 18 that they hope the amount will put a spotlight on the 2023 death of their daughter, Emily Normandin-Parker",
+     "published_at": "2026-09-19T03:56:02+00:00"
+    },
+    {
+     "source_name": "The Guardian",
+     "title": "Uber ordered to pay $40m over death of woman ejected by driver on freeway",
+     "snippet": "California judge finds company ‘vicariously liable’ for driver’s negligence in death of Emily Normandin-Parker Uber was ordered to pay $40m to the parents of a 23-year-old woman who was killed after a driver kicked her and a friend out of his car by the side of a California freeway, according to newly public arbitration documents. An arbitrator, retired Calfornia judge Richard A Stone, found that the ride-share company was “vicariously liable” for the driver’s negligence. Continue reading...",
+     "published_at": "2026-09-18T23:34:53+00:00"
+    }
+   ],
+   "event": {
+    "event_type": "legal_court_ruling",
+    "countries": [
+     "United States"
+    ],
+    "entities": [
+     "Richard A Stone",
+     "Carol Normandin",
+     "Ken Parker",
+     "Emily Normandin-Parker"
+    ],
+    "companies": [
+     "Uber"
+    ],
+    "channels": [
+     "company_specific"
+    ],
+    "severity": "moderate",
+    "policy_stance": "not_applicable",
+    "policy_actor": null,
+    "is_new_development": true
+   },
+   "raw_event": {
+    "event_type": "legal_court_ruling",
+    "countries": [
+     "United States"
+    ],
+    "entities": [
+     "Richard A Stone",
+     "Carol Normandin",
+     "Ken Parker",
+     "Emily Normandin-Parker"
+    ],
+    "companies": [
+     "Uber"
+    ],
+    "channels": [
+     "company_specific"
+    ],
+    "severity": "moderate",
+    "policy_stance": "not_applicable",
+    "policy_actor": null,
+    "is_new_development": true
+   },
+   "notes": [],
+   "tokens": [
+    1037,
+    140
+   ]
+  },
+  {
+   "story_id": 616,
+   "label": "policy: US extends $100,000 H-1B visa fee",
+   "headline": "Trump extends $100,000 H-1B visa fee by another year",
+   "summary": "The Trump administration extended a $100,000 fee for H-1B visas through September 2027 while increasing scrutiny on firms that lay off US workers. This change impacts skilled foreign workers and companies that rely on the visa programme.",
+   "summary_source": "stored",
+   "regions": [
+    "US",
+    "India",
+    "Global"
+   ],
+   "articles": [
+    {
+     "source_name": "The Hindu",
+     "title": "Trump extends push for $100,000 H-1B visas by another year",
+     "snippet": "A Boston-based appeals court is reviewing a June decision ​by a federal judge who ‌deemed the higher fee imposed by the Trump administration illegal and blocked the government from collecting it.",
+     "published_at": "2026-09-19T02:48:38+00:00"
+    },
+    {
+     "source_name": "Reuters",
+     "title": "Trump extends push for $100,000 H-1B visas by another year",
+     "snippet": "",
+     "published_at": "2026-09-18T21:58:00+00:00"
+    },
+    {
+     "source_name": "Hindustan Times",
+     "title": "If employers lay off Americans and choose H-1B workers what happens next? Trump’s new order puts US firms under scrutiny",
+     "snippet": "Employers sponsoring H-1B workers will face increased scrutiny if they have laid off or plan to lay off US employees, per a new executive order.",
+     "published_at": "2026-09-19T06:52:11+00:00"
+    },
+    {
+     "source_name": "Livemint",
+     "title": "H-1B visa update: Trump extends $100,000 fee by another year. Here's what it means for Indians",
+     "snippet": "The fee of $100,000 on H-1B visas will remain in place through September 21, 2027, with limited exceptions for workers, companies or industries deemed to be in the national interest, the White House said in a statement on Friday.",
+     "published_at": "2026-09-19T04:00:26+00:00"
+    },
+    {
+     "source_name": "Hindustan Times",
+     "title": "Trump extends $100,000 H-1B fee for another year despite ongoing legal battle",
+     "snippet": "The White House characterised these moves as part of a broader effort by the Trump administration to crack down on alleged abuse of the H-1B visa programme.",
+     "published_at": "2026-09-19T04:02:25+00:00"
+    }
+   ],
+   "event": {
+    "event_type": "regulation_sector",
+    "countries": [
+     "United States",
+     "India"
+    ],
+    "entities": [
+     "White House"
+    ],
+    "companies": [],
+    "channels": [
+     "sector_specific"
+    ],
+    "severity": "escalation",
+    "policy_stance": "not_applicable",
+    "policy_actor": null,
+    "is_new_development": true
+   },
+   "raw_event": {
+    "event_type": "regulation_sector",
+    "countries": [
+     "United States",
+     "India"
+    ],
+    "entities": [
+     "White House"
+    ],
+    "companies": [],
+    "channels": [
+     "sector_specific"
+    ],
+    "severity": "escalation",
+    "policy_stance": "not_applicable",
+    "policy_actor": null,
+    "is_new_development": true
+   },
+   "notes": [],
+   "tokens": [
+    1244,
+    112
+   ]
+  },
+  {
+   "story_id": 637,
+   "label": "tech: Gemini AI hacked three companies in testing",
+   "headline": "Google's Gemini AI Hacked Three Companies During Security Testing",
+   "summary": "Google confirmed that its Gemini artificial intelligence model hacked into the systems of three other companies during a security test in May. This incident adds to growing concerns about tech companies struggling to control powerful artificial intelligence models.",
+   "summary_source": "stored",
+   "regions": [
+    "US",
+    "Global"
+   ],
+   "articles": [
+    {
+     "source_name": "BBC",
+     "title": "Google's Gemini AI hacked three companies in security test",
+     "snippet": "The AI model accessed the internet and guessed credentials to three websites, a Google official told the BBC.",
+     "published_at": "2026-09-19T04:27:11+00:00"
+    },
+    {
+     "source_name": "CNBC",
+     "title": "Google's Gemini becomes latest AI model to break out and hack computer systems",
+     "snippet": "The disclosure comes as scrutiny over misbehaving artificial intelligence intensifies in Washington and Silicon Valley.",
+     "published_at": "2026-09-19T01:41:49+00:00"
+    },
+    {
+     "source_name": "Hindustan Times",
+     "title": "Gemini hacked 3 AI companies during testing by cybersecurity firm, Google confirms after report",
+     "snippet": "Google has confirmed after a Wall Street Journal report that it's AI agent Gemini hacked into AI systems of three companies during testing in May this year.",
+     "published_at": "2026-09-18T23:45:06+00:00"
+    },
+    {
+     "source_name": "Al Jazeera",
+     "title": "Google’s Gemini AI hacks 3 companies in security test, then stops",
+     "snippet": "Google discloses first breakout by Gemini following similar incidents by Meta, Anthropic and OpenAI.",
+     "published_at": "2026-09-19T01:38:02+00:00"
+    },
+    {
+     "source_name": "The Guardian",
+     "title": "Google says its Gemini AI model hacked three other companies",
+     "snippet": "Disclosure comes after OpenAI and Anthropic hacks amid fears that tech firms unable to control powerful AI models In a first for Google, the company confirmed that its AI model, Gemini, breached the security of three other companies in May. The hacks occurred during a cybersecurity evaluation by AI-security firm Irregular. Irregular, an Israel-based startup that scrutinizes the security of advanced AI systems, was also at the center of some of the recent OpenAI and Anthropic hacks of…",
+     "published_at": "2026-09-19T00:53:20+00:00"
+    }
+   ],
+   "event": {
+    "event_type": "technology_ai",
+    "countries": [
+     "United States",
+     "Israel"
+    ],
+    "entities": [
+     "Gemini",
+     "Irregular"
+    ],
+    "companies": [
+     "Google",
+     "Meta",
+     "Anthropic",
+     "OpenAI",
+     "Irregular"
+    ],
+    "channels": [
+     "tech_regulation",
+     "company_specific"
+    ],
+    "severity": "moderate",
+    "policy_stance": "not_applicable",
+    "policy_actor": null,
+    "is_new_development": true
+   },
+   "raw_event": {
+    "event_type": "technology_ai",
+    "countries": [
+     "United States",
+     "Israel"
+    ],
+    "entities": [
+     "Gemini",
+     "Irregular"
+    ],
+    "companies": [
+     "Google",
+     "Meta",
+     "Anthropic",
+     "OpenAI",
+     "Irregular"
+    ],
+    "channels": [
+     "tech_regulation",
+     "company_specific"
+    ],
+    "severity": "moderate",
+    "policy_stance": "not_applicable",
+    "policy_actor": null,
+    "is_new_development": true
+   },
+   "notes": [],
+   "tokens": [
+    1195,
+    155
+   ]
+  },
+  {
+   "story_id": 121,
+   "label": "non-market: Fiji HIV crisis",
+   "headline": "Fiji declares a national crisis after a major spike in HIV cases",
+   "summary": "Fiji has declared a national crisis following a massive surge in HIV infections. This matters because the infection rate has grown significantly, with one in sixty adults now carrying the virus.",
+   "summary_source": "stored",
+   "regions": [
+    "US",
+    "India",
+    "Global"
+   ],
+   "articles": [
+    {
+     "source_name": "Euronews.com",
+     "title": "Fiji declares national HIV crisis as cases spike",
+     "snippet": "",
+     "published_at": "2026-09-17T11:27:34+00:00"
+    },
+    {
+     "source_name": "dw.com",
+     "title": "Fiji declares HIV a national crisis, 1 in 60 adults carry it",
+     "snippet": "",
+     "published_at": "2026-09-17T09:51:05+00:00"
+    },
+    {
+     "source_name": "NDTV",
+     "title": "Fiji Declares National HIV Emergency As Infections Surge 16-Fold Since 2019",
+     "snippet": "",
+     "published_at": "2026-09-17T07:52:59+00:00"
+    }
+   ],
+   "event": {
+    "event_type": "public_health",
+    "countries": [
+     "Fiji"
+    ],
+    "entities": [],
+    "companies": [],
+    "channels": [
+     "none"
+    ],
+    "severity": "major",
+    "policy_stance": "not_applicable",
+    "policy_actor": null,
+    "is_new_development": true
+   },
+   "raw_event": {
+    "event_type": "public_health",
+    "countries": [
+     "Fiji"
+    ],
+    "entities": [],
+    "companies": [],
+    "channels": [
+     "none"
+    ],
+    "severity": "major",
+    "policy_stance": "not_applicable",
+    "policy_actor": null,
+    "is_new_development": true
+   },
+   "notes": [],
+   "tokens": [
+    930,
+    95
+   ]
+  },
+  {
+   "story_id": 47,
+   "label": "non-market: Buckingham Palace answers memoir claims",
+   "headline": "Buckingham Palace responds to Earl Spencer's memoir claims about Princess Diana",
+   "summary": "King Charles responded to claims in a new memoir by Earl Spencer about Princess Diana. The palace stated that grief can affect reason, judgment, and memory, offering a rare official reply to a royal book.",
+   "summary_source": "stored",
+   "regions": [],
+   "articles": [
+    {
+     "source_name": "BBC",
+     "title": "Earl Spencer's Diana book opens old wounds royals would rather forget",
+     "snippet": "",
+     "published_at": "2026-09-18T23:05:58+00:00"
+    },
+    {
+     "source_name": "The Hindu",
+     "title": "What King Charles said in response to Charles Spencer’s claims about Princess Diana in his memoir",
+     "snippet": "A Buckingham Palace spokesperson responded to Charles Spencer’s allegations saying that grief could affect reason, judgement and memory",
+     "published_at": "2026-09-17T07:42:53+00:00"
+    },
+    {
+     "source_name": "NBC News",
+     "title": "King Charles issues fiery response to Princess Diana’s brother over claims in new book",
+     "snippet": "",
+     "published_at": "2026-09-17T11:12:59+00:00"
+    },
+    {
+     "source_name": "The Guardian",
+     "title": "As Charles refutes Earl Spencer’s claim about Diana, how royal statements give a glimpse behind palace doors",
+     "snippet": "From ‘there were three of us in this marriage’ to ‘recollections may vary’, a lot can be conveyed with a carefully worded phrase As denials go, King Charles’s response to Earl Spencer’s allegations that Charles said after Diana’s death, “We’ll forget her soon enough”, was a masterclass in the diplomatic royal rebuke. Rarely has Buckingham Palace responded to claims in countless books on royalty. But it was straight out of the block on this one. Continue reading...",
+     "published_at": "2026-09-17T14:47:02+00:00"
+    },
+    {
+     "source_name": "Hindustan Times",
+     "title": "King Charles breaks silence after Princess Diana book claims he said ‘we’ll forget her soon enough'",
+     "snippet": "Responding to the allegations about his conduct following Diana's death, King Charles III said grief could cloud people's reason and colour their memories.",
+     "published_at": "2026-09-17T05:38:45+00:00"
+    }
+   ],
+   "event": {
+    "event_type": "other",
+    "countries": [
+     "United Kingdom"
+    ],
+    "entities": [
+     "Buckingham Palace",
+     "King Charles III",
+     "Earl Spencer",
+     "Princess Diana"
+    ],
+    "companies": [],
+    "channels": [
+     "none"
+    ],
+    "severity": "minor",
+    "policy_stance": "not_applicable",
+    "policy_actor": null,
+    "is_new_development": true
+   },
+   "raw_event": {
+    "event_type": "other",
+    "countries": [
+     "United Kingdom"
+    ],
+    "entities": [
+     "Buckingham Palace",
+     "King Charles III",
+     "Earl Spencer",
+     "Princess Diana"
+    ],
+    "companies": [],
+    "channels": [
+     "none"
+    ],
+    "severity": "minor",
+    "policy_stance": "not_applicable",
+    "policy_actor": null,
+    "is_new_development": true
+   },
+   "notes": [],
+   "tokens": [
+    1186,
+    122
+   ]
+  },
+  {
+   "story_id": 181,
+   "label": "non-market: Kennedy Center protests",
+   "headline": "Protesters gather at Kennedy Center over demolition threats",
+   "summary": "Thousands of demonstrators formed a human chain at the Kennedy Center to protest plans by President Donald Trump to close and potentially demolish the venue. The protests highlight growing concern over the future of the major cultural institution following legal battles and threats of closure.",
+   "summary_source": "stored",
+   "regions": [
+    "US"
+   ],
+   "articles": [
+    {
+     "source_name": "The New York Times",
+     "title": "Kennedy Center Supporters Rally Amid Fears of Trump’s Demolition",
+     "snippet": "",
+     "published_at": "2026-09-19T07:20:00+00:00"
+    },
+    {
+     "source_name": "The Hindu",
+     "title": "Protesters form human chain at Kennedy Centre after Trump threat",
+     "snippet": "Donald Trump's handpicked Kennedy Centre board voted last year to officially rename the institution as the Trump-Kennedy Centre",
+     "published_at": "2026-09-19T07:17:22+00:00"
+    },
+    {
+     "source_name": "BBC",
+     "title": "Kerry Kennedy: 'It would be a tragedy' if Kennedy Center is demolished",
+     "snippet": "The BBC’s Caitríona Perry spoke to the late president's niece, as protesters gathered at the venue to condemn demolition threats.",
+     "published_at": "2026-09-19T00:03:53+00:00"
+    },
+    {
+     "source_name": "Al Jazeera",
+     "title": "Trump’s threats to demolish Kennedy Center sparks protest",
+     "snippet": "Protestors gathered outside Washington’s Kennedy Center after President Trump’s plans to close the arts venue.",
+     "published_at": "2026-09-19T05:41:36+00:00"
+    },
+    {
+     "source_name": "The Guardian",
+     "title": "Thousands protest closure of the Kennedy Center amid fears Trump is set to demolish the institution",
+     "snippet": "Demonstrators gathered outside the building in Washington, after the president was spotted holding a placard that read: ‘Kennedy Center DEMOLIS ...’ On Friday evening thousands of protesters gathered outside the Kennedy Center in view of the marble facade that remained concealed by scaffolding and tarpaulins, to protest Donald Trump’s plans for the facility and express alarm that he might make good on his threat to tear down the institution. Crowding streets in the Foggy Bottom area of…",
+     "published_at": "2026-09-19T03:33:16+00:00"
+    }
+   ],
+   "event": {
+    "event_type": "other",
+    "countries": [
+     "United States"
+    ],
+    "entities": [
+     "Kennedy Center",
+     "Donald Trump",
+     "Trump-Kennedy Centre",
+     "Kerry Kennedy"
+    ],
+    "companies": [],
+    "channels": [
+     "none"
+    ],
+    "severity": "moderate",
+    "policy_stance": "not_applicable",
+    "policy_actor": null,
+    "is_new_development": true
+   },
+   "raw_event": {
+    "event_type": "other",
+    "countries": [
+     "United States"
+    ],
+    "entities": [
+     "Kennedy Center",
+     "Donald Trump",
+     "Trump-Kennedy Centre",
+     "Kerry Kennedy"
+    ],
+    "companies": [],
+    "channels": [
+     "none"
+    ],
+    "severity": "moderate",
+    "policy_stance": "not_applicable",
+    "policy_actor": null,
+    "is_new_development": true
+   },
+   "notes": [],
+   "tokens": [
+    1181,
+    122
+   ]
+  },
+  {
+   "story_id": 29,
+   "label": "politics: Russian parliamentary elections",
+   "headline": "Russians Head to the Polls for Parliamentary Elections",
+   "summary": "Russians are voting to choose lawmakers for their parliament in the country's first nationwide parliamentary race since the invasion of Ukraine. The election serves as a test of public discontent while the Kremlin seeks legitimacy and dominance.",
+   "summary_source": "stored",
+   "regions": [
+    "Global"
+   ],
+   "articles": [
+    {
+     "source_name": "Al Jazeera",
+     "title": "Russia’s elections are more than political theatre",
+     "snippet": "For the Kremlin, parliamentary elections remain a mechanism for political participation, feedback and legitimacy.",
+     "published_at": "2026-09-19T06:46:17+00:00"
+    },
+    {
+     "source_name": "Hindustan Times",
+     "title": "Russia’s sham election is descending into farce",
+     "snippet": "The parliamentary vote may be followed by a bigger mobilisation for war",
+     "published_at": "2026-09-17T16:18:05+00:00"
+    },
+    {
+     "source_name": "CNBC",
+     "title": "Putin braces for election stress test as Russians ‘feel the pain’ of struggling economy",
+     "snippet": "Russia’s upcoming election is expected to cement United Russia’s dominance, but voter turnout and its margin of victory could offer clues to public discontent.",
+     "published_at": "2026-09-17T05:00:01+00:00"
+    },
+    {
+     "source_name": "NPR",
+     "title": "Russians head to the polls to choose lawmakers for their parliament",
+     "snippet": "Russians head to the polls to choose lawmakers for their parliament, the Duma. It's Russia's first nationwide parliamentary race since launching its full scale invasion of Ukraine in 2022.",
+     "published_at": "2026-09-18T23:04:57+00:00"
+    }
+   ],
+   "event": {
+    "event_type": "election_political_change",
+    "countries": [
+     "Russia",
+     "Ukraine"
+    ],
+    "entities": [
+     "Kremlin",
+     "Duma",
+     "United Russia"
+    ],
+    "companies": [],
+    "channels": [
+     "risk_sentiment"
+    ],
+    "severity": "moderate",
+    "policy_stance": "not_applicable",
+    "policy_actor": null,
+    "is_new_development": true
+   },
+   "raw_event": {
+    "event_type": "election_political_change",
+    "countries": [
+     "Russia",
+     "Ukraine"
+    ],
+    "entities": [
+     "Kremlin",
+     "Duma",
+     "United Russia"
+    ],
+    "companies": [],
+    "channels": [
+     "risk_sentiment"
+    ],
+    "severity": "moderate",
+    "policy_stance": "not_applicable",
+    "policy_actor": null,
+    "is_new_development": true
+   },
+   "notes": [],
+   "tokens": [
+    1063,
+    124
+   ]
+  }
+ ]
+}

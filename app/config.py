@@ -149,6 +149,8 @@ class ScoringSettings(_Strict):
 class DeliverySettings(_Strict):
     digest_times: list[str]
     max_stories_per_digest: int = Field(gt=0)
+    # Impacts shown per story before the rest become a "+N more" line.
+    max_impacts_in_digest: int = Field(default=6, gt=0)
     breaking_alerts: bool = False
     breaking_importance_threshold: float
 

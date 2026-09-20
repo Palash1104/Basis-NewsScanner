@@ -94,3 +94,115 @@ class StorySummary(BaseModel):
         elif not (self.disagreement_note or "").strip():
             raise ValueError("sources_disagree is true, so disagreement_note must describe it")
         return self
+
+
+# ---------------------------------------------------------------- event extraction (SPEC 7.6)
+
+EventType = Literal[
+    "geopolitical_conflict",
+    "sanctions_trade_policy",
+    "central_bank_monetary",
+    "fiscal_policy_budget",
+    "macro_data_release",
+    "election_political_change",
+    "regulation_sector",
+    "corporate_earnings_guidance",
+    "corporate_deal",
+    "commodity_supply_disruption",
+    "weather_climate_agriculture",
+    "natural_disaster",
+    "public_health",
+    "technology_ai",
+    "legal_court_ruling",
+    "other",
+]
+Channel = Literal[
+    "oil_supply",
+    "natural_gas_supply",
+    "shipping_routes",
+    "safe_haven_demand",
+    "risk_sentiment",
+    "us_interest_rates",
+    "india_interest_rates",
+    "inflation",
+    "usd_strength",
+    "inr_exchange_rate",
+    "tariffs_trade",
+    "defense_spending",
+    "tech_regulation",
+    "semiconductor_supply",
+    "agriculture_supply",
+    "metals_demand",
+    "fiscal_spending",
+    "banking_credit",
+    "sector_specific",
+    "company_specific",
+    "none",
+]
+# One field, with a precedence rule in the prompt: easing developments are de_escalation and
+# worsening ones escalation, whatever their size; minor/moderate/major only when neither.
+Severity = Literal["minor", "moderate", "major", "escalation", "de_escalation"]
+PolicyStance = Literal["hawkish", "dovish", "neutral", "not_applicable"]
+
+
+def _clean_names(values: list[str]) -> list[str]:
+    """Collapse whitespace, drop blanks and duplicates (case-insensitive), keep order."""
+    seen: set[str] = set()
+    cleaned = []
+    for value in values:
+        text = " ".join(value.split())
+        if text and text.casefold() not in seen:
+            seen.add(text.casefold())
+            cleaned.append(text)
+    return cleaned
+
+
+# What happened, in fixed categories the playbook can match. The story's regions come from its
+# summary, so they aren't asked for again. (A comment, not a docstring: pydantic would send a
+# docstring to the model as the schema description.)
+class EventExtraction(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    event_type: EventType
+    countries: list[str] = Field(
+        description="Countries directly involved, as standard English short names "
+        "(e.g. United States, United Kingdom, China, India)."
+    )
+    entities: list[str] = Field(
+        description="Organizations, places and people central to the event, e.g. "
+        "Federal Reserve, RBI, OPEC, Strait of Hormuz."
+    )
+    companies: list[str] = Field(description="Companies directly named in the articles.")
+    channels: list[Channel] = Field(
+        description="How this event could reach financial markets. Only channels the articles "
+        'give a concrete link for; ["none"] if there is no plausible market channel.'
+    )
+    severity: Severity
+    policy_stance: PolicyStance = Field(
+        description="For central bank or monetary-policy news only; otherwise not_applicable."
+    )
+    policy_actor: str | None = Field(
+        default=None,
+        description="The authority whose stance policy_stance describes, e.g. Federal Reserve, "
+        "RBI, Bank of England. Null when policy_stance is not_applicable.",
+    )
+    is_new_development: bool = Field(
+        description="False for opinion, analysis, explainers, or rehashes of older news."
+    )
+
+    @field_validator("countries", "entities", "companies")
+    @classmethod
+    def _names(cls, value: list[str]) -> list[str]:
+        return _clean_names(value)
+
+    @field_validator("policy_actor")
+    @classmethod
+    def _actor(cls, value: str | None) -> str | None:
+        text = " ".join((value or "").split())
+        return text or None
+
+    @field_validator("channels")
+    @classmethod
+    def _channels(cls, value: list[str]) -> list[str]:
+        # "none" mixed with real channels is fixed (and logged) by extract_event, not rejected.
+        return list(dict.fromkeys(value))

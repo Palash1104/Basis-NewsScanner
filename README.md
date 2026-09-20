@@ -7,7 +7,8 @@ price checks and a track record (see `SPEC.md`).
 
 Research notes, not financial advice.
 
-**Status:** Phase 1 complete (fetch → group → rank → summarize → Telegram digest). Market
+**Status:** Phase 2 complete (fetch → group → rank → summarize → extract the event →
+apply the playbook → Telegram digest with market impacts). Market
 impact notes start in Phase 2.
 
 ## Setup
@@ -50,6 +51,7 @@ but skips summaries and records why. The digest only includes summarized stories
 | `uv run newsdesk digest --send` | Send that digest to Telegram. |
 | `uv run newsdesk scheduler` | Keep running: a pipeline pass every `schedule.pipeline_every_hours` (every 3 hours), and a digest at each `delivery.digest_times` (07:30 and 19:30 IST). Stop with Ctrl+C; restart it after editing `settings.yaml`. |
 | `uv run python scripts/verify_feeds.py [--include-disabled]` | Check every feed responds and has recent entries. |
+| `uv run newsdesk validate-tickers` | Check every symbol in `config/assets.yaml` has recent prices on Yahoo (writes `data/ticker_report.md`). |
 | `uv run python scripts/embedding_report.py [--refresh]` | Compare embedding grouping thresholds on real samples and the regression fixtures (writes `data/embedding_report.md`). |
 | `uv run python scripts/regroup.py [--dry-run]` | Regroup every stored article with embeddings (no LLM calls). Changed stories that had a summary become `needs_resummary`. |
 | `uv run python scripts/grouping_report.py --refresh` | The old title-matcher threshold report (the title matcher is now only a fallback). |
@@ -148,6 +150,11 @@ used to improve Google's products. On Anthropic, `claude-haiku-4-5` costs a few 
 - **Explainers, roundups and live blogs** are detected by headline patterns. They can attach to
   a story but never start one or count as a source. Each run prints every flagged headline, so
   misfires are visible.
+- **Market impacts come from hand-written rules** (`config/playbook.yaml`), not from a model,
+  and they are hypotheses: Phase 4 scores how often each rule is right. A rule that fires on
+  most conflicts (`geopolitical_risk_off`) is meant to be judged that way, not trusted yet.
+- **Impacts are kept forever once written.** Re-analysing a story adds new calls but never
+  edits old ones, so the track record reflects what was said at the time.
 - **Google News links** are Google redirect URLs, labelled with the real outlet's name.
 - **The digest holds at most 15 stories** (`delivery.max_stories_per_digest`). Summarized
   stories that don't make the cut aren't carried into the next digest unless they're

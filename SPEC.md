@@ -201,11 +201,13 @@ delivery:
 
 **articles**: id, url (normalized, unique), source_name, source_region (`US` | `IN` | `GLOBAL`), source_weight, title, snippet, published_at, fetched_at, story_id (nullable FK).
 
-**stories**: id, first_seen_at (earliest article published_at), updated_at, headline, summary, category, regions (JSON), sources_disagree (bool), disagreement_note, importance_score, source_count, region_diversity, status (`new` | `summarized` | `analyzed` | `failed`), processed_article_count, processed_source_regions (JSON), prompt_version.
+**stories**: id, first_seen_at (earliest article published_at), updated_at, headline, summary, category, regions (JSON), sources_disagree (bool), disagreement_note, importance_score, source_count, region_diversity, status (`new` | `summarized` | `analyzed` | `failed`, plus `needs_resummary` from regrouping), processed_article_count, processed_source_regions (JSON), prompt_version. Extra columns not in this list: `model`, `summary_pending`, and `event_pending` (an event is owed: set when a summary is written, cleared when the event is stored).
 
-**events**: id, story_id, event_type, countries (JSON), regions (JSON), entities (JSON), companies (JSON), channels (JSON), severity, policy_stance, is_new_development, model, prompt_version, created_at.
+**events**: id, story_id, event_type, countries (JSON), regions (JSON), entities (JSON), companies (JSON), channels (JSON), severity, policy_stance, **policy_actor** (added in Phase 2: the authority whose stance `policy_stance` describes), is_new_development, model, prompt_version, created_at. A story gets a new row each time it is re-extracted; the latest row is its current event.
 
-**impacts**: id, story_id, symbol, direction (`up` | `down`), mechanism, order (`first` | `second`), confidence (`high` | `medium` | `low`), horizon (`intraday` | `days` | `weeks`), origin (`playbook` | `llm` | `both`), rule_id (nullable), conflict (bool), reference_time, reference_price, move_at_detection_pct, created_at.
+**impacts**: id, story_id, **event_id** (added in Phase 2: which extraction produced it, so the track record can group by event type and prompt version), symbol, direction (`up` | `down`), mechanism, order (`first` | `second`), confidence (`high` | `medium` | `low`), horizon (`intraday` | `days` | `weeks`; null for playbook impacts, which don't state one), origin (`playbook` | `llm` | `both`), rule_id (nullable), conflict (bool), reference_time, reference_price, move_at_detection_pct (all three filled by the Phase 3 price check), created_at.
+
+Impacts are written once and never edited: each one is the call as it was made, which section 7.9 scores. Re-extracting a story adds only impacts it doesn't already have.
 
 **impact_scores**: id, impact_id, horizon_days, asset_return, benchmark_symbol, benchmark_return, excess_return, threshold, outcome (`hit` | `miss` | `no_move` | `unscorable`), scored_at. Unique on (impact_id, horizon_days).
 
@@ -340,18 +342,36 @@ companies: list[str]         # companies directly named
 channels: list[Channel]      # HOW this could reach markets; fixed enum below
 severity: minor | moderate | major | escalation | de_escalation
 policy_stance: hawkish | dovish | neutral | not_applicable   # for central bank / monetary news
+policy_actor: str | null     # whose stance that is, e.g. "Federal Reserve", "RBI"
 is_new_development: bool     # false for opinion, analysis, explainers, or rehashes of old news
 ```
 
+`regions` is copied from the story's summary rather than asked for again.
+
 Channel enum: `oil_supply`, `natural_gas_supply`, `shipping_routes`, `safe_haven_demand`, `risk_sentiment`, `us_interest_rates`, `india_interest_rates`, `inflation`, `usd_strength`, `inr_exchange_rate`, `tariffs_trade`, `defense_spending`, `tech_regulation`, `semiconductor_supply`, `agriculture_supply`, `metals_demand`, `fiscal_spending`, `banking_credit`, `sector_specific`, `company_specific`, `none`.
 
-Prompt guidance to include: pick channels only where the articles give a concrete link; use `none` if there is no plausible market channel; a ceasefire or easing of tensions is `de_escalation`, not `escalation`.
+Prompt guidance to include (prompt version `event-v2`):
+
+- **Severity precedence.** Anything that eases a conflict, supply risk, trade tension or market stress is `de_escalation` whatever its size (a ceasefire, an OPEC output increase, a tariff cut, a currency recovering, a good monsoon); anything that worsens one is `escalation`; `minor` / `moderate` / `major` only when neither applies. Several rules in section 9 depend on this.
+- **Channels** only where the articles give a concrete link, `none` when there is no plausible one (never mixed with other channels), and a channel must belong to the country that acted: `us_interest_rates` only for US policy, `india_interest_rates` only for Indian policy.
+- **Countries** only where the event happens or whose government, economy, companies or people are directly involved; not passing mentions.
+- **policy_actor** is the authority whose stance is described; other central banks merely reacting are not the actor.
+- **Corporate types**: `corporate_earnings_guidance` for results and guidance, `corporate_deal` for mergers, stake sales, IPOs and fundraising, `regulation_sector` for rules and oversight; a governance fight that is none of these is `other`.
+
+**Normalization after the call** (`extract_event.py`): country names are mapped to canonical English short names (`countries.py`; unmapped names are kept as written and shown in the run output), `none` is dropped when it arrives with real channels, and an empty channel list becomes `none`. Both fixes are logged.
+
+**When it runs.** Extraction follows a successful summary, from the same articles, so the re-processing rule is the summary's: new story, 2+ new articles, or a new source region. Summary and extraction are separate calls, so a failed extraction never costs a summary. If the quota runs out the step stops and the stories left keep `event_pending` for the next run; an API error also leaves `event_pending`; output still invalid after the retry leaves the story with no event until its next re-summary.
 
 ### 7.7 Impact mapping
 
 Two layers, then merge. Skip impact mapping entirely when `is_new_development` is false or channels is `[none]`.
 
 **Layer A: Playbook (deterministic).** `playbook.py` loads `config/playbook.yaml` (format in section 9). A rule matches when **every condition field it specifies** matches (AND across fields, OR within a field's list). Record `rule_id` on each impact.
+
+- `entities_any` and `policy_actor_any` match **whole words, case-insensitively**, not substrings, so "RBI" doesn't match "Herbie" and "Fed" doesn't match "FedEx". Rules list the spellings they accept (e.g. `[Federal Reserve, Fed, FOMC]`).
+- `policy_actor_any` matches only the authority whose stance the event describes, so a Fed decision can't trigger an RBI rule because the articles mention the RBI reacting.
+- Two rules may produce the same symbol: keep one impact row per rule (the track record is per rule) and show the asset once in the digest. If they disagree on direction, both rows are marked `conflict` and shown as "mixed signals".
+- `impacts.max_impacts_per_story` caps the LLM layer only; playbook rules list as many impacts as they need (`oil_supply_shock` has 11).
 
 **Layer B: LLM (reasoning_model).** Input: headline, summary, event JSON, impacts already produced by matched playbook rules, and the asset universe (symbol, name, type, country, sector, tags). Put the asset universe in a stable system-prompt block so it can use prompt caching (confirm current usage in Anthropic's docs).
 
@@ -625,6 +645,8 @@ If you think a rule is badly specified or a condition can't be expressed cleanly
 
 - Use Telegram's HTML parse mode, escape all text properly, and split messages under the 4096-character limit (never split in the middle of a story).
 - Per story: headline (bold), summary, impacts (▲/▼, display name, confidence, first/second order, move so far, "mixed signals" for conflicts), track record line if n ≥ min samples, up to 3 source links.
+- Impacts that share a mechanism share a line; `delivery.max_impacts_in_digest` (6) impacts are shown and the rest become one "+N more" line, so a story with 11 playbook impacts stays readable. Where an arrow is easy to misread, the asset's `up_means` is shown ("USD/INR (rupee weaker)"). When more than one rule makes the same call, the line says "2 rules" instead of repeating it.
+- Stories with no impacts show none of this: no empty "no impact" line.
 - Order impacts: first-order before second-order, then by confidence.
 - Footer on every digest: "Research notes, not financial advice."
 - `--dry-run` prints the formatted digest to the terminal instead of sending.
@@ -673,12 +695,12 @@ Done when:
 - you've shown me sample groupings and I've approved the similarity threshold
 - tests pass
 
-**Phase 2: Event extraction + asset universe + playbook**
+**Phase 2: Event extraction + asset universe + playbook** — complete 2026-09-20.
 Done when:
 
-- every symbol in assets.yaml validates (failures shown to me and resolved)
-- each playbook rule has passing match/no-match tests
-- digest shows playbook impacts with mechanisms
+- ~~every symbol in assets.yaml validates~~: 82/82 pass `newsdesk validate-tickers`
+- ~~each playbook rule has passing match/no-match tests~~: 15 rules, each with match and near-miss fixtures in `tests/fixtures/playbook_events.yaml`
+- ~~digest shows playbook impacts with mechanisms~~: checked in a live dry run
 
 **Phase 3: Price check**
 Done when:

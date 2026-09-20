@@ -1,0 +1,152 @@
+# Match / no-match events for every rule in config/playbook.yaml (SPEC §9 asks for both per
+# rule). Each `no_match` is a near miss: it differs from the matching event in the one
+# condition being tested, usually the severity direction.
+#
+# Fields left out default to: event_type other, severity moderate, policy_stance
+# not_applicable, policy_actor null, is_new_development true, empty lists.
+
+oil_supply_shock:
+  match:
+    - about: Houthi strike on a Saudi oil terminal
+      event: {event_type: geopolitical_conflict, countries: [Saudi Arabia, Yemen], channels: [oil_supply, shipping_routes], severity: escalation}
+  no_match:
+    - about: the same conflict easing into a ceasefire (de-escalation must not buy crude)
+      event: {event_type: geopolitical_conflict, countries: [Saudi Arabia, Yemen], channels: [oil_supply], severity: de_escalation}
+    - about: a major conflict with no oil or shipping channel
+      event: {event_type: geopolitical_conflict, countries: [Sudan], channels: [risk_sentiment], severity: major}
+
+oil_supply_easing:
+  match:
+    - about: China presses Iran to curb Houthi attacks on shipping (story 317)
+      event: {event_type: geopolitical_conflict, countries: [China, Iran], channels: [shipping_routes, risk_sentiment], severity: de_escalation}
+  no_match:
+    - about: the same conflict worsening instead
+      event: {event_type: geopolitical_conflict, countries: [China, Iran], channels: [shipping_routes], severity: escalation}
+
+geopolitical_risk_off:
+  match:
+    - about: escalating strikes with investors moving to safety
+      event: {event_type: geopolitical_conflict, countries: [Saudi Arabia], channels: [safe_haven_demand, risk_sentiment], severity: escalation}
+  no_match:
+    - about: a routine statement with the same channels but minor severity (story 621)
+      event: {event_type: geopolitical_conflict, countries: [North Korea], channels: [risk_sentiment, safe_haven_demand], severity: minor}
+    - about: an election with risk_sentiment (event type outside the rule)
+      event: {event_type: election_political_change, countries: [Russia], channels: [risk_sentiment], severity: major}
+
+india_defense_spending:
+  match:
+    - about: India orders more fighter aircraft
+      event: {event_type: geopolitical_conflict, countries: [India], channels: [defense_spending], severity: moderate}
+  no_match:
+    - about: an easing deal that also touches defence spending (must not buy defence stocks)
+      event: {event_type: geopolitical_conflict, countries: [India, Pakistan], channels: [defense_spending], severity: de_escalation}
+    - about: defence spending in another country
+      event: {event_type: geopolitical_conflict, countries: [Pakistan], channels: [defense_spending], severity: escalation}
+
+us_nato_defense_spending:
+  match:
+    - about: US clears a $2.7bn defence package for Ukraine (story 700)
+      event: {event_type: geopolitical_conflict, countries: [United States, Ukraine], channels: [defense_spending], severity: moderate}
+    - about: a NATO member raising its defence budget
+      event: {event_type: fiscal_policy_budget, countries: [Poland], channels: [defense_spending, fiscal_spending], severity: moderate}
+  no_match:
+    - about: the US-Denmark Greenland security deal, a de-escalation (story 612)
+      event: {event_type: geopolitical_conflict, countries: [United States, Denmark], channels: [defense_spending, risk_sentiment], severity: de_escalation}
+    - about: defence spending by a country outside NATO
+      event: {event_type: geopolitical_conflict, countries: [India], channels: [defense_spending], severity: escalation}
+
+nato_defense_spending_entity:
+  match:
+    - about: NATO agrees a higher spending target, no member country named
+      event: {event_type: fiscal_policy_budget, entities: [NATO], channels: [defense_spending], severity: moderate}
+  no_match:
+    - about: an entity that merely contains the letters "nato" (whole-word matching)
+      event: {event_type: fiscal_policy_budget, entities: [Nationwide Building Society], channels: [defense_spending], severity: moderate}
+    - about: NATO agreeing a drawdown
+      event: {event_type: geopolitical_conflict, entities: [NATO], channels: [defense_spending], severity: de_escalation}
+
+fed_hawkish:
+  match:
+    - about: the Fed raises rates (story 63)
+      event: {event_type: central_bank_monetary, countries: [United States], channels: [us_interest_rates, inflation], severity: escalation, policy_stance: hawkish, policy_actor: Federal Reserve, entities: [Federal Reserve, Reserve Bank of India]}
+  no_match:
+    - about: the same meeting but a rate cut
+      event: {event_type: central_bank_monetary, countries: [United States], channels: [us_interest_rates], severity: moderate, policy_stance: dovish, policy_actor: Federal Reserve}
+    - about: a company whose name merely contains "Fed" (whole-word matching)
+      event: {event_type: corporate_earnings_guidance, companies: [FedEx], channels: [company_specific], severity: moderate, policy_stance: hawkish, policy_actor: FedEx Corporation}
+
+fed_dovish:
+  match:
+    - about: the Fed cuts rates
+      event: {event_type: central_bank_monetary, countries: [United States], channels: [us_interest_rates], severity: moderate, policy_stance: dovish, policy_actor: FOMC}
+  no_match:
+    - about: the Fed raising rates instead
+      event: {event_type: central_bank_monetary, countries: [United States], channels: [us_interest_rates], severity: escalation, policy_stance: hawkish, policy_actor: Federal Reserve}
+
+rbi_dovish:
+  match:
+    - about: the RBI cuts the repo rate
+      event: {event_type: central_bank_monetary, countries: [India], channels: [india_interest_rates], severity: moderate, policy_stance: dovish, policy_actor: RBI}
+  no_match:
+    - about: a Fed decision that mentions the RBI reacting (the actor is the Fed, story 63)
+      event: {event_type: central_bank_monetary, countries: [United States, India], channels: [us_interest_rates, india_interest_rates], severity: escalation, policy_stance: dovish, policy_actor: Federal Reserve, entities: [Federal Reserve, Reserve Bank of India]}
+    - about: the RBI raising rates instead
+      event: {event_type: central_bank_monetary, countries: [India], channels: [india_interest_rates], severity: escalation, policy_stance: hawkish, policy_actor: Reserve Bank of India}
+
+rbi_hawkish:
+  match:
+    - about: the RBI raises the repo rate
+      event: {event_type: central_bank_monetary, countries: [India], channels: [india_interest_rates, inflation], severity: escalation, policy_stance: hawkish, policy_actor: Reserve Bank of India}
+  no_match:
+    - about: a lender whose name merely contains "rbi" (whole-word matching)
+      event: {event_type: central_bank_monetary, countries: [India], channels: [india_interest_rates], severity: escalation, policy_stance: hawkish, policy_actor: Herbie Capital}
+    - about: the RBI cutting rates instead
+      event: {event_type: central_bank_monetary, countries: [India], channels: [india_interest_rates], severity: moderate, policy_stance: dovish, policy_actor: RBI}
+
+semiconductor_supply_risk:
+  match:
+    - about: export controls threaten chip supply
+      event: {event_type: sanctions_trade_policy, countries: [United States, Taiwan], channels: [semiconductor_supply], severity: escalation}
+  no_match:
+    - about: the same controls being lifted
+      event: {event_type: sanctions_trade_policy, countries: [United States, Taiwan], channels: [semiconductor_supply], severity: de_escalation}
+
+china_stimulus_metals:
+  match:
+    - about: China announces infrastructure spending
+      event: {event_type: fiscal_policy_budget, countries: [China], channels: [fiscal_spending, metals_demand], severity: major}
+  no_match:
+    - about: the same spending package in another country
+      event: {event_type: fiscal_policy_budget, countries: [United States], channels: [fiscal_spending, metals_demand], severity: major}
+    - about: China tightening policy instead
+      event: {event_type: central_bank_monetary, countries: [China], channels: [metals_demand], severity: moderate, policy_stance: hawkish, policy_actor: People's Bank of China}
+
+rupee_sharp_fall:
+  match:
+    - about: the rupee falls sharply against the dollar
+      event: {event_type: macro_data_release, countries: [India, United States], channels: [inr_exchange_rate], severity: escalation}
+  no_match:
+    - about: the rupee recovering to settle flat (story 39)
+      event: {event_type: macro_data_release, countries: [India, United States], channels: [inr_exchange_rate], severity: de_escalation}
+    - about: a Fed decision that carries the rupee as a side effect, not its subject (story 63)
+      event: {event_type: central_bank_monetary, countries: [United States, India], channels: [us_interest_rates, inr_exchange_rate, usd_strength], severity: escalation, policy_stance: hawkish, policy_actor: Federal Reserve}
+
+india_weak_monsoon:
+  match:
+    - about: a failing monsoon threatens the kharif crop
+      event: {event_type: weather_climate_agriculture, countries: [India], channels: [agriculture_supply], severity: escalation}
+  no_match:
+    - about: a strong monsoon and a bumper harvest
+      event: {event_type: weather_climate_agriculture, countries: [India], channels: [agriculture_supply], severity: de_escalation}
+    - about: a weak monsoon somewhere else
+      event: {event_type: weather_climate_agriculture, countries: [Thailand], channels: [agriculture_supply], severity: major}
+
+us_tariffs_on_india:
+  match:
+    - about: a US law allowing 100% tariffs on India (story 2)
+      event: {event_type: sanctions_trade_policy, countries: [United States, India, Russia], channels: [tariffs_trade, oil_supply], severity: escalation}
+  no_match:
+    - about: the two sides agreeing to cut tariffs
+      event: {event_type: sanctions_trade_policy, countries: [United States, India], channels: [tariffs_trade], severity: de_escalation}
+    - about: US tariffs on someone else (countries_all needs both)
+      event: {event_type: sanctions_trade_policy, countries: [United States, China], channels: [tariffs_trade], severity: escalation}

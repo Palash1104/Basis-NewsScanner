@@ -38,6 +38,11 @@ ADDED_COLUMNS: dict[str, dict[str, str]] = {
     "stories": {
         "model": "VARCHAR(64)",
         "summary_pending": "BOOLEAN NOT NULL DEFAULT 0",
+        "event_pending": "BOOLEAN NOT NULL DEFAULT 0",
+    },
+    "events": {
+        # Added with event prompt v2, after the first extractions had been stored.
+        "policy_actor": "VARCHAR(64)",
     },
 }
 

@@ -30,9 +30,14 @@ between phases.
 - The minute window is shared across processes via `llm_requests`.
 - Run 9: 16 new articles, 1 call.
 
-**Phase 2 in progress** (event extraction, asset universe, playbook). Plan approved
-2026-09-19. Stops for user review: (1) ticker validation — done, all 82 symbols ok;
-(2) the filled-in playbook.yaml before its tests.
+**Phase 2 complete (2026-09-20):** event extraction, asset universe, playbook.
+- All three SPEC §13 criteria checked: 82/82 symbols validate; all 15 rules have match and
+  near-miss tests; the digest shows impacts with mechanisms in a live dry run.
+- 316 tests pass.
+- Run 12: 16 events extracted, 90 impacts from 4 rules; 56/500 requests used that day.
+- 20 real extractions are kept as fixtures (`tests/fixtures/event_extractions.json`).
+
+Phase 3 has not started; wait for the user.
 
 Since then (2026-09-17):
 - Real rate limits for `gemini-3.5-flash-lite` are set (15 RPM, 250k input TPM, 500 RPD), with
@@ -84,12 +89,14 @@ uv run python scripts/verify_feeds.py [--include-disabled] [--file other.yaml]
 uv run python scripts/embedding_report.py [--refresh] [--candidate 0.55]   # embedding threshold tuning
 uv run python scripts/regroup.py [--dry-run]    # regroup all stored articles, no LLM calls
 uv run python scripts/grouping_report.py [--refresh --lookback-hours 24] [--detail title_token_set:64]
+uv run python scripts/event_fixtures.py [story_ids...]   # live extractions -> test fixtures
 ```
 
 ## Layout
 
 - `config/settings.yaml` tunables · `config/feeds.yaml` verified feeds (see header comment)
 - `config/assets.yaml` asset universe (82 SPEC §8 starter symbols, all validated)
+- `config/playbook.yaml` 15 cause → effect rules (SPEC §9)
 - `app/assets.py` ticker validation (yfinance), stored checks, the unvalidated-symbol warning,
   `benchmark_for` (by exchange)
 - `app/config.py` pydantic models for config, `.env` loading
@@ -104,6 +111,9 @@ uv run python scripts/grouping_report.py [--refresh --lookback-hours 24] [--deta
 - `app/pipeline/regroup.py` one-off regroup of stored articles (`scripts/regroup.py`)
 - `app/pipeline/rank.py` importance score (SPEC 7.4) · `app/pipeline/summarize.py` when to
   (re)summarize, article selection, story updates
+- `app/pipeline/extract_event.py` event extraction (SPEC 7.6), normalization, pending handling
+- `app/pipeline/countries.py` canonical country names and aliases for event matching
+- `app/pipeline/playbook.py` rule models, loading and validation, matching, storing impacts
 - `app/llm/client.py` `LLMClient` (the only thing the pipeline calls: rate limiting, transient
   retries, validation retry, token counts), the `LLMProvider` protocol, `GeminiProvider` (REST
   via httpx), `AnthropicProvider` (SDK), `make_llm_client` factory
@@ -258,6 +268,34 @@ uv run python scripts/grouping_report.py [--refresh --lookback-hours 24] [--deta
   - The scoring benchmark is chosen by exchange, not country: `NSI` → `^NSEI`, `NYQ`/`NMS` →
     `^GSPC`, stocks only (TSM → `^GSPC`). A stock on another exchange gets no benchmark until
     its code is seen in a report and added to `EXCHANGE_BENCHMARKS`.
+- Event extraction (SPEC 7.6, prompt `event-v2`):
+  - Runs right after each successful summary, on the same articles, so the re-processing rule
+    is the summary's. Separate call from the summary: a bad event never costs a summary, and
+    the event prompt can change without rewriting summaries.
+  - Writing a summary sets `stories.event_pending`; extraction clears it. A run that stops
+    between the two (quota, API error, crash) is picked up by the next run.
+  - `policy_actor` (added in v2) is the authority whose stance the event gives, so a Fed
+    decision can't match an RBI rule because the articles quote the RBI reacting.
+  - Country names are canonicalized; unmapped ones are kept as written and printed in the run
+    output. `none` arriving with real channels is dropped and logged.
+  - A story keeps its summary but gets no event when output stays invalid after the retry;
+    it's retried only at its next re-summary.
+- Playbook (SPEC §9, `config/playbook.yaml`):
+  - Severity precedence in the prompt is what makes several rules work: easing is
+    `de_escalation` whatever its size, worsening is `escalation`. The oil-easing, rupee,
+    monsoon and US-tariff rules say so in a comment.
+  - `entities_any` and `policy_actor_any` match whole words with listed aliases, so "RBI"
+    doesn't match "Herbie" and "Fed" doesn't match "FedEx".
+  - SPEC's "US or NATO" rule is two rules sharing impacts through a YAML anchor, because
+    conditions can only be ANDed. The NATO member list is dated in a comment.
+  - `geopolitical_risk_off` is expected to fire broadly (any escalating conflict with
+    risk_sentiment or safe_haven_demand). That's deliberate: Phase 4's track record is what
+    judges whether those calls are worth keeping.
+  - Impacts are written once and never edited; re-extraction only adds. One row per rule, so
+    the track record stays per rule; the digest shows an asset once and says "2 rules".
+  - An asset called both ways on one story is marked `conflict` and shown as "mixed signals".
+  - Rules with an `UNSURE` comment (bank stocks on RBI moves, TSMC on chip risk, Tata Steel on
+    Chinese stimulus) are held at low confidence on purpose.
 - Ticker validation (`newsdesk validate-tickers`):
   - One yfinance `history(period="5d")` call per symbol. Yahoo's name, currency, exchange and
     instrument type come from the same request's metadata.

@@ -7,18 +7,19 @@ from zoneinfo import ZoneInfo
 import httpx
 import pytest
 
-from app.config import Settings
+from app.config import Settings, load_assets
 from app.delivery.format import (
     FOOTER,
     DigestItem,
     SourceLink,
     format_digest,
     format_story,
+    impact_lines,
     pick_sources,
     telegram_length,
 )
 from app.delivery.telegram import TelegramError, get_me, send_messages
-from app.models import Article
+from app.models import Article, Impact
 from tests.conftest import NOW
 
 KOLKATA = ZoneInfo("Asia/Kolkata")
@@ -195,3 +196,105 @@ def test_pick_sources_skips_non_news() -> None:
 
     links = pick_sources([article("Explainer Weekly", True), article("BBC", False)])
     assert [link.name for link in links] == ["BBC"]
+
+
+# ---------------------------------------------------------------- impacts in the digest
+
+ASSETS = {asset.symbol: asset for asset in load_assets()}
+
+
+def _impact(symbol: str, direction: str, **fields: object) -> Impact:
+    values: dict[str, object] = {
+        "order": "first",
+        "confidence": "medium",
+        "mechanism": "Supply fears add a risk premium to crude",
+        "origin": "playbook",
+        "rule_id": "oil_supply_shock",
+        "conflict": False,
+        "created_at": NOW,
+    }
+    return Impact(symbol=symbol, direction=direction, **(values | fields))
+
+
+def test_impacts_sharing_a_mechanism_share_a_line() -> None:
+    impacts = [_impact("BZ=F", "up"), _impact("CL=F", "up")]
+    (line,) = impact_lines(impacts, ASSETS, limit=6)
+    assert (
+        line == "▲ Brent crude, WTI crude · 1st · medium — Supply fears add a risk premium to crude"
+    )
+
+
+def test_impact_order_first_then_confidence_and_currency_direction_is_spelled_out() -> None:
+    impacts = [
+        _impact(
+            "ASIANPAINT.NS", "down", order="second", confidence="low", mechanism="Costlier inputs"
+        ),
+        _impact("INR=X", "up", order="second", mechanism="A higher oil import bill hits the rupee"),
+        _impact("BZ=F", "up", confidence="high"),
+    ]
+    lines = impact_lines(impacts, ASSETS, limit=6)
+    assert lines[0].startswith("▲ Brent crude · 1st · high")
+    assert (
+        lines[1]
+        == "▲ USD/INR (rupee weaker) · 2nd · medium — A higher oil import bill hits the rupee"
+    )
+    assert lines[2].startswith("▼ Asian Paints · 2nd · low")
+
+
+def test_rules_that_agree_are_counted_once() -> None:
+    impacts = [
+        _impact("^NSEI", "down", order="second", confidence="low", mechanism="Risk-off selling"),
+        _impact(
+            "^NSEI",
+            "down",
+            order="second",
+            confidence="low",
+            mechanism="Risk-off selling",
+            rule_id="us_tariffs_on_india",
+        ),
+    ]
+    (line,) = impact_lines(impacts, ASSETS, limit=6)
+    assert line == "▼ Nifty 50 · 2nd · low · 2 rules — Risk-off selling"
+
+
+def test_opposite_calls_become_one_mixed_signals_line() -> None:
+    impacts = [
+        _impact("GC=F", "up", mechanism="Safe-haven demand", conflict=True),
+        _impact("GC=F", "down", mechanism="Higher yields", conflict=True, rule_id="fed_hawkish"),
+        _impact("BZ=F", "up"),
+    ]
+    lines = impact_lines(impacts, ASSETS, limit=6)
+    assert lines[0] == "↕ Gold · mixed signals: Safe-haven demand vs Higher yields"
+    assert len(lines) == 2 and lines[1].startswith("▲ Brent crude")
+
+
+def test_extra_impacts_are_summarized_as_n_more() -> None:
+    impacts = [
+        _impact(symbol, "up", mechanism=f"m{index}")
+        for index, symbol in enumerate(["BZ=F", "CL=F", "GC=F", "SI=F", "HG=F", "ZW=F", "ZC=F"])
+    ]
+    lines = impact_lines(impacts, ASSETS, limit=6)
+    assert lines[-1] == "+1 more: ▲ Corn"
+    assert len(lines) == 7
+
+
+def test_unknown_symbol_falls_back_to_the_ticker() -> None:
+    (line,) = impact_lines([_impact("XYZ", "up")], {}, limit=6)
+    assert line.startswith("▲ XYZ")
+
+
+def test_story_shows_impacts_under_the_summary() -> None:
+    item = DigestItem(
+        headline="Strikes hit a Saudi oil terminal",
+        summary="Drones struck a terminal. Exports may slow.",
+        category="Geopolitics",
+        regions=["Global"],
+        disagreement_note=None,
+        sources=[SourceLink("BBC", "https://example.com/1")],
+        impacts=["▲ Brent crude · 1st · high — Supply fears add a risk premium to crude"],
+    )
+    text = format_story(item)
+    lines = text.split("\n")
+    assert lines[2] == "Drones struck a terminal. Exports may slow."
+    assert lines[3].startswith("▲ Brent crude")
+    assert lines[4].startswith("Sources:")

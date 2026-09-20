@@ -95,8 +95,26 @@ class FakeProvider:
         return item
 
 
+def event_json(**overrides: Any) -> str:
+    data = {
+        "event_type": "sanctions_trade_policy",
+        "countries": ["United States", "India"],
+        "entities": ["US Congress"],
+        "companies": [],
+        "channels": ["tariffs_trade"],
+        "severity": "escalation",
+        "policy_stance": "not_applicable",
+        "is_new_development": True,
+    }
+    data.update(overrides)
+    return json.dumps(data)
+
+
 def echo_summary_responder(kwargs: dict[str, Any]) -> ProviderResponse:
-    """A valid summary whose headline is the first article title in the prompt."""
+    """A valid summary whose headline is the first article title in the prompt, or a fixed
+    valid event for event-extraction requests."""
+    if kwargs["schema"].__name__ == "EventExtraction":
+        return provider_response(event_json())
     match = re.search(r'published="[^"]*">([^\n<]*)', kwargs["user"])
     title = match.group(1) if match else "Untitled story"
     headline = " ".join(title.split()[:12])

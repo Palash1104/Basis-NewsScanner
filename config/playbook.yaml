@@ -1,0 +1,253 @@
+# Playbook (SPEC §9): hand-written cause -> effect rules. These are starting hypotheses, not
+# truths; the scoring phase exists to test them.
+#
+# A rule matches an extracted event (SPEC 7.6) when EVERY condition it lists matches: AND
+# across fields, OR within a field's list. Conditions:
+#   event_types, channels_any, countries_any, countries_all, severity_any, policy_stance_any,
+#   entities_any and policy_actor_any (both whole-word and case-insensitive; list the aliases,
+#   e.g. Fed / Federal Reserve). policy_actor_any matches the authority whose stance
+#   policy_stance describes, so a Fed decision can't match an RBI rule.
+# Country names are canonical (app/pipeline/countries.py): "United States", "United Kingdom".
+#
+# Impacts use only symbols from config/assets.yaml that passed validate-tickers.
+#   order: first = directly exposed; second = through a knock-on effect (confidence <= medium)
+#   confidence: high | medium | low. "UNSURE" comments mark mechanisms I'm not confident of;
+#   those are set to low.
+#
+# Severity precedence (event prompt event-v1): an event that eases a conflict, supply risk,
+# trade tension or market stress is de_escalation whatever its size; one that worsens it is
+# escalation; minor/moderate/major only when neither. Rules marked "relies on the severity
+# precedence rule" only work because of it.
+
+- id: oil_supply_shock
+  description: Conflict or disruption threatening oil supply
+  when:
+    event_types: [geopolitical_conflict, commodity_supply_disruption, sanctions_trade_policy]
+    channels_any: [oil_supply, shipping_routes]
+    severity_any: [major, escalation]
+  impacts:
+    - {symbol: BZ=F, direction: up, order: first, confidence: high, mechanism: "Supply fears add a risk premium to crude"}
+    - {symbol: CL=F, direction: up, order: first, confidence: high, mechanism: "Supply fears add a risk premium to crude"}
+    - {symbol: ONGC.NS, direction: up, order: second, confidence: medium, mechanism: "Higher crude prices lift upstream realisations"}
+    - {symbol: OIL.NS, direction: up, order: second, confidence: medium, mechanism: "Higher crude prices lift upstream realisations"}
+    - {symbol: BPCL.NS, direction: down, order: second, confidence: medium, mechanism: "Costlier crude squeezes fuel marketing margins"}
+    - {symbol: HINDPETRO.NS, direction: down, order: second, confidence: medium, mechanism: "Costlier crude squeezes fuel marketing margins"}
+    - {symbol: IOC.NS, direction: down, order: second, confidence: medium, mechanism: "Costlier crude squeezes fuel marketing margins"}
+    - {symbol: INDIGO.NS, direction: down, order: second, confidence: medium, mechanism: "Jet fuel is a major airline cost"}
+    - {symbol: ASIANPAINT.NS, direction: down, order: second, confidence: low, mechanism: "Crude-derived raw materials get costlier"}
+    - {symbol: INR=X, direction: up, order: second, confidence: medium, mechanism: "A higher oil import bill pressures the rupee"}
+    - {symbol: XOM, direction: up, order: second, confidence: medium, mechanism: "Higher crude lifts oil producer earnings"}
+
+# Relies on the severity precedence rule: an OPEC output increase or a ceasefire must be
+# tagged de_escalation ("output increase language" can't be matched directly, so SPEC §9's
+# workaround is oil_supply + de_escalation). Reverse of oil_supply_shock with confidence one
+# step lower; impacts already at low stay low.
+- id: oil_supply_easing
+  description: Easing conflict, supply risk or sanctions that relieves oil supply fears
+  when:
+    event_types: [geopolitical_conflict, commodity_supply_disruption, sanctions_trade_policy]
+    channels_any: [oil_supply, shipping_routes]
+    severity_any: [de_escalation]
+  impacts:
+    - {symbol: BZ=F, direction: down, order: first, confidence: medium, mechanism: "Easing supply fears remove the risk premium from crude"}
+    - {symbol: CL=F, direction: down, order: first, confidence: medium, mechanism: "Easing supply fears remove the risk premium from crude"}
+    - {symbol: ONGC.NS, direction: down, order: second, confidence: low, mechanism: "Lower crude prices cut upstream realisations"}
+    - {symbol: OIL.NS, direction: down, order: second, confidence: low, mechanism: "Lower crude prices cut upstream realisations"}
+    - {symbol: BPCL.NS, direction: up, order: second, confidence: low, mechanism: "Cheaper crude widens fuel marketing margins"}
+    - {symbol: HINDPETRO.NS, direction: up, order: second, confidence: low, mechanism: "Cheaper crude widens fuel marketing margins"}
+    - {symbol: IOC.NS, direction: up, order: second, confidence: low, mechanism: "Cheaper crude widens fuel marketing margins"}
+    - {symbol: INDIGO.NS, direction: up, order: second, confidence: low, mechanism: "Cheaper jet fuel lowers airline costs"}
+    - {symbol: ASIANPAINT.NS, direction: up, order: second, confidence: low, mechanism: "Crude-derived raw materials get cheaper"}
+    - {symbol: INR=X, direction: down, order: second, confidence: low, mechanism: "A lower oil import bill eases pressure on the rupee"}
+    - {symbol: XOM, direction: down, order: second, confidence: low, mechanism: "Lower crude cuts oil producer earnings"}
+
+- id: geopolitical_risk_off
+  description: Major or escalating geopolitical shock that makes investors avoid risk
+  when:
+    # Limited to these event types (approved 2026-09-19); natural_disaster added by the user.
+    event_types: [geopolitical_conflict, sanctions_trade_policy, natural_disaster]
+    channels_any: [safe_haven_demand, risk_sentiment]
+    severity_any: [major, escalation]
+  impacts:
+    - {symbol: GC=F, direction: up, order: first, confidence: medium, mechanism: "Investors buy gold as a safe haven when risk rises"}
+    - {symbol: ^VIX, direction: up, order: first, confidence: medium, mechanism: "Rising risk pushes up expected US stock market volatility"}
+    - {symbol: ^INDIAVIX, direction: up, order: first, confidence: medium, mechanism: "Rising risk pushes up expected Indian stock market volatility"}
+    - {symbol: ^NSEI, direction: down, order: second, confidence: low, mechanism: "Risk-off selling weighs on Indian stocks"}
+    - {symbol: ^GSPC, direction: down, order: second, confidence: low, mechanism: "Risk-off selling weighs on US stocks"}
+
+- id: india_defense_spending
+  description: News that raises Indian defence spending
+  when:
+    channels_any: [defense_spending]
+    countries_any: [India]
+    # Everything except de_escalation: an easing deal shouldn't buy defence stocks.
+    severity_any: [minor, moderate, major, escalation]
+  impacts:
+    - {symbol: HAL.NS, direction: up, order: first, confidence: medium, mechanism: "More Indian defence spending means more aircraft and helicopter orders"}
+    - {symbol: BEL.NS, direction: up, order: first, confidence: medium, mechanism: "More Indian defence spending means more defence electronics orders"}
+
+# SPEC §9 says "countries United States or NATO members / entities NATO". Rules can only AND
+# their conditions, so this is two rules with the same impacts (approved 2026-09-19): one on
+# countries, one on the NATO entity.
+- id: us_nato_defense_spending
+  description: News that raises US or NATO-member defence spending
+  when:
+    channels_any: [defense_spending]
+    # Everything except de_escalation: an easing deal shouldn't buy defence stocks.
+    severity_any: [minor, moderate, major, escalation]
+    # United States plus the NATO members listed at
+    # https://www.nato.int/cps/en/natohq/nato_countries.htm, taken 2026-09-19 (page last
+    # updated 11 March 2024, 32 members). The site's "Czechia", "The Netherlands" and
+    # "Türkiye" are written here as our canonical Czech Republic, Netherlands and Turkey.
+    countries_any: [
+      Albania, Belgium, Bulgaria, Canada, Croatia, Czech Republic, Denmark, Estonia, Finland,
+      France, Germany, Greece, Hungary, Iceland, Italy, Latvia, Lithuania, Luxembourg,
+      Montenegro, Netherlands, North Macedonia, Norway, Poland, Portugal, Romania, Slovakia,
+      Slovenia, Spain, Sweden, Turkey, United Kingdom, United States,
+    ]
+  impacts: &us_defense_impacts
+    - {symbol: LMT, direction: up, order: first, confidence: medium, mechanism: "More US and allied defence spending means more orders for US defence contractors"}
+    - {symbol: RTX, direction: up, order: first, confidence: medium, mechanism: "More US and allied defence spending means more orders for US defence contractors"}
+    - {symbol: NOC, direction: up, order: first, confidence: medium, mechanism: "More US and allied defence spending means more orders for US defence contractors"}
+
+- id: nato_defense_spending_entity
+  description: News that raises NATO defence spending, where NATO itself is named
+  when:
+    channels_any: [defense_spending]
+    # Everything except de_escalation: an easing deal shouldn't buy defence stocks.
+    severity_any: [minor, moderate, major, escalation]
+    entities_any: [NATO, North Atlantic Treaty Organization]
+  impacts: *us_defense_impacts
+
+- id: fed_hawkish
+  description: The Federal Reserve tightens or signals tighter policy
+  when:
+    event_types: [central_bank_monetary]
+    policy_actor_any: [Federal Reserve, Fed, FOMC]
+    policy_stance_any: [hawkish]
+  impacts:
+    - {symbol: ^TNX, direction: up, order: first, confidence: medium, mechanism: "Tighter Fed policy pushes US Treasury yields higher"}
+    - {symbol: DX-Y.NYB, direction: up, order: first, confidence: medium, mechanism: "Higher US rates make dollar assets more attractive, lifting the dollar"}
+    - {symbol: ^IXIC, direction: down, order: second, confidence: medium, mechanism: "Higher rates weigh on growth-stock valuations"}
+    - {symbol: INR=X, direction: up, order: second, confidence: medium, mechanism: "A stronger dollar and higher US yields pull money out of India, weakening the rupee"}
+    - {symbol: GC=F, direction: down, order: second, confidence: low, mechanism: "Higher yields make non-yielding gold less attractive"}
+
+- id: fed_dovish
+  description: The Federal Reserve loosens or signals looser policy
+  when:
+    event_types: [central_bank_monetary]
+    policy_actor_any: [Federal Reserve, Fed, FOMC]
+    policy_stance_any: [dovish]
+  impacts:
+    - {symbol: ^TNX, direction: down, order: first, confidence: medium, mechanism: "Looser Fed policy pulls US Treasury yields lower"}
+    - {symbol: DX-Y.NYB, direction: down, order: first, confidence: medium, mechanism: "Lower US rates make dollar assets less attractive, weakening the dollar"}
+    - {symbol: ^IXIC, direction: up, order: second, confidence: medium, mechanism: "Lower rates support growth-stock valuations"}
+    - {symbol: INR=X, direction: down, order: second, confidence: medium, mechanism: "A weaker dollar and lower US yields draw money into India, supporting the rupee"}
+    - {symbol: GC=F, direction: up, order: second, confidence: low, mechanism: "Lower yields make non-yielding gold more attractive"}
+
+- id: rbi_dovish
+  description: The RBI loosens or signals looser policy
+  when:
+    event_types: [central_bank_monetary]
+    policy_actor_any: [RBI, Reserve Bank of India]
+    policy_stance_any: [dovish]
+  impacts:
+    # UNSURE: rate cuts help banks' loan growth and bond holdings but squeeze their interest
+    # margins; the net direction for bank stocks isn't clear-cut.
+    - {symbol: ^NSEBANK, direction: up, order: first, confidence: low, mechanism: "Lower rates support loan growth and lift banks' bond holdings"}
+    - {symbol: BAJFINANCE.NS, direction: up, order: first, confidence: medium, mechanism: "Lower rates cut the borrowing costs of lenders that fund themselves in markets"}
+    - {symbol: ^CNXREALTY, direction: up, order: second, confidence: medium, mechanism: "Cheaper home loans support property demand"}
+    - {symbol: DLF.NS, direction: up, order: second, confidence: medium, mechanism: "Cheaper home loans support property demand"}
+    - {symbol: MARUTI.NS, direction: up, order: second, confidence: low, mechanism: "Cheaper car loans support vehicle demand"}
+
+- id: rbi_hawkish
+  description: The RBI tightens or signals tighter policy
+  when:
+    event_types: [central_bank_monetary]
+    policy_actor_any: [RBI, Reserve Bank of India]
+    policy_stance_any: [hawkish]
+  impacts:
+    # UNSURE: as in rbi_dovish, the net effect of rate rises on bank stocks isn't clear-cut
+    # (wider margins against slower loan growth and bond losses).
+    - {symbol: ^NSEBANK, direction: down, order: first, confidence: low, mechanism: "Higher rates slow loan growth and hit banks' bond holdings"}
+    - {symbol: BAJFINANCE.NS, direction: down, order: first, confidence: medium, mechanism: "Higher rates raise the borrowing costs of lenders that fund themselves in markets"}
+    - {symbol: ^CNXREALTY, direction: down, order: second, confidence: medium, mechanism: "Costlier home loans weigh on property demand"}
+    - {symbol: DLF.NS, direction: down, order: second, confidence: medium, mechanism: "Costlier home loans weigh on property demand"}
+    - {symbol: MARUTI.NS, direction: down, order: second, confidence: low, mechanism: "Costlier car loans weigh on vehicle demand"}
+
+- id: semiconductor_supply_risk
+  description: A major or escalating threat to chip supply
+  when:
+    channels_any: [semiconductor_supply]
+    severity_any: [major, escalation]
+  impacts:
+    # UNSURE: TSMC falls if the disruption hits Taiwan or TSMC itself, but could gain pricing
+    # power if it hits rival chipmakers; the event doesn't say where the disruption is.
+    - {symbol: TSM, direction: down, order: first, confidence: low, mechanism: "A chip supply disruption threatens the largest foundry's output"}
+    - {symbol: SMH, direction: down, order: first, confidence: medium, mechanism: "Chip supply disruptions weigh on the semiconductor sector"}
+    - {symbol: NVDA, direction: down, order: second, confidence: low, mechanism: "Nvidia depends on outside foundries to make its chips"}
+    - {symbol: AMD, direction: down, order: second, confidence: low, mechanism: "AMD depends on outside foundries to make its chips"}
+
+- id: china_stimulus_metals
+  description: Chinese fiscal or monetary stimulus that lifts metals demand
+  when:
+    event_types: [fiscal_policy_budget, central_bank_monetary]
+    countries_any: [China]
+    channels_any: [metals_demand, fiscal_spending]
+    policy_stance_any: [dovish, not_applicable]
+  impacts:
+    - {symbol: HG=F, direction: up, order: first, confidence: medium, mechanism: "Chinese stimulus raises expected demand for copper"}
+    - {symbol: ^CNXMETAL, direction: up, order: second, confidence: medium, mechanism: "Stronger Chinese demand lifts global metal prices and Indian metal producers"}
+    # UNSURE: this assumes stimulus lifts China's own steel use and so cuts its steel exports;
+    # if Chinese mills just produce more, export pressure on Indian steelmakers stays.
+    - {symbol: TATASTEEL.NS, direction: up, order: second, confidence: low, mechanism: "Stronger Chinese demand lifts global steel prices and eases Chinese export pressure"}
+    - {symbol: HINDALCO.NS, direction: up, order: second, confidence: medium, mechanism: "Higher aluminium and copper prices lift Hindalco's realisations"}
+    - {symbol: VEDL.NS, direction: up, order: second, confidence: medium, mechanism: "Higher base-metal prices lift Vedanta's realisations"}
+
+# Relies on the severity precedence rule: a sharp rupee fall is escalation (or major when the
+# model sees no direction); a rupee recovery is de_escalation and must not match. SPEC §9 had
+# severity major only; [major, escalation] approved 2026-09-19.
+- id: rupee_sharp_fall
+  description: A sharp fall in the rupee against the dollar
+  when:
+    # The rupee must be what the event is about, not a side effect of someone else's policy:
+    # a Fed decision is central_bank_monetary and carries inr_exchange_rate too, but it is not
+    # a rupee event. These two types are what a currency move itself is tagged as.
+    event_types: [macro_data_release, other]
+    countries_any: [India]
+    channels_any: [inr_exchange_rate]
+    severity_any: [major, escalation]
+  impacts:
+    # All low: the rupee-to-IT-revenue link is real but small and slow next to everything else
+    # that moves these stocks.
+    - {symbol: ^CNXIT, direction: up, order: first, confidence: low, mechanism: "A weaker rupee raises the rupee value of IT exporters' dollar revenue"}
+    - {symbol: TCS.NS, direction: up, order: first, confidence: low, mechanism: "A weaker rupee raises the rupee value of TCS's dollar revenue"}
+    - {symbol: INFY.NS, direction: up, order: first, confidence: low, mechanism: "A weaker rupee raises the rupee value of Infosys's dollar revenue"}
+
+# Relies on the severity precedence rule: a weak monsoon is escalation, a good one
+# de_escalation (must not match). SPEC §9 had severity major only; [major, escalation]
+# approved 2026-09-19.
+- id: india_weak_monsoon
+  description: A weak monsoon that threatens Indian farm output
+  when:
+    event_types: [weather_climate_agriculture]
+    countries_any: [India]
+    channels_any: [agriculture_supply]
+    severity_any: [major, escalation]
+  impacts:
+    - {symbol: ^CNXFMCG, direction: down, order: second, confidence: low, mechanism: "A weak monsoon cuts farm incomes and rural spending on household goods"}
+    - {symbol: HINDUNILVR.NS, direction: down, order: second, confidence: low, mechanism: "A weak monsoon cuts farm incomes and rural spending on household goods"}
+    - {symbol: M&M.NS, direction: down, order: second, confidence: low, mechanism: "A weak monsoon cuts farm incomes and tractor demand"}
+
+# Relies on the severity precedence rule: a tariff cut or trade deal is de_escalation, so
+# every severity except de_escalation is listed (approved 2026-09-19).
+- id: us_tariffs_on_india
+  description: New or higher US tariffs on India
+  when:
+    event_types: [sanctions_trade_policy]
+    channels_any: [tariffs_trade]
+    countries_all: [United States, India]
+    severity_any: [minor, moderate, major, escalation]
+  impacts:
+    - {symbol: ^NSEI, direction: down, order: second, confidence: low, mechanism: "US tariffs threaten Indian exports and growth"}
+    - {symbol: INR=X, direction: up, order: second, confidence: low, mechanism: "Tariffs threaten India's export earnings, weakening the rupee"}

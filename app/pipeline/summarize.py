@@ -163,6 +163,9 @@ def summarize_stories(
         story.disagreement_note = summary.disagreement_note
         story.status = "summarized"
         story.summary_pending = False
+        # A fresh summary owes a fresh event: extraction picks this up in the same run, and
+        # still finds it next run if this one stops early.
+        story.event_pending = True
         story.updated_at = now
         _record_processed(story, articles, model)
         session.commit()

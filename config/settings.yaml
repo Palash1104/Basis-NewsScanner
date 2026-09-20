@@ -114,6 +114,9 @@ schedule:
 delivery:
   digest_times: ["07:30", "19:30"]
   max_stories_per_digest: 15
+  # Impacts shown per story (first-order first, then by confidence); the rest are
+  # listed as "+N more", so a story with a dozen playbook impacts stays readable.
+  max_impacts_in_digest: 6
   breaking_alerts: false
   breaking_importance_threshold: 5.0
 
