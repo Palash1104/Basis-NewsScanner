@@ -764,7 +764,7 @@ def runs_view(session: Session, settings: Settings, now: datetime, days: int) ->
     pipeline = [run for run in runs if run.kind == "pipeline"]
     calls, declines = health.layer_b_totals(pipeline)
 
-    models = [settings.llm.summary_model, settings.llm.reasoning_model]
+    models = list(dict.fromkeys([settings.llm.summary_model, settings.llm.reasoning_model]))
     quota_days = health.quota_days(settings, now, days)
     counts = health.requests_per_day(session, models, quota_days)
     limits = settings.llm.rate_limits

@@ -165,7 +165,8 @@ def health_lines(
         lines.append(f"  {label}: {len(other)}, {failed} with errors{when}")
 
     lines += ["", "LLM requests per quota day (Pacific; budget stops new work, cap is the quota)"]
-    models = [settings.llm.summary_model, settings.llm.reasoning_model]
+    # The rerank shares the summary model, so the same id can appear twice.
+    models = list(dict.fromkeys([settings.llm.summary_model, settings.llm.reasoning_model]))
     days_listed = quota_days(settings, now, days)
     counts = requests_per_day(session, models, days_listed)
     width = max(len(model) for model in models) + 4

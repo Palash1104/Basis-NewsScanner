@@ -37,6 +37,16 @@ break a running install for no gain.
 - The minute window is shared across processes via `llm_requests`.
 - Run 9: 16 new articles, 1 call.
 
+**Phase 6 complete (2026-09-22):** the web UI.
+- 512 tests pass.
+- All five SPEC 11 pages against real data, plus `/design` as the style guide:
+  `/` (feed, filters, search, 1D/1W/1M), `/story/{id}`, `/track-record`, `/assets` +
+  `/asset/{symbol}`, `/runs`.
+- `newsdesk serve` on 127.0.0.1:8787, read-only, light and dark.
+- Checked against an empty database: every page returns 200 (or 404 for a missing story or
+  symbol) and says what it has nothing of.
+- India went from 0 stories on the feed to 9 after the reserved slots landed.
+
 **Phase 5 complete (2026-09-20):** LLM impact layer and rerank.
 - 375 tests pass.
 - Quality gate before wiring in (`scripts/impact_gate.py`, 20 fixtures on Flash-Lite): 13 of
@@ -73,7 +83,9 @@ break a running install for no gain.
 - Run 12: 16 events extracted, 90 impacts from 4 rules; 56/500 requests used that day.
 - 20 real extractions are kept as fixtures (`tests/fixtures/event_extractions.json`).
 
-Phase 6 (the web UI) has not started; wait for the user.
+Every phase in SPEC 13 is complete. Next work is the user's call: breaking alerts were
+deferred out of Phase 4, and the grouping thresholds are due a retune from
+`data/logs/grouping_borderline.jsonl`.
 
 Since then (2026-09-17):
 - Real rate limits for `gemini-3.5-flash-lite` are set (15 RPM, 250k input TPM, 500 RPD), with
@@ -180,6 +192,13 @@ powershell -ExecutionPolicy Bypass -File scripts/install_tasks.ps1 [-Remove]   #
 - `app/health.py` `newsdesk health`: slot coverage, quota-day usage, rerank fallbacks, layer
   B's decline rate, rules at n>=5. Database only, so it can run while the scheduler runs.
 - `app/locks.py` `job_lock`: one pipeline / digest / score job at a time (OS file lock)
+- `app/presentation.py` what a story says about the market, decided once for the digest and
+  the web: asset calls, "mixed signals", "N rules", "+N more", story age
+- `app/pipeline/sections.py` URL sections, and which stories may take a reserved slot
+- `app/web/main.py` routes and the app factory · `queries.py` every read the pages make ·
+  `palette.py` the colours and their measured contrast · `templates/` · `static/`
+  (`design-system.css` is the export, vendored unmodified; `theme.css` is dark mode and the
+  mockup's inline values; `app.css` is screen layout)
 - `scripts/install_tasks.ps1` registers the Windows tasks · `scripts/run_task.ps1` is what
   they execute (venv, working directory, `data/logs/tasks/<job>.log`)
 - `scripts/` one-off tools · `tests/fixtures/` synthetic feeds · `data/` DB, logs, reports (gitignored)
@@ -239,13 +258,28 @@ powershell -ExecutionPolicy Bypass -File scripts/install_tasks.ps1 [-Remove]   #
 
 ## Web UI (Phase 6)
 
-- The web UI must follow the visual design in `design/` and the decisions in `design/NOTES.md`,
-  implemented in the spec's stack: FastAPI + Jinja2 + HTMX + plain CSS, no React, no JS build
-  step (SPEC §11).
+- Follow the visual design in `design/` and the decisions in `design/NOTES.md`, in the spec's
+  stack: FastAPI + Jinja2 + HTMX + plain CSS, no React, no JS build step (SPEC §11).
 - Primary mockup: `design/Basis - Commodity News App.dc.html`. Tokens:
   `design/_ds/modernist-3dfd6d1f-f6ac-418e-8f3e-37cf9f987647/styles.css`.
 - `design/support.js` and `design/browser-window.jsx` only preview the mockup; don't use them in
   the app.
+- `app/web/static/css/design-system.css` **is** that stylesheet, vendored byte for byte; a test
+  compares the two. Never edit it: it is token-driven, so `theme.css` adds dark mode by
+  overriding its custom properties.
+- Colours are the export's, including the primary button (3.76:1 light, 4.18:1 dark - below
+  AA, kept on the user's instruction and reported on `/design`). Muted text is ink at 70%, as
+  the mockup writes it, not the system's 55%.
+- The web app never writes: `make_read_only_engine` sets `query_only` and deliberately not
+  `journal_mode` (that takes a write lock). It never calls `init_db`, so restart the server
+  after a schema change. No request touches the network.
+- Search is SQLite FTS5 (`db.SEARCH_TABLE`), created and kept current by `init_db` and its
+  triggers, never by the web app. Typed words are quoted before they reach FTS5 so its own
+  operators can't break a query. A database it can't index logs a warning and carries on.
+- Sparklines come from `price_cache` only, sampled to ~24 points: 60-minute bars for 1D and
+  1W, daily for 1M. An asset with no bars gets no line, never a made-up one.
+- `/design` is the style guide and stays reachable, but it is not in the nav, because it is
+  not in the design.
 
 ## Decisions worth knowing
 
@@ -497,8 +531,16 @@ powershell -ExecutionPolicy Bypass -File scripts/install_tasks.ps1 [-Remove]   #
     rate-limit page, not the model list.
   - It runs on the top `impacts.llm_max_stories_per_run` (5) stories per run, in post-rerank
     order, and only where the playbook step would map impacts at all.
-  - The rerank keeps the reasoning model: one call per run, and any failure (503s and its
-    daily cap are both common) falls back to the computed importance order.
+  - The rerank runs on Flash-Lite too, since 2026-09-22 (user): `gemini-3.6-flash` failed
+    7 of 21 reranks with 503s, including the last two runs, and the Phase 5 gate found its
+    reasoning no better than Flash-Lite's. `reasoning_model` now points at Flash-Lite;
+    3.6 Flash keeps its `rate_limits` entry so it can be used again without guessing.
+    - Budget after the move, 8 runs a day: 206 summaries+extraction + 40 layer B + 8 rerank
+      = 254 typical, 320 on a busy day, against the 350 budget (headroom 30).
+    - Run 27 (2026-09-22) was the first after the move: the rerank succeeded, no fallback,
+      26 calls for the run (1 rerank + 10 summaries + 10 extractions + 5 layer B).
+  - Any rerank failure still falls back to the computed importance order, and one call per
+    run is all it ever makes.
   - The rerank retries once, not `llm.max_retries` (`RERANK_MAX_RETRIES`): retries spend
     the reasoning model's 20-request day, and the fallback is fine. On 2026-09-20,
     retries of 503s pushed it to 18 requests against a budget of 15.

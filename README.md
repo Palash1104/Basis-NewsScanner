@@ -10,10 +10,9 @@ price checks and a track record (see `SPEC.md`).
 
 Research notes, not financial advice.
 
-**Status:** Phase 5 complete (fetch → group → rank and rerank → summarize → extract the
-event → apply the playbook and the LLM impact layer → check whether the market already moved
-→ score the calls afterwards → Telegram digest). Market
-impact notes start in Phase 2.
+**Status:** all six phases complete (fetch → group → rank and rerank → summarize → extract
+the event → apply the playbook and the LLM impact layer → check whether the market already
+moved → score the calls afterwards → Telegram digest → a local web UI).
 
 ## Setup
 
@@ -57,6 +56,7 @@ but skips summaries and records why. The digest only includes summarized stories
 | `uv run python scripts/verify_feeds.py [--include-disabled]` | Check every feed responds and has recent entries. |
 | `uv run newsdesk score` | Judge every call whose horizon is complete and print the track record. Safe to re-run: scores are written once. |
 | `uv run newsdesk validate-tickers` | Check every symbol in `config/assets.yaml` has recent prices on Yahoo (writes `data/ticker_report.md`). |
+| `uv run newsdesk serve` | The web UI on http://127.0.0.1:8787 (`--port` to change it). It only reads the database, so it is safe to run while the pipeline is writing. |
 | `uv run newsdesk health [--days 7]` | Whether the scheduler kept its slots, what the LLM layers used against their budgets, and which rules have enough judged calls to mean anything. Reads the database only, so it is safe to run while the scheduler is running. |
 | `uv run python scripts/embedding_report.py [--refresh]` | Compare embedding grouping thresholds on real samples and the regression fixtures (writes `data/embedding_report.md`). |
 | `uv run python scripts/regroup.py [--dry-run]` | Regroup every stored article with embeddings (no LLM calls). Changed stories that had a summary become `needs_resummary`. |
@@ -147,6 +147,30 @@ while the machine was off (`anacron` does).
 over, and the digest covers everything summarized since the last digest that was sent without
 errors. Downtime longer than the lookback window is what actually loses stories, and
 `uv run newsdesk health` lists the slots that were missed.
+
+## The web UI
+
+```
+uv run newsdesk serve      # then open http://127.0.0.1:8787
+```
+
+Localhost only, no login, light and dark (the theme button follows your OS by default). It
+reads the database and never writes to it, so leaving it open while the scheduled pipeline
+runs is fine; restart it after a schema change.
+
+| Page | What it answers |
+|---|---|
+| `/` | What moved in the last 48 hours, and why. Filter by region and category, search stories, switch sparklines between 1D, 1W and 1M. |
+| `/story/{id}` | One story: the summary, every asset it calls with the mechanism and the move since news, every score as it comes in, any rule the model disputed, the extracted event, and all source articles. |
+| `/track-record` | Whether the calls are worth anything: hit rates by rule, event type, origin, confidence and horizon, gated so a thin record can't look like a measurement. |
+| `/assets`, `/asset/{symbol}` | Which assets get called, what keeps moving them, and how those calls turned out. |
+| `/runs` | Whether the schedule is being kept, what the LLM cost, and what broke. |
+| `/design` | The style guide: tokens, both themes, and their measured contrast. Not in the nav. |
+
+**Reading a hit rate.** A direction call right by chance is about 50%, and no-move calls are
+excluded from the rate. A rate appears only after 5 judged calls from 3 different stories,
+and is marked *early* until 10 stories stand behind it: one story calls ten assets at once
+and they move together, so ten calls from one story is one observation.
 
 ## Configuration
 

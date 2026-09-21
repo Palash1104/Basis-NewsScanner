@@ -702,6 +702,17 @@ FastAPI + Jinja2 + HTMX, plain CSS, light/dark mode, binds to localhost only, no
 - `/asset/{symbol}`: every impact call on that asset and its outcomes
 - `/runs`: recent runs, errors, token usage
 
+**As built (Phase 6, 2026-09-22).** `newsdesk serve` on 127.0.0.1:8787.
+
+- **Read-only by construction.** `make_read_only_engine` sets `query_only`, so a page cannot write even through a bug, and it deliberately does not set `journal_mode`, which would take a write lock. The database is already WAL, so pages and the pipeline never block each other. The web app never runs `init_db`: schema changes stay with `newsdesk run`, and the server is restarted after one. Nothing in a request touches the network - prices come from `price_cache`, never yfinance.
+- **The design system is the export's own stylesheet**, vendored byte for byte and token-driven, so the dark theme (which the export does not define) is an override of its custom properties. Colours are the export's, including the primary button, which is 3.76:1 against its label and kept anyway; `app/web/palette.py` records that and the tests prove everything else meets AA in both themes.
+- **What a story says about the market is decided once**, in `app/presentation.py`, and rendered twice: Telegram HTML for the digest, chips and tables for the web. The digest's bytes are unchanged, which its tests pin.
+- **`/` adds** the 1D/1W/1M sparkline control (from `price_cache`: 60-minute bars for a day and a week, daily for a month), search over stories (SQLite FTS5, built by `init_db`, kept current by triggers), and the states the design never showed: no market impact, no price yet, mixed signals, a story with no region.
+- **`/assets`** lists every universe asset that has been called, most recently first; assets nobody has called are left out. `/asset/{symbol}` is the mockup's watchlist card plus "what moves it": the channels and rules behind its calls, as counts, not a score.
+- **`/runs`** is built on `app/health.py`, the same functions `newsdesk health` prints.
+- **Rates are gated the same everywhere** (7.9): 5 judged calls and 3 distinct stories, marked *early* until 10 stories.
+- **Not carried over from the design**, because the data does not exist: the watchlist, search over commodities, "biggest movers", read time, datelines, the avatar and the sign-up button.
+
 ---
 
 ## 12. CLI (`typer`)
@@ -774,8 +785,15 @@ Done when:
 - ~~track record can be split by origin so I can compare playbook vs LLM~~: `origin` is a track-record group, and live runs now produce `both` rows
 - ~~embedding grouping examples shown to me and threshold approved~~: done in the Phase 1 fixes (threshold 0.55 approved 2026-09-19)
 
-**Phase 6: Web UI**
+**Phase 6: Web UI** - complete 2026-09-22.
 Done when all pages in section 11 work against real data.
+
+- ~~`/` shows today's stories with their calls, filtered by region and category~~
+- ~~`/story/{id}` shows the articles, the event, every impact with its scores, and rule disagreements~~
+- ~~`/track-record` shows the tables, with rates gated by calls and stories~~
+- ~~`/assets` and `/asset/{symbol}` show what has been called and how it went~~
+- ~~`/runs` shows runs, errors, token usage and missed slots~~
+- ~~light and dark, the design's tokens, localhost only, read-only~~
 
 ---
 
@@ -786,7 +804,7 @@ Done when all pages in section 11 work against real data.
   - Gemini: `generationConfig.responseMimeType: application/json` plus `responseJsonSchema`.
   - Anthropic: `output_config.format` with a `json_schema`.
 - **Validation failures.** Retry once, including the rejected output and the validation error in the retry. If it still fails, mark the story `failed`, log it, and continue.
-- **Transient errors.** Timeouts, 429 and 5xx are retried with exponential backoff (at most `llm.max_retries` times, waits capped at 60s). A call may lower that for itself (`structured(max_retries=...)`): the rerank retries once, because every attempt spends a request from the reasoning model's 20-a-day quota and its fallback (the computed importance order) costs almost nothing.
+- **Transient errors.** Timeouts, 429 and 5xx are retried with exponential backoff (at most `llm.max_retries` times, waits capped at 60s). A call may lower that for itself (`structured(max_retries=...)`): the rerank retries once, because its fallback (the computed importance order) costs almost nothing.
 - **Rate limits.** A client-side limiter keeps every run inside the provider's quotas: requests per minute, input tokens per minute, and requests per day.
   - Limits are configured per model in `llm.rate_limits`, and are required for Gemini models. Google's docs no longer publish free-tier numbers, so copy them from AI Studio (https://aistudio.google.com/rate-limit).
   - Current values for `gemini-3.5-flash-lite`: 15 RPM, 250,000 input TPM, 500 RPD.
