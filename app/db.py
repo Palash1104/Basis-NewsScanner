@@ -65,6 +65,11 @@ ADDED_COLUMNS: dict[str, dict[str, str]] = {
         "temperature": "FLOAT",
         "seed": "INTEGER",
     },
+    "runs": {
+        # Added 2026-09-21 for `newsdesk health`.
+        "llm_impact_calls": "INTEGER NOT NULL DEFAULT 0",
+        "llm_impact_declines": "INTEGER NOT NULL DEFAULT 0",
+    },
     "ticker_checks": {
         # Added in Phase 4: trading-day counting needs each exchange's time zone.
         "timezone": "VARCHAR(48)",

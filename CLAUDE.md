@@ -127,6 +127,7 @@ uv run python scripts/grouping_report.py [--refresh --lookback-hours 24] [--deta
 uv run python scripts/event_fixtures.py [story_ids...]   # live extractions -> test fixtures
 uv run newsdesk score [--rescore]              # judge due calls, print the track record
 uv run python scripts/impact_gate.py [--model summary|reasoning] [--story ID...]
+uv run newsdesk health [--days 7]              # scheduler slots, LLM budgets, layer B, rules at n>=5
 ```
 
 ## Layout
@@ -164,6 +165,9 @@ uv run python scripts/impact_gate.py [--model summary|reasoning] [--story ID...]
 - `app/delivery/format.py` Telegram HTML digest + splitting · `telegram.py` Bot API calls
 - `app/cli.py` typer commands plus `run_pipeline` / `run_digest` / `run_once` /
   `build_scheduler` (tested directly)
+- `app/schedule.py` `pipeline_hours` (shared by the scheduler and health, no CLI import)
+- `app/health.py` `newsdesk health`: slot coverage, quota-day usage, rerank fallbacks, layer
+  B's decline rate, rules at n>=5. Database only, so it can run while the scheduler runs.
 - `scripts/` one-off tools · `tests/fixtures/` synthetic feeds · `data/` DB, logs, reports (gitignored)
 - `design/` Claude Design export for the Phase 6 web UI (reference only) · `design/NOTES.md` maps
   its screens to SPEC pages and data, and lists gaps and design tokens
@@ -286,6 +290,15 @@ uv run python scripts/impact_gate.py [--model summary|reasoning] [--story ID...]
   migrated DB wouldn't get them.
 - Scheduler:
   - APScheduler 3.x `BlockingScheduler`, in `settings.timezone`.
+  - Nothing is caught up after downtime: the job store is in memory, and a cron job missed
+    while the process was stopped never runs later. Misfire grace only covers a process that
+    was running but busy or suspended: 15 min for the pipeline, 30 for a digest, 60 for
+    scoring. `coalesce` means several missed fires become one.
+  - That is safe because the pipeline recovers by itself: the next run re-fetches the whole
+    `pipeline.lookback_hours` window, `summary_pending` / `event_pending` stories go first,
+    and the digest window starts at the last digest sent without errors. Downtime longer than
+    the lookback window is what actually loses stories.
+  - `newsdesk health` is how missed slots are seen after the fact.
   - The pipeline cron hours are `pipeline_hours()`, aligned to the first digest's hour.
   - Jobs have `max_instances=1` and `coalesce`, and catch their own exceptions.
   - Settings load once at start, so restart the scheduler after editing `settings.yaml`

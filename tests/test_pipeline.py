@@ -453,6 +453,7 @@ def test_the_llm_layer_adds_calls_merges_them_and_records_disagreements(
     assert report.llm_impact_calls == 2  # capped at 2 stories a run
     assert report.llm_impacts_added == 2  # one ^CNXIT call per analyzed story
     assert report.llm_disagreements == 2
+    assert report.llm_impact_declines == 0  # this fake answers with impacts every time
     assert any("MADEUP.NS" in note and "invalid symbol" in note for note in report.llm_notes)
 
     with db() as session:
@@ -478,6 +479,11 @@ def test_the_llm_layer_adds_calls_merges_them_and_records_disagreements(
         disagreements = session.scalars(select(RuleDisagreementRow)).all()
         assert {d.rule_id for d in disagreements} == {"us_tariffs_on_india"}
         assert "not in force yet" in disagreements[0].reason
+        # `newsdesk health` reads the decline rate from the run, since a declined call
+        # writes no impacts to count.
+        run = session.get(Run, report.run_id)
+        assert run is not None
+        assert (run.llm_impact_calls, run.llm_impact_declines) == (2, 0)
         assert disagreements[0].model == settings.llm.summary_model
         assert (disagreements[0].temperature, disagreements[0].seed) == (
             temperature,

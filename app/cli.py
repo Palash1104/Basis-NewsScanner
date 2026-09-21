@@ -45,6 +45,8 @@ from app.config import (
 from app.db import init_db, make_engine, make_session_factory
 from app.delivery.format import digest_item, format_digest, telegram_length
 from app.delivery.telegram import TelegramError, send_messages
+from app.health import DEFAULT_DAYS as HEALTH_DAYS
+from app.health import health_lines
 from app.llm.client import (
     LLMClient,
     LLMConfigError,
@@ -96,6 +98,7 @@ from app.pipeline.scoring import (
     unpriced_impacts,
 )
 from app.pipeline.summarize import summarize_stories
+from app.schedule import pipeline_hours
 
 log = logging.getLogger("newsdesk")
 
@@ -145,6 +148,7 @@ class PipelineReport:
     impacts_created: int = 0
     reranked: int = 0  # stories the reasoning model reordered
     llm_impact_calls: int = 0
+    llm_impact_declines: int = 0  # calls where the model saw nothing worth calling
     llm_impacts_added: int = 0  # calls the playbook didn't have
     llm_disagreements: int = 0
     # Invented symbols, capped confidences and anything else layer B had thrown out.
@@ -404,6 +408,7 @@ def run_pipeline(
                             model_calls = checked.impacts
                             disagreements = checked.disagreements
                             report.llm_impact_calls += 1
+                            report.llm_impact_declines += checked.no_clear_impact
                             report.llm_notes += [
                                 f"story {story_id}: {note}" for note in checked.dropped
                             ]
@@ -489,6 +494,8 @@ def run_pipeline(
             run.stories_processed = report.summarized
             run.input_tokens = report.input_tokens
             run.output_tokens = report.output_tokens
+            run.llm_impact_calls = report.llm_impact_calls
+            run.llm_impact_declines = report.llm_impact_declines
             run.errors = report.errors
             session.commit()
     return report
@@ -792,7 +799,8 @@ def run_once(settings: Settings, session_factory: sessionmaker[Session]) -> list
             else ""
         ),
         f"impacts: {report.impacts_created} from {report.stories_analyzed} analyzed "
-        f"({report.llm_impact_calls} LLM calls, {report.llm_impacts_added} added by the model, "
+        f"({report.llm_impact_calls} LLM calls, {report.llm_impact_declines} declined, "
+        f"{report.llm_impacts_added} added by the model, "
         f"{report.llm_disagreements} rule disagreements) "
         + (
             "stories (" + ", ".join(f"{rule} {n}" for rule, n in report.impact_rules.items()) + ")"
@@ -994,6 +1002,20 @@ def score(
             typer.echo(line)
 
 
+@app.command()
+def health(
+    days: Annotated[
+        int, typer.Option("--days", min=1, help="How many days back to report on.")
+    ] = HEALTH_DAYS,
+) -> None:
+    """Whether the scheduler is keeping up, what the LLM layers cost, and which rules have
+    enough judged calls to mean anything. Reads the database only."""
+    settings, session_factory = _bootstrap()
+    with session_factory() as session:
+        for line in health_lines(session, settings, utcnow(), days):
+            typer.echo(line)
+
+
 # ---------------------------------------------------------------- tickers
 
 
@@ -1075,13 +1097,6 @@ def validate_tickers() -> None:
 
 
 # ---------------------------------------------------------------- scheduler
-
-
-def pipeline_hours(every_hours: int, digest_times: Sequence[str]) -> list[int]:
-    """Hours (local time) to run the pipeline: every `every_hours`, lined up with the first
-    digest's hour so a run starts in the same hour as the digest."""
-    anchor = int(digest_times[0].split(":")[0]) % every_hours if digest_times else 0
-    return list(range(anchor, 24, every_hours))
 
 
 def build_scheduler(

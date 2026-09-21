@@ -98,6 +98,11 @@ def pending_stories(session: Session, settings: Settings, now: datetime) -> list
     )
 
 
+# What a run records when the rerank failed and the computed order was kept. `newsdesk
+# health` counts these, so the text is a constant rather than a string written twice.
+RERANK_FALLBACK_NOTE = "rerank skipped, keeping the importance order"
+
+
 def rerank_stories(
     llm: "LLMClient", stories: Sequence[Story], settings: Settings, limit: int
 ) -> tuple[list[Story], str | None]:
@@ -127,7 +132,7 @@ def rerank_stories(
             purpose=f"rerank {len(candidates)} stories",
         )
     except LLMError as exc:
-        return list(stories), f"rerank skipped, keeping the importance order: {exc}"
+        return list(stories), f"{RERANK_FALLBACK_NOTE}: {exc}"
 
     by_id = {story.id: story for story in candidates}
     ordered: list[Story] = []

@@ -257,6 +257,11 @@ class Run(Base):
     input_tokens: Mapped[int] = mapped_column(Integer, default=0)
     output_tokens: Mapped[int] = mapped_column(Integer, default=0)
     errors: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
+    # Layer B's calls and how many of them declined (`no_clear_impact`). Not in SPEC section 6:
+    # `newsdesk health` needs the decline rate, and it can't be derived from the impacts, which
+    # a declined call doesn't write.
+    llm_impact_calls: Mapped[int] = mapped_column(Integer, default=0)
+    llm_impact_declines: Mapped[int] = mapped_column(Integer, default=0)
 
 
 class LLMDailyUsage(Base):

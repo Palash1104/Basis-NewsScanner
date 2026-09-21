@@ -710,10 +710,19 @@ newsdesk digest [--send|--dry-run]
 newsdesk score                # score all due impacts (idempotent)
 newsdesk validate-tickers
 newsdesk scheduler            # APScheduler: run every schedule.pipeline_every_hours, digests at configured times, score daily (Phase 4)
+newsdesk health [--days 7]    # scheduler slots kept, LLM usage against the budgets, rerank fallbacks, layer B decline rate, rules at n>=5
 newsdesk serve                # Phase 6 web UI
 ```
 
 Document equivalent cron lines in the README.
+
+**`newsdesk health`** (added 2026-09-21) answers "is the scheduler doing its job": it reads the database only, so it is safe to run while the scheduler is running.
+
+- **Pipeline slots.** Every slot of the last N days, and whether a run covered it. A slot is covered by any pipeline run started between it and the next slot, so a manual `newsdesk run` counts. A slot less than 15 minutes old is "due now", not missed: that is the scheduler's own misfire grace.
+- **Missed slots are expected after downtime.** The scheduler has no persistent job store, and cron jobs missed while the process was stopped do not run later (14, misfire grace). The pipeline is written to recover on its own instead: the lookback window, `summary_pending`, `event_pending` and the digest window all mean the next run picks up what the missed one would have done, as long as it happens inside `pipeline.lookback_hours`.
+- **LLM requests per quota day**, per model, against `requests_per_day_budget` and `requests_per_day`. Days past the budget are marked, not flagged as errors: the budget stops new work, and retries may use the rest of the quota.
+- **Rerank fallbacks**, counted from `runs.errors` (the note is a constant in `app/pipeline/rank.py`), and **layer B's decline rate**, from `runs.llm_impact_calls` / `runs.llm_impact_declines`. Those two columns exist because a declined call writes no impacts and so can't be counted afterwards; runs from before they were added report zero.
+- **Rules at n >= `min_samples_to_show_rate`**: the track-record rows whose hit rate is worth reading.
 
 ---
 

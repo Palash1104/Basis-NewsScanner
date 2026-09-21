@@ -54,6 +54,7 @@ but skips summaries and records why. The digest only includes summarized stories
 | `uv run python scripts/verify_feeds.py [--include-disabled]` | Check every feed responds and has recent entries. |
 | `uv run newsdesk score` | Judge every call whose horizon is complete and print the track record. Safe to re-run: scores are written once. |
 | `uv run newsdesk validate-tickers` | Check every symbol in `config/assets.yaml` has recent prices on Yahoo (writes `data/ticker_report.md`). |
+| `uv run newsdesk health [--days 7]` | Whether the scheduler kept its slots, what the LLM layers used against their budgets, and which rules have enough judged calls to mean anything. Reads the database only, so it is safe to run while the scheduler is running. |
 | `uv run python scripts/embedding_report.py [--refresh]` | Compare embedding grouping thresholds on real samples and the regression fixtures (writes `data/embedding_report.md`). |
 | `uv run python scripts/regroup.py [--dry-run]` | Regroup every stored article with embeddings (no LLM calls). Changed stories that had a summary become `needs_resummary`. |
 | `uv run python scripts/grouping_report.py --refresh` | The old title-matcher threshold report (the title matcher is now only a fallback). |
@@ -79,6 +80,22 @@ CRON_TZ=Asia/Kolkata
 convert the times to the machine's time zone (07:30 IST is 02:00 UTC). On Windows, create two
 Task Scheduler tasks running `uv run newsdesk run` and `uv run newsdesk digest --send`, with
 the project folder as the start directory.
+
+### Sleep, shutdown and missed runs
+
+The scheduler holds its jobs in memory and does not catch up on what it missed:
+
+- **The laptop sleeps briefly.** A job whose time passed still runs when the machine wakes, as
+  long as it wakes inside the misfire grace: 15 minutes for a pipeline run, 30 for a digest, 60
+  for scoring. Several missed fires collapse into one run (`coalesce`).
+- **The laptop sleeps longer, or the process is stopped or restarted.** Those slots are skipped,
+  and nothing runs until the next scheduled time. Start the scheduler again after a restart; it
+  does not start itself.
+- **Skipped slots rarely lose stories.** The next run re-fetches the whole
+  `pipeline.lookback_hours` window (12 hours), summaries and events skipped for quota are
+  carried over, and the digest covers everything summarized since the last digest that was sent
+  without errors. Downtime longer than the lookback window is what actually loses stories.
+- `uv run newsdesk health` lists the slots that were missed.
 
 ## Configuration
 
