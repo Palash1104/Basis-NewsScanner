@@ -1,0 +1,87 @@
+{# The story list, swapped on its own when a filter, the search box or the 1D/1W/1M control
+   changes. Everything outside it (the masthead, the strip) stays put. #}
+<div id="feed">
+  {% if query %}
+    <p class="feed-note">
+      {{ stories | length }} result{{ "" if stories | length == 1 else "s" }} for
+      <b>{{ query }}</b>{% if not stories %} — nothing matched{% endif %}, among summarized
+      stories. <a href="/">Clear</a>
+    </p>
+  {% elif not stories %}
+    <p class="feed-note">
+      No summarized stories in the last {{ hours }} hours.
+      {% if filtered %}<a href="/">Clear the filters</a>.{% endif %}
+    </p>
+  {% endif %}
+
+  {% for item in stories %}
+    {% set story = item.story %}
+    <article class="story">
+      <div class="story-meta">
+        {% if story.category %}<span class="kicker kicker-accent">{{ story.category }}</span>{% endif %}
+        <span class="meta-line">{{ story.first_seen_at | ist }}</span>
+        {% if story.regions %}
+          <span class="meta-line">{{ story.regions | join(" · ") }}</span>
+        {% endif %}
+        <span class="meta-line">{{ item.sources | length }} source{{ "" if item.sources | length == 1 else "s" }}</span>
+      </div>
+
+      <div class="story-body">
+        <h2 class="story-headline">{{ story.headline }}</h2>
+
+        {% if story.summary %}
+          <div class="note"><p>{{ story.summary }}</p></div>
+        {% endif %}
+
+        {% if story.sources_disagree and story.disagreement_note %}
+          <p class="story-disagree"><b>Sources disagree:</b> {{ story.disagreement_note }}</p>
+        {% endif %}
+
+        <div class="section-label">
+          <span class="kicker">Assets affected</span><span class="line"></span>
+        </div>
+
+        {% if item.shown %}
+          <div class="chips">
+            {% for call in item.shown %}{% include "_chip.html" %}{% endfor %}
+          </div>
+          {% if item.calls.extra %}
+            <p class="story-more">
+              +{{ item.calls.extra | length }} more:
+              {% for call in item.calls.extra %}{{ call.name }}{{ ", " if not loop.last }}{% endfor %}
+            </p>
+          {% endif %}
+        {% else %}
+          <p class="story-none">No market impact identified.</p>
+        {% endif %}
+
+        {% if item.track_record %}
+          <p class="story-track">{{ item.track_record }}</p>
+        {% endif %}
+
+        {% if item.sources %}
+          <p class="story-sources">
+            Sources:
+            {% for source in item.sources %}
+              <a href="{{ source.url }}" rel="noreferrer noopener" target="_blank">{{ source.name }}</a>{{ " · " if not loop.last }}
+            {% endfor %}
+          </p>
+        {% endif %}
+      </div>
+    </article>
+  {% endfor %}
+
+  <div class="feed-foot">
+    {% if more %}
+      <button type="button" class="btn btn-secondary"
+        hx-get="/" hx-target="#feed" hx-swap="outerHTML" hx-push-url="true"
+        hx-include="[name='q'],[name='region'],[name='category'],[name='range']"
+        hx-vals='{"offset": {{ offset + page_size }}}'>Earlier stories</button>
+    {% elif offset %}
+      <a class="btn btn-secondary" href="/">Back to the latest</a>
+    {% endif %}
+    <span class="feed-stamp">
+      Updated {{ updated }}{% if next_digest %} · next brief {{ next_digest }}{% endif %}
+    </span>
+  </div>
+</div>

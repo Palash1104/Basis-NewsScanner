@@ -1,0 +1,303 @@
+"""Everything the pages read, in one place, so no page grows a query of its own.
+
+Every function here is read-only and touches nothing but the database: prices come from
+`price_cache`, never from Yahoo, so a page can neither race the pipeline's price step nor
+spend its rate limit.
+"""
+
+import re
+from collections.abc import Sequence
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta
+
+from sqlalchemy import func, select, text
+from sqlalchemy.orm import Session, selectinload
+
+from app.config import AssetConfig, Settings
+from app.db import SEARCH_TABLE
+from app.delivery.format import SourceLink, pick_sources
+from app.models import Article, PriceBar, Story
+from app.pipeline.prices import DAILY, INTRADAY, move_labels
+from app.pipeline.scoring import TrackRow, story_track_line
+from app.presentation import AssetCall, StoryCalls, story_calls
+
+# How far back the feed looks by default, and how many stories a page holds. Two days rather
+# than one: the pipeline runs eight times a day, but a day with a long gap (a laptop asleep,
+# see `newsdesk health`) would otherwise leave the page nearly empty. The window is printed
+# on the page, so it is never guessed at.
+FEED_HOURS = 48
+PAGE_SIZE = 12
+# The digest shows at most this many assets per story; the feed follows it.
+MAX_CALLS_PER_STORY = 6
+
+SUMMARIZED = ("summarized", "analyzed")
+
+
+@dataclass(frozen=True)
+class Series:
+    """One asset's recent closes, for a sparkline. Empty when nothing is cached."""
+
+    symbol: str
+    closes: tuple[float, ...] = ()
+    rose: bool = True
+
+    @property
+    def points(self) -> bool:
+        return len(self.closes) > 1
+
+
+@dataclass
+class FeedStory:
+    """A story as the feed shows it."""
+
+    story: Story
+    calls: StoryCalls
+    sources: list[SourceLink] = field(default_factory=list)
+    track_record: str | None = None
+
+    @property
+    def shown(self) -> list[AssetCall]:
+        return self.calls.shown
+
+
+# ---------------------------------------------------------------- search
+
+
+def search_ready(session: Session) -> bool:
+    """Whether the index exists. It is built by `newsdesk run`, never by the web app."""
+    found = session.execute(
+        text("SELECT 1 FROM sqlite_master WHERE type='table' AND name=:name"),
+        {"name": SEARCH_TABLE},
+    ).first()
+    return found is not None
+
+
+def _match_expression(query: str) -> str | None:
+    """Turn what someone typed into an FTS5 query.
+
+    Each word is quoted, so punctuation and FTS5's own operators (AND, NEAR, *, ") can't
+    break the query or mean something the reader didn't ask for. The last word matches as a
+    prefix, which is what makes search-as-you-type feel right.
+    """
+    words = re.findall(r"\w+", query, flags=re.UNICODE)
+    if not words:
+        return None
+    quoted = [f'"{word}"' for word in words[:-1]]
+    quoted.append(f'"{words[-1]}"*')
+    return " ".join(quoted)
+
+
+def search_story_ids(session: Session, query: str, limit: int = 200) -> list[int]:
+    """Story ids matching `query`, best first. Empty when nothing matches."""
+    expression = _match_expression(query)
+    if expression is None or not search_ready(session):
+        return []
+    rows = session.execute(
+        text(f"SELECT rowid FROM {SEARCH_TABLE} WHERE {SEARCH_TABLE} MATCH :q ORDER BY rank"),
+        {"q": expression},
+    ).fetchall()
+    return [row[0] for row in rows[:limit]]
+
+
+# ---------------------------------------------------------------- the feed
+
+
+def feed_page(
+    session: Session,
+    *,
+    now: datetime,
+    hours: int = FEED_HOURS,
+    region: str | None = None,
+    category: str | None = None,
+    query: str = "",
+    offset: int = 0,
+    limit: int = PAGE_SIZE,
+) -> tuple[list[Story], bool]:
+    """Summarized stories, most important first (SPEC 7.4), with one page of results.
+
+    Returns the page and whether older stories remain. A search looks through everything
+    stored, not just the window: someone searching has a story in mind.
+    """
+    statement = (
+        select(Story)
+        .where(Story.status.in_(SUMMARIZED))
+        .options(selectinload(Story.articles), selectinload(Story.impacts))
+    )
+    if query:
+        matches = search_story_ids(session, query)
+        if not matches:
+            return [], False
+        statement = statement.where(Story.id.in_(matches))
+    else:
+        # Either the story broke inside the window, or its summary was written inside it.
+        # The reserved slots often summarize Indian stories days after they broke, and
+        # windowing on first_seen_at alone would hide exactly those.
+        cutoff = now - timedelta(hours=hours)
+        statement = statement.where(
+            (Story.first_seen_at >= cutoff) | (Story.updated_at >= cutoff)
+        )
+    if category:
+        statement = statement.where(Story.category == category)
+
+    statement = statement.order_by(Story.importance_score.desc(), Story.first_seen_at.desc())
+    # Regions are a JSON list, and one window holds few enough stories to filter in Python.
+    stories = list(session.scalars(statement))
+    if region:
+        stories = [story for story in stories if region in (story.regions or [])]
+    page = stories[offset : offset + limit]
+    return page, len(stories) > offset + limit
+
+
+def categories_in_use(session: Session) -> list[str]:
+    """The categories that actually appear, so the filter can't offer an empty result."""
+    rows = session.scalars(
+        select(Story.category)
+        .where(Story.status.in_(SUMMARIZED), Story.category.is_not(None))
+        .distinct()
+        .order_by(Story.category)
+    )
+    return [row for row in rows if row]
+
+
+def feed_stories(
+    session: Session,
+    stories: Sequence[Story],
+    assets: dict[str, AssetConfig],
+    settings: Settings,
+    now: datetime,
+    rules: Sequence[TrackRow],
+) -> list[FeedStory]:
+    """Attach to each story what the digest would say about it, decided the same way."""
+    impacts = [impact for story in stories for impact in story.impacts]
+    labels = move_labels(session, impacts, assets, settings, now)
+    names = {asset.symbol: asset.display_name for asset in assets.values()}
+    minimum = settings.scoring.min_samples_to_show_rate
+    return [
+        FeedStory(
+            story=story,
+            calls=story_calls(story.impacts, assets, MAX_CALLS_PER_STORY, labels),
+            sources=pick_sources(story.articles),
+            track_record=story_track_line(story, rules, minimum, names),
+        )
+        for story in stories
+    ]
+
+
+def news_article_count(story: Story) -> int:
+    return sum(1 for article in story.articles if not article.non_news)
+
+
+# ---------------------------------------------------------------- sparklines
+
+
+# What each window of the 1D/1W/1M control reads. Hourly bars only exist from the day an
+# asset was first called, and daily history is about two months, so 1M is the longest
+# window the cache can honestly fill.
+WINDOWS: dict[str, tuple[str, timedelta]] = {
+    "1d": (INTRADAY, timedelta(days=1)),
+    "1w": (INTRADAY, timedelta(days=7)),
+    "1m": (DAILY, timedelta(days=31)),
+}
+DEFAULT_WINDOW = "1w"
+
+
+def series_for(
+    session: Session, symbols: Sequence[str], window: str, now: datetime
+) -> dict[str, Series]:
+    """Closes per symbol for the chosen window, from the cache alone.
+
+    An asset that has never been called has no bars, and gets an empty series: the chip then
+    shows no sparkline rather than a made-up one.
+    """
+    interval, span = WINDOWS.get(window, WINDOWS[DEFAULT_WINDOW])
+    wanted = sorted(set(symbols))
+    if not wanted:
+        return {}
+    rows = session.execute(
+        select(PriceBar.symbol, PriceBar.close, PriceBar.volume)
+        .where(
+            PriceBar.symbol.in_(wanted),
+            PriceBar.interval == interval,
+            PriceBar.ts >= now - span,
+        )
+        .order_by(PriceBar.symbol, PriceBar.ts)
+    ).all()
+
+    closes: dict[str, list[float]] = {symbol: [] for symbol in wanted}
+    for symbol, close, volume in rows:
+        # Exchange holidays leave a zero-volume filler bar on .NS stocks (CLAUDE.md); it is
+        # not a session, and it would flatten the line.
+        if interval == DAILY and volume == 0 and closes[symbol] and close == closes[symbol][-1]:
+            continue
+        closes[symbol].append(close)
+    return {
+        symbol: Series(
+            symbol=symbol,
+            closes=tuple(values),
+            rose=len(values) < 2 or values[-1] >= values[0],
+        )
+        for symbol, values in closes.items()
+    }
+
+
+# The mockup draws 16 points in a 68px box. A week of hourly bars is over a hundred, which
+# turns the same box into noise, so a long series is sampled down to about that many.
+SPARK_MAX_POINTS = 24
+
+
+def _sampled(values: Sequence[float], limit: int = SPARK_MAX_POINTS) -> list[float]:
+    """Evenly spaced samples, always keeping the first and last close."""
+    if len(values) <= limit:
+        return list(values)
+    last = len(values) - 1
+    picks = {round(index * last / (limit - 1)) for index in range(limit)}
+    return [values[index] for index in sorted(picks)]
+
+
+def sparkline_points(series: Series, width: int, height: int, pad: int) -> str:
+    """An SVG polyline, scaled to the box, as the mockup's `poly()` does."""
+    values = _sampled(series.closes)
+    if len(values) < 2:
+        return ""
+    low, high = min(values), max(values)
+    span = (high - low) or 1
+    last = len(values) - 1
+    points = []
+    for index, value in enumerate(values):
+        x = (index / last) * width
+        y = height - pad - ((value - low) / span) * (height - pad * 2)
+        points.append(f"{x:.1f},{y:.1f}")
+    return " ".join(points)
+
+
+# ---------------------------------------------------------------- the strip and the footer
+
+
+def last_run_finish(session: Session, kind: str = "pipeline") -> datetime | None:
+    from app.models import Run
+
+    return session.scalars(
+        select(Run.finished_at)
+        .where(Run.kind == kind, Run.finished_at.is_not(None))
+        .order_by(Run.finished_at.desc())
+        .limit(1)
+    ).first()
+
+
+def story_count(session: Session, now: datetime, hours: int = FEED_HOURS) -> int:
+    cutoff = now - timedelta(hours=hours)
+    return (
+        session.scalar(
+            select(func.count())
+            .select_from(Story)
+            .where(
+                Story.status.in_(SUMMARIZED),
+                (Story.first_seen_at >= cutoff) | (Story.updated_at >= cutoff),
+            )
+        )
+        or 0
+    )
+
+
+def article_sources(story: Story) -> list[Article]:
+    return [article for article in story.articles if not article.non_news]

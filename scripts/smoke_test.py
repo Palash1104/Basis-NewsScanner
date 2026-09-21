@@ -136,7 +136,7 @@ def main() -> int:
                 if not chat_id:
                     outcomes["telegram"] = "FAIL (TELEGRAM_CHAT_ID not set)"
                 else:
-                    text = "<b>Newsdesk smoke test</b>\nTelegram delivery works."
+                    text = "<b>BASIS smoke test</b>\nTelegram delivery works."
                     asyncio.run(send_messages([text], token, chat_id, settings.http))
                     print("Telegram test message sent.")
         except TelegramError as exc:

@@ -1,4 +1,4 @@
-# Newsdesk: Personal News + Market Impact App — Build Spec
+# BASIS: Personal News + Market Impact App — Build Spec
 
 You are building a personal, single-user app for me. It fetches important news from around the world (focus: US, India, global), explains each story in 2–3 simple sentences, and flags which commodities, currencies, indices and stocks the story could move, with the direction, the reasoning, a live "has it already moved?" check, and a track record showing how often each type of call has been right.
 
@@ -279,6 +279,8 @@ importance = w_sources * log(1 + distinct_independent_sources)
 ```
 
 Select the top `max_stories_per_run`.
+
+**Reserved slots (added 2026-09-21).** `pipeline.reserved_slots` keeps part of `max_stories_per_run` for stories only one region's outlets carry: `{IN: 5}` means 15 general + 5 India-only. Measured before adding it: 0 of 524 India-only stories were summarized in 48 hours, because their importance tops out at 3.60 against a cutoff of 4.69 - a domestic story is carried by 3-5 outlets in one region, while the cutoff is set by international stories with 8-10 outlets across three. The region is the source region, not the summary's `regions` tag. `reserved_candidate_pool` (10) puts them in front of the rerank; a slot is only given to a story whose URL section is known hard news (not sport, entertainment, lifestyle or filler), which is what protects the slots when the rerank fails; and unused slots return to the general list, so the run size never changes.
 
 **Phase 5 addition:** LLM rerank of the top ~40 with the reasoning model, prompt: rank by real-world significance for a reader following the US, India, and global affairs and markets; demote celebrity, sports, and viral stories that are widely covered but not significant. Return ordered story IDs as JSON.
 

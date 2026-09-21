@@ -63,6 +63,11 @@ pipeline:
   lookback_hours: 12
   story_attach_window_hours: 36
   max_stories_per_run: 20
+  # 15 general + 5 for stories only Indian outlets carry. Measured 2026-09-21: 0 of 524
+  # India-only stories were summarized in 48h, because their importance tops out at 3.60
+  # against a cutoff of 4.69. Inside max_stories_per_run, so it costs no LLM calls.
+  reserved_slots: { IN: 5 }
+  reserved_candidate_pool: 10
   max_articles_per_story_for_llm: 5
   # The reasoning model reorders this many top stories by real-world significance
   # before summarizing (SPEC 7.4). It decides which stories are summarized and which

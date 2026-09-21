@@ -134,8 +134,26 @@ class PipelineSettings(_Strict):
     rerank_candidates: int = Field(default=40, ge=0)
     story_attach_window_hours: int = Field(gt=0)
     max_stories_per_run: int = Field(gt=0)
+    # Slots inside max_stories_per_run kept for stories carried only by one region's outlets
+    # (SPEC 7.4). Without this, a domestic Indian story cannot reach the summarizer: it is
+    # covered by 3-5 Indian outlets and one region, while the cutoff is set by international
+    # stories with 8-10 outlets across three regions.
+    reserved_slots: dict[Region, int] = Field(default_factory=dict)
+    # How many of a region's stories join the rerank's candidates, so the model can order
+    # them before the slots are filled.
+    reserved_candidate_pool: int = Field(default=10, ge=0)
     max_articles_per_story_for_llm: int = Field(gt=0)
     snippet_max_chars: int = Field(default=500, gt=0)
+
+    @model_validator(mode="after")
+    def _reserved_fit_in_the_run(self) -> "PipelineSettings":
+        total = sum(self.reserved_slots.values())
+        if total > self.max_stories_per_run:
+            raise ValueError(
+                f"reserved_slots total {total} exceeds max_stories_per_run "
+                f"{self.max_stories_per_run}"
+            )
+        return self
 
 
 class DedupeSettings(_Strict):

@@ -96,7 +96,7 @@ def test_digest_splits_between_stories_under_limit() -> None:
 
     assert len(messages) > 1
     assert all(telegram_length(m) <= 700 for m in messages)
-    assert messages[0].startswith("<b>Newsdesk digest</b> · Wed 16 Sep 2026, 17:30 IST · 8 stories")
+    assert messages[0].startswith("<b>BASIS digest</b> · Wed 16 Sep 2026, 17:30 IST · 8 stories")
     for n in range(1, 9):  # every story whole, in exactly one message
         holders = [m for m in messages if f"Headline number {n}</b>" in m]
         assert len(holders) == 1 and f'href="https://example.com/{n}"' in holders[0]

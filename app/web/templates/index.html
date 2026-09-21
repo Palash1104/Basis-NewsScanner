@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block title %}BASIS · what moved, and why{% endblock %}
+
+{% block tools %}
+  <input class="input search" type="search" name="q" value="{{ query }}"
+    placeholder="Search a story or an asset" aria-label="Search stories"
+    hx-get="/" hx-target="#feed" hx-swap="outerHTML" hx-push-url="true"
+    hx-trigger="input changed delay:300ms, search"
+    hx-include="[name='region'],[name='category'],[name='range']" />
+{% endblock %}
+
+{% block content %}
+  <div class="screen-head">
+    <div>
+      <h1>What moved, and why</h1>
+      <p class="sub">
+        {{ today }} · {{ story_count }} {{ "story" if story_count == 1 else "stories" }} ·
+        last {{ hours }} hours
+      </p>
+    </div>
+    <div class="seg" role="group" aria-label="Sparkline window">
+      {% for key, label in ranges %}
+        <label class="seg-opt">
+          <input type="radio" name="range" value="{{ key }}"
+            {% if key == range %}checked{% endif %}
+            hx-get="/" hx-target="#feed" hx-swap="outerHTML" hx-push-url="true"
+            hx-include="[name='q'],[name='region'],[name='category']" />{{ label }}
+        </label>
+      {% endfor %}
+    </div>
+  </div>
+
+  <div class="filters">
+    <div class="seg" role="group" aria-label="Region">
+      {% for key, label in regions %}
+        <label class="seg-opt">
+          <input type="radio" name="region" value="{{ key }}"
+            {% if key == region %}checked{% endif %}
+            hx-get="/" hx-target="#feed" hx-swap="outerHTML" hx-push-url="true"
+            hx-include="[name='q'],[name='category'],[name='range']" />{{ label }}
+        </label>
+      {% endfor %}
+    </div>
+    <select class="input category" name="category" aria-label="Category"
+      hx-get="/" hx-target="#feed" hx-swap="outerHTML" hx-push-url="true"
+      hx-include="[name='q'],[name='region'],[name='range']">
+      <option value="">Every category</option>
+      {% for name in categories %}
+        <option value="{{ name }}" {% if name == category %}selected{% endif %}>{{ name }}</option>
+      {% endfor %}
+    </select>
+  </div>
+
+  {% include "_feed.html" %}
+{% endblock %}

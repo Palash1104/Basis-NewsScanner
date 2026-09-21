@@ -1,8 +1,15 @@
-# Newsdesk
+# BASIS
 
 Personal news digest: fetch world/US/India news, group into stories, summarize, flag market
 impact. Full spec in `SPEC.md`; work proceeds one phase at a time (section 13) with approval
 between phases.
+
+**The product is BASIS; the internal name stays `newsdesk`** (user, 2026-09-21). BASIS appears
+wherever a person sees it: the web header and page titles, the Telegram digest header, the
+`serve` and `health` output, and the README and SPEC headings. Everything else keeps
+`newsdesk`: the CLI command, the Python package, `data/newsdesk.db`, the log files, the
+scheduled task names and folder, and the `newsdesk-theme` storage key. Renaming those would
+break a running install for no gain.
 
 ## Status
 
@@ -104,6 +111,9 @@ Open follow-ups (not Phase 1 criteria):
   centroids or digest links, but it appears in that story's article list.
 - The shared minute window only sees calls made through this app's database. Calls made with
   the same key elsewhere (AI Studio, another machine) can still cause a 429, which is retried.
+- The rank stage commits before the rerank's LLM call: ranking writes every story's score,
+  and holding that transaction open locked the rate limiter out of its own session
+  ("database is locked", run 24 on 2026-09-21).
 - SQLite writes: never hold a write transaction across an LLM call. The rate limiter writes
   from its own session, so an open transaction locks it out ("database is locked", twice on
   2026-09-20). Every per-story loop commits before the next call, and connections set
@@ -331,6 +341,32 @@ powershell -ExecutionPolicy Bypass -File scripts/install_tasks.ps1 [-Remove]   #
   refused, truncated or still-invalid output marks it `failed` and records the processed
   article count, so it is retried only after it gains 2+ articles or a new region.
 - Ranking: `mean(source_weight)` is over the story's articles, as written in SPEC 7.4.
+- Reserved slots (`pipeline.reserved_slots`, `{IN: 5}` since 2026-09-21):
+  - Why: in 48h, **0 of 524 India-only stories were summarized**. They top out at 3.60
+    importance against a top-20 cutoff of 4.69, because both the source count and the region
+    term are capped when only Indian outlets carry a story. Removing the region term entirely
+    moved one story, so reweighting was not the answer.
+  - The slots sit *inside* `max_stories_per_run` (15 general + 5 India), so they cost no LLM
+    calls. Unused slots go back to the general list.
+  - The region is the **source** region (`app/pipeline/sections.py` `only_from`), not the
+    summary's `regions` tag, which doesn't exist until after summarizing.
+  - `reserved_candidate_pool` (10) joins the rerank's candidates, so the model can order them
+    before the slots are filled; the rerank runs over the whole candidate list.
+  - `may_take_reserved_slot` keeps a slot away from sport, entertainment, lifestyle and viral
+    filler by reading URL **path sections**, never substrings ("sport" is inside passport,
+    "ipl" inside diplomats, "celeb" inside celebrate). Unknown sections (Google News
+    redirects, ~10% of Indian articles) are not eligible: candidates are many, slots are few.
+  - It also skips stories that don't need a summary, so a slot is never spent on a no-op.
+  - First live run (25, 2026-09-21): the rerank 503'd, so the fallback path ran, and the five
+    slots went to Sensex/Nifty, BRICS exports, the SBI strike advisory, Kerala floods and
+    Trump's India tariffs. All five were tagged `India` by the summary; no sport.
+  - **US has no reserve** (user, 2026-09-21): only 73 US-only stories in 48h, max importance
+    2.88, all single-outlet features, and 21 of 30 summarized stories already carry a `US`
+    tag. **Re-check after a week of scheduled runs** with the same analysis before deciding.
+- Daily price listings (`classify.py` `_PRICE_LISTING`): "Petrol, diesel prices today…",
+  "Gold rate today", "Check rates in Delhi, Mumbai" are non-news, like roundups. A price
+  *event* (a hike, a duty cut, a 50-month high) and a market preview ("Will Nifty extend
+  gains…") stay news. Checked against 1,097 real headlines: 2 matched, both templates.
 - Digest window: stories summarized since the start of the last digest sent without errors
   (or the lookback window if none). `--dry-run` records nothing; a failed send is recorded with
   errors and doesn't move the window.

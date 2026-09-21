@@ -2,7 +2,7 @@
 
 import math
 from collections import defaultdict
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING
@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 from app.config import Settings
 from app.models import Article, Story
 from app.pipeline.dedupe import count_independent_sources
+from app.pipeline.sections import only_from, regional_candidates
 
 if TYPE_CHECKING:  # a type hint only: rank.py must not import the LLM client
     from app.llm.client import LLMClient
@@ -159,3 +160,60 @@ def rerank_stories(
             "those kept their importance order"
         )
     return ordered + rest, note
+
+
+def reserved_pool(
+    session: Session, settings: Settings, now: datetime, exclude: Sequence[Story] = ()
+) -> list[Story]:
+    """Stories from a single region's outlets, to put in front of the rerank.
+
+    They never reach the top 40 on importance alone, so without this the model never sees
+    them and the reserved slots would be filled from the computed order only.
+    """
+    pool = settings.pipeline.reserved_candidate_pool
+    if not settings.pipeline.reserved_slots or not pool:
+        return []
+    cutoff = now - timedelta(hours=settings.pipeline.lookback_hours)
+    recent = select(Article.story_id).where(
+        Article.story_id.is_not(None), Article.published_at >= cutoff
+    )
+    stories = session.scalars(select(Story).where(Story.id.in_(recent))).all()
+    seen = {story.id for story in exclude}
+    picked: list[Story] = []
+    for region in settings.pipeline.reserved_slots:
+        for story in regional_candidates(stories, region, pool):
+            if story.id not in seen:
+                seen.add(story.id)
+                picked.append(story)
+    return picked
+
+
+def select_with_reserved(
+    ordered: Sequence[Story],
+    settings: Settings,
+    eligible: Callable[[Story], bool] | None = None,
+) -> list[Story]:
+    """Pick this run's stories from `ordered`, keeping `reserved_slots` for single-region ones.
+
+    The reserved picks are taken in the order given (the rerank's, or importance when it
+    failed), and only from stories `eligible` accepts: that is what keeps a slot away from
+    an Asian Games final. Slots nobody qualifies for go back to the general list, and the
+    result keeps `ordered`'s order, so the digest still reads most important first.
+    """
+    total = settings.pipeline.max_stories_per_run
+    chosen: set[int] = set()
+    for region, count in settings.pipeline.reserved_slots.items():
+        for story in ordered:
+            if len(chosen) >= total or count <= 0:
+                break
+            if story.id in chosen or not only_from(story, region):
+                continue
+            if eligible is not None and not eligible(story):
+                continue
+            chosen.add(story.id)
+            count -= 1
+    for story in ordered:
+        if len(chosen) >= total:
+            break
+        chosen.add(story.id)
+    return [story for story in ordered if story.id in chosen][:total]

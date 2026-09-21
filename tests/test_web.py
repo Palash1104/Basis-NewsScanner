@@ -13,8 +13,8 @@ from app.db import (
     make_read_only_session_factory,
     make_session_factory,
 )
-from app.models import Impact, Run, Story
-from app.web import palette
+from app.models import Article, Impact, Run, Story
+from app.web import palette, queries
 from app.web.main import create_app, ticker_items
 
 NOW = datetime(2026, 9, 21, 6, 0, tzinfo=UTC)
@@ -34,11 +34,38 @@ def database(tmp_path: Path) -> Path:
             first_seen_at=NOW - timedelta(hours=3),
             updated_at=NOW - timedelta(hours=3),
             headline="Houthi attacks close the Red Sea to tankers",
-            summary="One. Two.",
+            summary="Shipping is rerouting around the Cape.",
             status="analyzed",
+            category="Geopolitics",
+            regions=["Global"],
+            importance_score=8.0,
         )
         session.add(story)
         session.flush()
+        session.add_all(
+            [
+                Article(
+                    url="https://reuters.example/red-sea",
+                    title="Tankers avoid the Red Sea",
+                    source_name="Reuters",
+                    source_region="GLOBAL",
+                    source_weight=3,
+                    published_at=NOW - timedelta(hours=3),
+                    fetched_at=NOW - timedelta(hours=3),
+                    story_id=story.id,
+                ),
+                Article(
+                    url="https://ft.example/red-sea",
+                    title="Freight rates jump",
+                    source_name="Financial Times",
+                    source_region="GLOBAL",
+                    source_weight=3,
+                    published_at=NOW - timedelta(hours=2, minutes=30),
+                    fetched_at=NOW - timedelta(hours=2, minutes=30),
+                    story_id=story.id,
+                ),
+            ]
+        )
         session.add_all(
             [
                 Impact(
@@ -67,6 +94,47 @@ def database(tmp_path: Path) -> Path:
                     created_at=NOW - timedelta(hours=2),
                 ),
             ]
+        )
+        session.add_all(
+            [
+                # One asset called both ways by different layers: "mixed signals".
+                Impact(
+                    story_id=story.id,
+                    symbol="GC=F",
+                    direction="up",
+                    mechanism="Safe-haven demand",
+                    order="first",
+                    confidence="medium",
+                    origin="playbook",
+                    rule_id="geopolitical_risk_off",
+                    conflict=True,
+                    created_at=NOW - timedelta(hours=2),
+                ),
+                Impact(
+                    story_id=story.id,
+                    symbol="GC=F",
+                    direction="down",
+                    mechanism="Higher yields",
+                    order="second",
+                    confidence="low",
+                    origin="llm",
+                    conflict=True,
+                    created_at=NOW - timedelta(hours=2),
+                ),
+            ]
+        )
+        # A story with nothing to say about markets: the common case after a decline.
+        session.add(
+            Story(
+                first_seen_at=NOW - timedelta(hours=4),
+                updated_at=NOW - timedelta(hours=4),
+                headline="Parliament debates the water treaty",
+                summary="Nothing for markets here.",
+                status="summarized",
+                category="Politics",
+                regions=["India"],
+                importance_score=1.0,
+            )
         )
         session.add(
             Run(
@@ -134,11 +202,10 @@ def test_pages_render_while_the_pipeline_holds_a_write_transaction(
 
 
 def test_the_design_page_renders_with_the_footer_and_both_themes(client: TestClient) -> None:
-    body = client.get("/").text
+    body = client.get("/design").text
     assert "Research notes, not financial advice." in body
     assert "Design foundation" in body
     assert "data-theme-toggle" in body
-    assert client.get("/design").status_code == 200
 
 
 def test_static_files_are_served_locally(client: TestClient) -> None:
@@ -235,3 +302,146 @@ def test_muted_text_is_darker_than_the_systems_own_default() -> None:
     muted = palette.blend(palette.LIGHT["text"], palette.LIGHT["bg"], palette.MUTED_ALPHA)
     assert palette.contrast(faint, palette.LIGHT["bg"]) < palette.AA_TEXT
     assert palette.contrast(muted, palette.LIGHT["bg"]) >= palette.AA_TEXT
+
+
+# ---------------------------------------------------------------- the feed
+
+
+def test_the_feed_shows_the_story_and_what_it_calls(client: TestClient) -> None:
+    body = client.get("/").text
+    assert "What moved, and why" in body  # the mockup's own page title
+    assert "Houthi attacks close the Red Sea to tankers" in body
+    assert "Shipping is rerouting around the Cape." in body
+    assert "Geopolitics" in body and "Global" in body
+    # The call, stated as the digest states it: direction, order, confidence, origin, why.
+    assert "Brent crude" in body and "+2.4%" in body and "since news" in body
+    assert "first order" in body and "playbook" in body and "shipping risk" in body
+    assert " pts" in body  # rates keep their unit here too
+
+
+def test_a_story_with_no_calls_says_so(client: TestClient) -> None:
+    """Declining is common (13 of 20 fixtures in the Phase 5 gate), so it needs words."""
+    assert "No market impact identified." in client.get("/").text
+
+
+def test_an_asset_called_both_ways_is_shown_as_mixed_signals(client: TestClient) -> None:
+    body = client.get("/").text
+    assert "mixed signals" in body
+    assert "Safe-haven demand vs Higher yields" in body
+
+
+def test_an_unpriced_call_says_it_has_no_price_yet(client: TestClient) -> None:
+    """SPEC 7.8's "price unavailable": the market may simply not have opened yet."""
+    assert "no price yet" in client.get("/").text
+
+
+def test_the_feed_links_its_sources_and_carries_the_disclaimer(client: TestClient) -> None:
+    body = client.get("/").text
+    assert "Sources:" in body
+    assert "Research notes, not financial advice." in body
+
+
+# ---------------------------------------------------------------- filters and search
+
+
+def test_htmx_gets_the_list_alone(client: TestClient) -> None:
+    fragment = client.get("/", headers={"HX-Request": "true"}).text
+    assert '<div id="feed"' in fragment
+    assert "<html" not in fragment
+
+
+def test_the_region_filter_narrows_the_feed(client: TestClient) -> None:
+    india = client.get("/", params={"region": "India"}).text
+    assert "Parliament debates the water treaty" in india
+    assert "Houthi attacks" not in india
+
+
+def test_the_category_filter_narrows_the_feed(client: TestClient) -> None:
+    body = client.get("/", params={"category": "Geopolitics"}).text
+    assert "Houthi attacks" in body and "Parliament debates" not in body
+
+
+def test_search_finds_a_story_by_a_word_in_its_headline(client: TestClient) -> None:
+    body = client.get("/", params={"q": "tankers"}).text
+    assert "Houthi attacks close the Red Sea to tankers" in body
+    assert "Parliament debates" not in body
+    assert "1 result for" in body
+
+
+def test_search_matches_a_prefix_as_you_type(client: TestClient) -> None:
+    assert "Houthi" in client.get("/", params={"q": "tank"}).text
+
+
+def test_search_that_matches_nothing_says_so(client: TestClient) -> None:
+    assert "nothing matched" in client.get("/", params={"q": "zirconium"}).text
+
+
+def test_punctuation_in_a_search_cannot_break_the_query(client: TestClient) -> None:
+    """FTS5 has a query syntax of its own; what someone types is words, not an expression."""
+    for query in ['"', "AND", "red* OR", "NEAR(a b)", "()", "-", "^"]:
+        assert client.get("/", params={"q": query}).status_code == 200, query
+
+
+def test_the_search_index_is_there_for_a_database_the_pipeline_built(database: Path) -> None:
+    engine = make_read_only_engine(database)
+    with make_read_only_session_factory(engine)() as session:
+        assert queries.search_ready(session)
+        assert queries.search_story_ids(session, "tankers")
+
+
+# ---------------------------------------------------------------- sparklines
+
+
+def test_a_sparkline_is_empty_when_nothing_is_cached(database: Path) -> None:
+    """An asset that has never been called has no bars, and gets no line rather than a
+    made-up one."""
+    engine = make_read_only_engine(database)
+    with make_read_only_session_factory(engine)() as session:
+        series = queries.series_for(session, ["BZ=F"], "1w", NOW)
+    assert series["BZ=F"].closes == ()
+    assert queries.sparkline_points(series["BZ=F"], 68, 22, 2) == ""
+
+
+def test_a_long_series_is_sampled_down_to_the_mockups_density() -> None:
+    series = queries.Series("X", tuple(float(value) for value in range(500)))
+    points = queries.sparkline_points(series, 68, 22, 2).split(" ")
+    assert len(points) <= queries.SPARK_MAX_POINTS
+    assert points[0].startswith("0.0,") and points[-1].startswith("68.0,")
+
+
+def test_each_window_reads_the_interval_that_has_the_data() -> None:
+    assert queries.WINDOWS["1d"][0] == "60m"
+    assert queries.WINDOWS["1w"][0] == "60m"
+    assert queries.WINDOWS["1m"][0] == "1d"
+
+
+def test_an_unknown_window_falls_back_rather_than_failing(client: TestClient) -> None:
+    assert client.get("/", params={"range": "10y"}).status_code == 200
+
+
+def test_a_story_summarized_today_shows_even_if_it_broke_earlier(
+    database: Path, settings: Settings
+) -> None:
+    """The reserved slots summarize Indian stories days after they break; windowing on
+    first_seen_at alone would hide exactly those."""
+    engine = make_engine(database)
+    with make_session_factory(engine)() as session:
+        session.add(
+            Story(
+                first_seen_at=NOW - timedelta(days=4),
+                updated_at=NOW - timedelta(minutes=5),
+                headline="India's software exports rise 8.2%",
+                summary="Exports grew.",
+                status="summarized",
+                category="Economy & Markets",
+                regions=["India"],
+                importance_score=3.5,
+            )
+        )
+        session.commit()
+    engine.dispose()
+
+    engine = make_read_only_engine(database)
+    client = TestClient(create_app(settings, make_read_only_session_factory(engine)))
+    body = client.get("/", params={"region": "India"}).text
+    assert "software exports rise 8.2%" in body  # the apostrophe is HTML-escaped

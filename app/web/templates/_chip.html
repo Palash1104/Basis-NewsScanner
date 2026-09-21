@@ -1,0 +1,41 @@
+{# One asset the story calls, in the mockup's chip: name and unit, sparkline, move.
+   The second row carries what the digest says and the design never showed - which way the
+   call goes, how sure, whose call it is, and why. #}
+<div class="chip{% if call.conflict %} chip-conflict{% endif %}">
+  <div class="chip-head">
+    <div class="chip-id">
+      <span class="chip-name">
+        {%- if call.conflict %}<span class="arrow" title="called both ways">↕</span>
+        {%- elif call.direction == "up" %}<span class="arrow" title="called up">▲</span>
+        {%- else %}<span class="arrow" title="called down">▼</span>{% endif %}
+        {{ call.name }}
+      </span>
+      {% if units.get(call.symbol) %}<span class="chip-unit">{{ units[call.symbol] }}</span>{% endif %}
+    </div>
+    {% set series = sparklines.get(call.symbol) %}
+    {% if series and series.points %}
+      <svg class="spark" viewBox="0 0 68 22" width="68" height="22" aria-hidden="true">
+        <polyline points="{{ points(series) }}" fill="none" stroke-width="1.6"
+          stroke-linejoin="round" class="{{ 'up' if series.rose else 'down' }}" />
+      </svg>
+    {% endif %}
+    {% if call.move %}
+      <span class="chip-move {{ 'up' if call.move_up else 'down' }}">{{ call.move }}</span>
+    {% else %}
+      <span class="chip-move chip-waiting" title="no bar since the story broke">no price yet</span>
+    {% endif %}
+  </div>
+  <div class="chip-detail">
+    {% if call.conflict %}
+      <span class="tag tag-outline">mixed signals</span>
+    {% else %}
+      <span class="tag tag-neutral">{{ order_words[call.order] }}</span>
+      <span class="tag tag-neutral">{{ call.confidence }}</span>
+    {% endif %}
+    <span class="tag tag-accent">{{ call.origin_label }}</span>
+    {% if call.rule_count > 1 %}<span class="tag tag-outline">{{ call.rule_count }} rules</span>{% endif %}
+    {% if call.label %}<span class="tag tag-outline">{{ call.label }}</span>{% endif %}
+    {% if call.move %}<span class="chip-window">since news</span>{% endif %}
+    <span class="chip-why">{{ call.mechanism }}</span>
+  </div>
+</div>

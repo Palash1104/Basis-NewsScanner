@@ -268,6 +268,26 @@ def move_label(
     return "already moved" if moved_up == (direction == "up") else "moving against this call"
 
 
+def move_labels(
+    session: Session,
+    impacts: Sequence[Impact],
+    assets: dict[str, AssetConfig],
+    settings: Settings,
+    now: datetime,
+) -> dict[int, str]:
+    """ "already moved" / "moving against this call" per impact, from cached daily bars only,
+    so neither the digest nor a web page ever reaches the network to label a move."""
+    labels: dict[int, str] = {}
+    daily: dict[str, list[Bar]] = {}
+    for impact in impacts:
+        if impact.symbol not in daily:
+            daily[impact.symbol] = cached_bars(session, impact.symbol, DAILY, now - DAILY_LEAD)
+        label = label_for(impact, assets.get(impact.symbol), daily[impact.symbol], settings)
+        if label:
+            labels[impact.id] = label
+    return labels
+
+
 def format_move(asset: AssetConfig, reference_price: float, pct: float) -> str:
     """Yields in points, everything else in percent; the unit is always written out."""
     if asset.type == "rate":

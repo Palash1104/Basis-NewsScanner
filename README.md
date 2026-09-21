@@ -1,4 +1,7 @@
-# Newsdesk
+# BASIS
+
+The product is **BASIS**. Everything internal keeps the original name `newsdesk`: the CLI
+command, the Python package, the database file and the scheduled tasks.
 
 A personal news digest. It fetches important news from the US, India and the rest of the
 world, groups articles about the same event into stories, ranks them, explains the top stories
@@ -32,7 +35,7 @@ impact notes start in Phase 2.
    project at https://aistudio.google.com/rate-limit. `llm.rate_limits` in
    `config/settings.yaml` holds this project's values for `gemini-3.5-flash-lite`: 15
    requests/min, 250,000 input tokens/min and 500 requests/day, plus a daily budget of 350.
-   Newsdesk won't call Gemini without limits and never exceeds them. If your project's limits
+   BASIS won't call Gemini without limits and never exceeds them. If your project's limits
    change, update them there.
 5. Check everything works (a few feeds, one small LLM call, and the bot):
    ```

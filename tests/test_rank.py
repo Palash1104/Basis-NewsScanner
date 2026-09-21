@@ -6,7 +6,15 @@ from sqlalchemy.orm import Session
 from app.config import Settings
 from app.llm.client import LLMClient, ProviderError
 from app.models import Article, Story
-from app.pipeline.rank import RERANK_FALLBACK_NOTE, rank_stories, rerank_stories, score_articles
+from app.pipeline.rank import (
+    RERANK_FALLBACK_NOTE,
+    rank_stories,
+    rerank_stories,
+    reserved_pool,
+    score_articles,
+    select_with_reserved,
+)
+from app.pipeline.sections import may_take_reserved_slot, only_from
 from tests.conftest import NOW
 from tests.fakes import FakeProvider
 
@@ -101,11 +109,36 @@ def test_non_news_articles_add_nothing_to_importance(settings: Settings) -> None
 # ---------------------------------------------------------------- rerank
 
 
-def _story(session: Session, headline: str) -> Story:
+def _story(
+    session: Session,
+    headline: str,
+    region: str = "US",
+    url: str | None = None,
+    score: float = 0.0,
+) -> Story:
     story = Story(
-        first_seen_at=NOW, updated_at=NOW, headline=headline, source_count=2, regions=["US"]
+        first_seen_at=NOW,
+        updated_at=NOW,
+        headline=headline,
+        source_count=2,
+        regions=["US"],
+        importance_score=score,
     )
     session.add(story)
+    session.flush()
+    story.articles = [
+        Article(
+            url=url or f"https://example.com/news/world/{story.id}",
+            source_name="Outlet",
+            source_region=region,
+            source_weight=2,
+            title=headline,
+            snippet="",
+            published_at=NOW,
+            fetched_at=NOW,
+            story_id=story.id,
+        )
+    ]
     session.flush()
     return story
 
@@ -124,3 +157,156 @@ def test_a_503_rerank_is_tried_twice_then_falls_back(session: Session, settings:
     assert len(fake.calls) == 2  # the attempt and one retry, not llm.max_retries
     assert ordered == stories  # unchanged: the importance order stands
     assert note is not None and note.startswith(RERANK_FALLBACK_NOTE)
+
+
+# ---------------------------------------------------------------- reserved slots
+
+
+def _ranked(session: Session, settings: Settings) -> list[Story]:
+    """Twenty-five international stories, then ten Indian ones: the real shape of a run,
+    where India-only stories sit far below the cutoff."""
+    stories = []
+    for index in range(25):
+        story = _story(
+            session,
+            f"World story {index}",
+            region="GLOBAL",
+            url=f"https://www.reuters.com/world/story-{index}",
+            score=9.0 - index * 0.1,
+        )
+        stories.append(story)
+    for index in range(10):
+        story = _story(
+            session,
+            f"India story {index}",
+            region="IN",
+            url=f"https://www.livemint.com/market/stock-market-news/story-{index}-117.html",
+            score=3.5 - index * 0.1,
+        )
+        stories.append(story)
+    session.flush()
+    return stories
+
+
+def test_reserved_slots_go_to_single_region_stories(session: Session, settings: Settings) -> None:
+    settings.pipeline.max_stories_per_run = 20
+    settings.pipeline.reserved_slots = {"IN": 5}
+    picked = select_with_reserved(_ranked(session, settings), settings)
+
+    assert len(picked) == 20
+    indian = [story for story in picked if only_from(story, "IN")]
+    assert len(indian) == 5
+    # The five best Indian ones, and the fifteen best of the rest.
+    assert [story.headline for story in indian] == [f"India story {index}" for index in range(5)]
+    assert sum(1 for story in picked if only_from(story, "GLOBAL")) == 15
+
+
+def test_the_order_stays_the_order_it_was_given(session: Session, settings: Settings) -> None:
+    """Reserved or not, the digest still reads most important first."""
+    settings.pipeline.max_stories_per_run = 20
+    settings.pipeline.reserved_slots = {"IN": 5}
+    ordered = _ranked(session, settings)
+    picked = select_with_reserved(ordered, settings)
+    assert picked == [story for story in ordered if story in picked]
+
+
+def test_a_reserved_slot_never_goes_to_sport(session: Session, settings: Settings) -> None:
+    """The guard that matters when the rerank has failed and importance order is all we have."""
+    settings.pipeline.max_stories_per_run = 8
+    settings.pipeline.reserved_slots = {"IN": 2}
+    sport = _story(
+        session,
+        "Asian Games: India's shooters take aim",
+        region="IN",
+        url="https://economictimes.indiatimes.com/news/sports/other-sports/asian-games/articleshow/1.cms",
+        score=4.0,
+    )
+    business = _story(
+        session,
+        "India's software exports rise 8.2%",
+        region="IN",
+        url="https://www.livemint.com/market/stock-market-news/exports-117.html",
+        score=3.0,
+    )
+    world = [
+        _story(
+            session,
+            f"World {index}",
+            region="GLOBAL",
+            url=f"https://www.reuters.com/world/w{index}",
+            score=9.0 - index * 0.1,  # all of them above both Indian stories
+        )
+        for index in range(8)
+    ]
+    session.flush()
+
+    ordered = sorted([sport, business, *world], key=lambda s: -s.importance_score)
+    picked = select_with_reserved(ordered, settings, eligible=may_take_reserved_slot)
+
+    # business is below the cutoff and only gets in through the reserve; sport outranks it
+    # and still does not, because a reserved slot is not for sport. The freed slot goes
+    # back to the general list.
+    assert business in picked
+    assert sport not in picked
+    assert sum(1 for story in picked if only_from(story, "GLOBAL")) == 7
+
+
+def test_unused_reserved_slots_go_back_to_the_general_list(
+    session: Session, settings: Settings
+) -> None:
+    settings.pipeline.max_stories_per_run = 6
+    settings.pipeline.reserved_slots = {"IN": 5}
+    world = [
+        _story(
+            session,
+            f"World {index}",
+            region="GLOBAL",
+            url=f"https://www.reuters.com/world/w{index}",
+            score=9.0 - index,
+        )
+        for index in range(9)
+    ]
+    india = _story(
+        session,
+        "One Indian story",
+        region="IN",
+        url="https://www.livemint.com/market/stock-market-news/only-117.html",
+        score=1.0,
+    )
+    session.flush()
+    picked = select_with_reserved(
+        sorted([*world, india], key=lambda s: -s.importance_score), settings
+    )
+
+    assert len(picked) == 6  # not 1 + 5 empty
+    assert india in picked
+    assert sum(1 for story in picked if only_from(story, "GLOBAL")) == 5
+
+
+def test_no_reserved_slots_configured_changes_nothing(session: Session, settings: Settings) -> None:
+    settings.pipeline.max_stories_per_run = 20
+    settings.pipeline.reserved_slots = {}
+    ordered = _ranked(session, settings)
+    assert select_with_reserved(ordered, settings) == ordered[:20]
+
+
+def test_reserved_slots_cannot_exceed_the_run(session: Session, settings: Settings) -> None:
+    settings.pipeline.max_stories_per_run = 3
+    settings.pipeline.reserved_slots = {"IN": 5}
+    picked = select_with_reserved(_ranked(session, settings), settings)
+    assert len(picked) == 3
+
+
+def test_the_candidate_pool_reaches_past_the_cutoff(session: Session, settings: Settings) -> None:
+    """Indian stories rank ~50th, so the rerank would never see them without this."""
+    settings.pipeline.reserved_slots = {"IN": 5}
+    settings.pipeline.reserved_candidate_pool = 10
+    stories = _ranked(session, settings)
+    session.commit()
+    top = stories[:25]  # what rank_stories would have returned
+
+    pool = reserved_pool(session, settings, NOW, exclude=top)
+
+    assert len(pool) == 10
+    assert all(only_from(story, "IN") for story in pool)
+    assert not set(pool) & set(top)

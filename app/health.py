@@ -137,7 +137,7 @@ def health_lines(
     missed = sum(len(day.missed) for day in slots)
     pending = sum(len(day.pending) for day in slots)
 
-    lines = [f"Newsdesk health · {local_now:%d %b %Y %H:%M %Z} · last {days} days", ""]
+    lines = [f"BASIS health · {local_now:%d %b %Y %H:%M %Z} · last {days} days", ""]
     hours = pipeline_hours(every, settings.delivery.digest_times)
     lines.append(
         f"Pipeline slots (every {every}h at {_hours(hours)}; any run inside a slot counts)"

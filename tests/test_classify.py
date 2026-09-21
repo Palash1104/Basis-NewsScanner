@@ -66,3 +66,40 @@ def test_live_blogs_are_non_news(title: str) -> None:
 )
 def test_the_word_live_alone_is_not_a_live_blog(title: str) -> None:
     assert not (non_news_reason(title) or "").startswith("live blog"), title
+
+
+# ---------------------------------------------------------------- price listings
+
+
+def test_daily_price_listings_are_not_news() -> None:
+    """The same template every day with new numbers. Real headlines from Indian feeds."""
+    for title in [
+        "Petrol, diesel prices today, September 21: Check rates in Delhi, Mumbai, Bengaluru",
+        "Gold rate today: 24k vs 22k vs 20k vs 18k prices",
+        "Silver price today, September 22: rates in Mumbai and Delhi",
+        "Gold, silver rates on September 21: check the latest levels",
+    ]:
+        reason = non_news_reason(title)
+        assert reason is not None and reason.startswith("price listing"), title
+
+
+def test_a_price_event_is_still_news() -> None:
+    """A hike, a duty cut or a record high is the story, not the daily table."""
+    for title in [
+        "Bangladesh raises fuel prices by up to 17% amid global oil price surge",
+        "India's petrol pricing touches 50-month high; experts warn of further rise",
+        "Government cuts excise duty on petrol by Rs 2 a litre",
+        "After October 1, non-eKYC households get smaller LPG refills at market prices",
+        "Lib Dems use conference to set out plan to cut fuel duty",
+        "Gold prices fall Rs 1,331/10 gram, silver dips Rs 1,600/kg as Mideast tensions bite",
+    ]:
+        assert non_news_reason(title) is None, title
+
+
+def test_a_market_preview_is_still_news() -> None:
+    """These are useful in the digest, so they must not look like a price table."""
+    for title in [
+        "Will Nifty extend gains to a 4th session on Monday? US sanctions, FII flows in focus",
+        "Ahead of market: 10 things that will decide stock market action on Friday",
+    ]:
+        assert non_news_reason(title) is None, title

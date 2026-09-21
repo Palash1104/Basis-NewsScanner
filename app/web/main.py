@@ -27,7 +27,8 @@ from app.db import make_read_only_engine, make_read_only_session_factory
 from app.models import Impact, Run, utcnow
 from app.pipeline.prices import format_move
 from app.pipeline.scoring import track_record
-from app.web import palette
+from app.presentation import ORDER_WORDS
+from app.web import palette, queries
 
 log = logging.getLogger(__name__)
 
@@ -53,8 +54,13 @@ NAV = (
     {"name": "track", "label": "Track record", "href": None, "note": "step 3"},
     {"name": "assets", "label": "Assets", "href": None, "note": "step 4"},
     {"name": "runs", "label": "Runs", "href": None, "note": "step 5"},
-    {"name": "design", "label": "Design", "href": "/design", "note": ""},
 )
+# The style guide stays reachable at /design, but it is not in the design's nav, so it is not
+# in ours either (user, 2026-09-21).
+
+REGION_FILTERS = (("", "All"), ("US", "US"), ("India", "India"), ("Global", "Global"))
+RANGE_OPTIONS = (("1d", "1D"), ("1w", "1W"), ("1m", "1M"))
+SPARK_WIDTH, SPARK_HEIGHT, SPARK_PAD = 68, 22, 2
 
 
 @dataclass(frozen=True)
@@ -169,6 +175,29 @@ def sample_track_rows(session: Session, limit: int = 4) -> list[dict[str, str]]:
     return rows
 
 
+def _in_zone(value: datetime | None, settings: Settings) -> str:
+    """Times are stored UTC and shown in settings.timezone (SPEC 0)."""
+    return value.astimezone(settings.tz).strftime("%H:%M") if value else ""
+
+
+def _unit(asset: AssetConfig | None) -> str:
+    """The mockup's "LME 3M · $/t" line, from what assets.yaml actually knows."""
+    if asset is None:
+        return ""
+    return " · ".join(part for part in (asset.exchange, asset.currency) if part)
+
+
+def _next_digest(settings: Settings, now: datetime) -> str:
+    """The next time a digest goes out, for the mockup's "next brief" stamp."""
+    local = now.astimezone(settings.tz)
+    times = sorted(settings.delivery.digest_times)
+    for value in times:
+        hour, minute = (int(part) for part in value.split(":"))
+        if (local.hour, local.minute) < (hour, minute):
+            return value
+    return times[0] if times else ""
+
+
 def create_app(
     settings: Settings | None = None, session_factory: sessionmaker[Session] | None = None
 ) -> FastAPI:
@@ -178,18 +207,76 @@ def create_app(
         engine = make_read_only_engine(settings.resolve_path(settings.paths.database))
         session_factory = make_read_only_session_factory(engine)
 
-    web = FastAPI(title="Newsdesk", docs_url=None, redoc_url=None, openapi_url=None)
+    web = FastAPI(title="BASIS", docs_url=None, redoc_url=None, openapi_url=None)
     web.state.settings = settings
     web.state.session_factory = session_factory
     web.state.assets = {asset.symbol: asset for asset in load_assets()}
     web.mount("/static", StaticFiles(directory=WEB_DIR / "static"), name="static")
     templates = Jinja2Templates(directory=WEB_DIR / "templates")
+    templates.env.filters["ist"] = lambda value: _in_zone(value, settings)
 
     @web.get("/", response_class=HTMLResponse)
+    def today(
+        request: Request,
+        session: ReadSession,
+        q: str = "",
+        region: str = "",
+        category: str = "",
+        range: str = queries.DEFAULT_WINDOW,  # noqa: A002 - the query parameter's name
+        offset: int = 0,
+    ) -> HTMLResponse:
+        """The feed: today's stories, most important first, with what each one calls."""
+        now = utcnow()
+        window = range if range in queries.WINDOWS else queries.DEFAULT_WINDOW
+        assets: dict[str, AssetConfig] = request.app.state.assets
+        stories, more = queries.feed_page(
+            session,
+            now=now,
+            region=region or None,
+            category=category or None,
+            query=q,
+            offset=max(offset, 0),
+        )
+        items = queries.feed_stories(
+            session, stories, assets, settings, now, track_record(session, "rule_id")
+        )
+        symbols = [call.symbol for item in items for call in item.shown]
+        series = queries.series_for(session, symbols, window, now)
+
+        context = base_context(request, session, active="today", now=now)
+        context |= {
+            "stories": items,
+            "more": more,
+            "offset": max(offset, 0),
+            "page_size": queries.PAGE_SIZE,
+            "hours": queries.FEED_HOURS,
+            "query": q,
+            "region": region,
+            "category": category,
+            "range": window,
+            "filtered": bool(region or category),
+            "regions": REGION_FILTERS,
+            "ranges": RANGE_OPTIONS,
+            "categories": queries.categories_in_use(session),
+            "story_count": queries.story_count(session, now),
+            "today": now.astimezone(settings.tz).strftime("%A %d %B %Y"),
+            "sparklines": series,
+            "units": {symbol: _unit(assets.get(symbol)) for symbol in symbols},
+            "points": lambda item: queries.sparkline_points(
+                item, SPARK_WIDTH, SPARK_HEIGHT, SPARK_PAD
+            ),
+            "order_words": ORDER_WORDS,
+            "updated": context["ticker_as_of"],
+            "next_digest": _next_digest(settings, now),
+        }
+        # HTMX asks for the list alone; a plain visit gets the whole page.
+        name = "_feed.html" if request.headers.get("hx-request") else "index.html"
+        return templates.TemplateResponse(request, name, context)
+
     @web.get("/design", response_class=HTMLResponse)
     def design(request: Request, session: ReadSession) -> HTMLResponse:
-        """Step 0: the tokens, both themes and the contrast they achieve. The feed takes
-        over `/` at step 1; this page stays at `/design` as the style guide."""
+        """The tokens, both themes and the contrast they achieve: the style guide the pages
+        are built from."""
         context = base_context(request, session, active="design")
         context |= {
             "semantic": SEMANTIC_SWATCHES,

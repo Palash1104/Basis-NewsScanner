@@ -9,13 +9,11 @@ from zoneinfo import ZoneInfo
 from app.config import AssetConfig
 from app.models import Article, Impact, Story
 from app.pipeline.dedupe import normalize_source
-from app.pipeline.prices import format_move
+from app.presentation import AssetCall, story_calls
 
 TELEGRAM_LIMIT = 4096
 MAX_SOURCE_LINKS = 3
 UP, DOWN, MIXED = "\u25b2", "\u25bc", "\u2195"
-_ORDER_RANK = {"first": 0, "second": 1}
-_CONFIDENCE_RANK = {"high": 0, "medium": 1, "low": 2}
 _ORDER_LABEL = {"first": "1st", "second": "2nd"}
 # Where the call came from: the rules, the model, or both agreeing.
 _ORIGIN_LABEL = {"playbook": "playbook", "llm": "LLM", "both": "both"}
@@ -59,30 +57,12 @@ def pick_sources(articles: Sequence[Article], limit: int = MAX_SOURCE_LINKS) -> 
     return links
 
 
-def _display(symbol: str, assets: dict[str, AssetConfig], direction: str) -> str:
-    """The asset's short name, saying what "up" means where an arrow is easy to misread."""
-    asset = assets.get(symbol)
-    if asset is None:
-        return symbol
-    if direction == "up" and asset.up_means:
-        return f"{asset.display_name} ({asset.up_means})"
-    return asset.display_name
-
-
-def _rank(impact: Impact) -> tuple[int, int]:
-    return _ORDER_RANK[impact.order], _CONFIDENCE_RANK[impact.confidence]
-
-
-def _entry(impact: Impact, assets: dict[str, AssetConfig], labels: dict[int, str]) -> str:
-    """The asset, its move so far, and the "already moved" label where one applies. An impact
+def _entry(call: AssetCall) -> str:
+    """The asset, its move so far, and the "already moved" label where one applies. A call
     with no price yet shows the name alone (SPEC 7.8's "price unavailable")."""
-    name = _display(impact.symbol, assets, impact.direction)
-    asset = assets.get(impact.symbol)
-    if asset is None or impact.reference_price is None or impact.move_at_detection_pct is None:
-        return name
-    move = format_move(asset, impact.reference_price, impact.move_at_detection_pct)
-    label = labels.get(impact.id)
-    return f"{name} {move}" + (f" ({label})" if label else "")
+    if call.move is None:
+        return call.name
+    return f"{call.name} {call.move}" + (f" ({call.label})" if call.label else "")
 
 
 def impact_lines(
@@ -91,58 +71,43 @@ def impact_lines(
     limit: int,
     labels: dict[int, str] | None = None,
 ) -> list[str]:
-    """Impact lines for one story: first-order before second-order, then by confidence.
-    Impacts sharing a mechanism share a line, an asset called both ways becomes one "mixed
-    signals" line, and anything past `limit` is summarized as "+N more"."""
-    labels = labels or {}
-    conflicted = sorted({impact.symbol for impact in impacts if impact.conflict})
-    lines = []
-    for symbol in conflicted:
-        mechanisms = dict.fromkeys(i.mechanism for i in impacts if i.symbol == symbol)
-        name = assets[symbol].display_name if symbol in assets else symbol
-        lines.append(f"{MIXED} {_text(name)} · mixed signals: {_text(' vs '.join(mechanisms))}")
-
-    # One entry per symbol and direction; rules that agree are counted, not repeated.
-    grouped: dict[tuple[str, str], list[Impact]] = {}
-    for impact in impacts:
-        if impact.symbol not in conflicted:
-            grouped.setdefault((impact.symbol, impact.direction), []).append(impact)
-    entries = [
-        (min(same, key=_rank), len({i.rule_id for i in same if i.rule_id}))
-        for same in grouped.values()
+    """Impact lines for one story, rendering what `app.presentation` decided: first-order
+    before second-order, then by confidence. Assets sharing a mechanism share a line, an asset
+    called both ways becomes one "mixed signals" line, and the rest becomes "+N more"."""
+    calls = story_calls(impacts, assets, limit, labels)
+    lines = [
+        f"{MIXED} {_text(call.name)} · mixed signals: {_text(call.mechanism)}"
+        for call in calls.shown
+        if call.conflict
     ]
-    entries.sort(key=lambda entry: _rank(entry[0]))
-    shown, extra = entries[:limit], entries[limit:]
 
-    names_by_line: dict[tuple[str, str, str, str], list[str]] = {}
-    rules_by_line: dict[tuple[str, str, str, str], int] = {}
-    origins_by_line: dict[tuple[str, str, str, str], set[str]] = {}
-    priced_lines: set[tuple[str, str, str, str]] = set()
-    for impact, rule_count in shown:
-        key = (impact.direction, impact.order, impact.confidence, impact.mechanism)
-        names_by_line.setdefault(key, []).append(_entry(impact, assets, labels))
-        rules_by_line[key] = max(rules_by_line.get(key, 0), rule_count)
-        origins_by_line.setdefault(key, set()).add(impact.origin)
-        if impact.move_at_detection_pct is not None and impact.reference_price is not None:
-            priced_lines.add(key)
-    for key, names in names_by_line.items():
-        direction, order, confidence, mechanism = key
-        agree = f" · {rules_by_line[key]} rules" if rules_by_line[key] > 1 else ""
+    # Assets that share a direction, order, confidence and mechanism share a line.
+    by_line: dict[tuple[str, str, str, str], list[AssetCall]] = {}
+    for call in calls.shown:
+        if call.conflict:
+            continue
+        key = (call.direction, call.order, call.confidence, call.mechanism)
+        by_line.setdefault(key, []).append(call)
+
+    for (direction, order, confidence, mechanism), group in by_line.items():
+        agree_count = max(call.rule_count for call in group)
+        agree = f" · {agree_count} rules" if agree_count > 1 else ""
         # Say which window the move covers: the track-record line uses a different one.
-        window = " · since news" if key in priced_lines else ""
-        origin = "+".join(_ORIGIN_LABEL.get(name, name) for name in sorted(origins_by_line[key]))
+        window = " · since news" if any(call.priced for call in group) else ""
+        origins = sorted({origin for call in group for origin in call.origins})
+        origin = "+".join(_ORIGIN_LABEL.get(name, name) for name in origins)
         arrow = UP if direction == "up" else DOWN
+        names = ", ".join(_entry(call) for call in group)
         lines.append(
-            f"{arrow} {_text(', '.join(names))}{window} · {_ORDER_LABEL[order]} · "
+            f"{arrow} {_text(names)}{window} · {_ORDER_LABEL[order]} · "
             f"{confidence} · {origin}{agree} — {_text(mechanism)}"
         )
-    if extra:
+
+    if calls.extra:
         rest = ", ".join(
-            f"{UP if impact.direction == 'up' else DOWN} "
-            f"{_text(_display(impact.symbol, assets, impact.direction))}"
-            for impact, _ in extra
+            f"{UP if call.direction == 'up' else DOWN} {_text(call.name)}" for call in calls.extra
         )
-        lines.append(f"+{len(extra)} more: {rest}")
+        lines.append(f"+{len(calls.extra)} more: {rest}")
     return lines
 
 
@@ -218,7 +183,7 @@ def format_digest(
     The last message ends with the not-financial-advice footer."""
     local = generated_at.astimezone(tz)
     count = f"{len(items)} {'story' if len(items) == 1 else 'stories'}"
-    header = f"<b>Newsdesk digest</b> · {local:%a %d %b %Y, %H:%M} {local.tzname()} · {count}"
+    header = f"<b>BASIS digest</b> · {local:%a %d %b %Y, %H:%M} {local.tzname()} · {count}"
 
     messages: list[str] = []
     current = header

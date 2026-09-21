@@ -80,17 +80,20 @@ from app.pipeline.playbook import (
     stories_awaiting_impacts,
 )
 from app.pipeline.prices import (
-    DAILY,
-    DAILY_LEAD,
     PriceProvider,
     PriceReport,
     YahooPrices,
-    cached_bars,
     impacts_to_price,
-    label_for,
+    move_labels,
     price_impacts,
 )
-from app.pipeline.rank import pending_stories, rank_stories, rerank_stories
+from app.pipeline.rank import (
+    pending_stories,
+    rank_stories,
+    rerank_stories,
+    reserved_pool,
+    select_with_reserved,
+)
 from app.pipeline.scoring import (
     ScoreReport,
     mark_unreferenced,
@@ -99,7 +102,8 @@ from app.pipeline.scoring import (
     track_record,
     unpriced_impacts,
 )
-from app.pipeline.summarize import summarize_stories
+from app.pipeline.sections import may_take_reserved_slot, only_from
+from app.pipeline.summarize import news_articles, resummarize_reason, summarize_stories
 from app.schedule import pipeline_hours
 
 log = logging.getLogger("newsdesk")
@@ -149,6 +153,8 @@ class PipelineReport:
     stories_analyzed: int = 0  # event extracted and the playbook applied
     impacts_created: int = 0
     reranked: int = 0  # stories the reasoning model reordered
+    reserved_candidates: int = 0  # single-region stories added to the rerank's candidates
+    reserved_used: int = 0  # single-region stories that took a reserved slot
     llm_impact_calls: int = 0
     llm_impact_declines: int = 0  # calls where the model saw nothing worth calling
     llm_impacts_added: int = 0  # calls the playbook didn't have
@@ -289,14 +295,37 @@ def run_pipeline(
                 settings.pipeline.rerank_candidates, settings.pipeline.max_stories_per_run
             )
             top = rank_stories(session, settings, now, limit=candidates_wanted)
+            # Stories only one region's outlets carry never reach the top 40 on importance,
+            # so they join the candidates before the model orders them (SPEC 7.4).
+            reserved_candidates = reserved_pool(session, settings, now, exclude=top)
+            report.reserved_candidates = len(reserved_candidates)
+            top = top + reserved_candidates
+            # Ranking writes every story's score, and the rerank below is a network call:
+            # commit first, or the open write transaction locks the rate limiter out of its
+            # own session ("database is locked", seen 2026-09-21).
+            session.commit()
             if llm is not None and settings.pipeline.rerank_candidates:
                 # SPEC 7.4: the reasoning model decides what matters most, which then decides
                 # what gets summarized and which stories layer B spends a call on.
-                top, note = rerank_stories(llm, top, settings, settings.pipeline.rerank_candidates)
-                report.reranked = min(len(top), settings.pipeline.rerank_candidates)
+                top, note = rerank_stories(llm, top, settings, len(top))
+                report.reranked = min(len(top), candidates_wanted + len(reserved_candidates))
                 if note:
                     report.errors.append({"stage": "rank", "error": note})
-            top = top[: settings.pipeline.max_stories_per_run]
+
+            def _can_reserve(story: Story) -> bool:
+                # A reserved slot is for news the digest would otherwise never carry: not
+                # sport or filler, and only where a summary is actually owed.
+                return may_take_reserved_slot(story) and (
+                    resummarize_reason(story, news_articles(story)) is not None
+                )
+
+            top = select_with_reserved(top, settings, eligible=_can_reserve)
+            report.reserved_used = sum(
+                1
+                for story in top
+                for region in settings.pipeline.reserved_slots
+                if only_from(story, region)
+            )
             report.stories_ranked = len(top)
             # Summaries skipped for quota on an earlier run go first, even if no longer top-N.
             pending = pending_stories(session, settings, now)
@@ -622,7 +651,8 @@ def run_digest(
     with session_factory() as session:
         stories, since = select_digest_stories(session, settings, now)
         assets = _assets()
-        labels = move_labels(session, stories, assets, settings, now)
+        impacts = [impact for story in stories for impact in story.impacts]
+        labels = move_labels(session, impacts, assets, settings, now)
         rules = track_record(session, "rule_id")
         names = {asset.symbol: asset.display_name for asset in assets.values()}
         items = [
@@ -710,27 +740,6 @@ def _assets(errors: list[dict[str, Any]] | None = None) -> dict[str, AssetConfig
         return {}
 
 
-def move_labels(
-    session: Session,
-    stories: Sequence[Story],
-    assets: dict[str, AssetConfig],
-    settings: Settings,
-    now: datetime,
-) -> dict[int, str]:
-    """ "already moved" / "moving against this call" per impact, from cached daily bars only
-    (no network at digest time)."""
-    impacts = [impact for story in stories for impact in story.impacts]
-    labels: dict[int, str] = {}
-    daily: dict[str, list] = {}
-    for impact in impacts:
-        if impact.symbol not in daily:
-            daily[impact.symbol] = cached_bars(session, impact.symbol, DAILY, now - DAILY_LEAD)
-        label = label_for(impact, assets.get(impact.symbol), daily[impact.symbol], settings)
-        if label:
-            labels[impact.id] = label
-    return labels
-
-
 def asset_warning(
     session_factory: sessionmaker[Session], now: datetime | None = None
 ) -> str | None:
@@ -768,6 +777,12 @@ def run_once(settings: Settings, session_factory: sessionmaker[Session]) -> list
         f" + {report.pending_carried} pending from earlier runs" if report.pending_carried else ""
     )
     left = f", left for next run {report.skipped_quota}" if report.skipped_quota else ""
+    reserved = (
+        f" ({report.reserved_used} in reserved slots, from {report.reserved_candidates} "
+        f"single-region candidates)"
+        if report.reserved_candidates
+        else ""
+    )
     lines = [
         f"run {report.run_id}: feeds {report.feeds_ok} ok / {report.feeds_failed} failed · "
         f"articles fetched {report.articles_fetched}, in last "
@@ -776,7 +791,7 @@ def run_once(settings: Settings, session_factory: sessionmaker[Session]) -> list
         f"stories: {report.stories_created} new, {report.articles_attached} articles attached "
         f"to existing ({report.grouping_method} grouping; non-news: "
         f"{report.non_news_attached} attached, {report.non_news_ungrouped} left out) · "
-        f"top {report.stories_ranked} ranked{pending} · summarized "
+        f"top {report.stories_ranked} ranked{reserved}{pending} · summarized "
         f"{report.summarized}, unchanged {report.skipped_unchanged}, failed {report.failed}, "
         f"LLM errors {report.llm_call_errors}{left}",
         f"events: extracted {report.events_extracted}"
@@ -1067,7 +1082,7 @@ def serve(
         )
         raise typer.Exit(code=1)
 
-    typer.echo(f"Newsdesk web UI on http://{host}:{port}/  (Ctrl+C to stop)")
+    typer.echo(f"BASIS web UI on http://{host}:{port}/  (Ctrl+C to stop)")
     if reload:
         # --reload needs an import string rather than an app object.
         uvicorn.run("app.web.main:app_from_env", factory=True, host=host, port=port, reload=True)
