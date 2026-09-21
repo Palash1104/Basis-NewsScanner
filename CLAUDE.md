@@ -128,6 +128,7 @@ uv run python scripts/event_fixtures.py [story_ids...]   # live extractions -> t
 uv run newsdesk score [--rescore]              # judge due calls, print the track record
 uv run python scripts/impact_gate.py [--model summary|reasoning] [--story ID...]
 uv run newsdesk health [--days 7]              # scheduler slots, LLM budgets, layer B, rules at n>=5
+powershell -ExecutionPolicy Bypass -File scripts/install_tasks.ps1 [-Remove]   # Windows tasks
 ```
 
 ## Layout
@@ -168,6 +169,9 @@ uv run newsdesk health [--days 7]              # scheduler slots, LLM budgets, l
 - `app/schedule.py` `pipeline_hours` (shared by the scheduler and health, no CLI import)
 - `app/health.py` `newsdesk health`: slot coverage, quota-day usage, rerank fallbacks, layer
   B's decline rate, rules at n>=5. Database only, so it can run while the scheduler runs.
+- `app/locks.py` `job_lock`: one pipeline / digest / score job at a time (OS file lock)
+- `scripts/install_tasks.ps1` registers the Windows tasks · `scripts/run_task.ps1` is what
+  they execute (venv, working directory, `data/logs/tasks/<job>.log`)
 - `scripts/` one-off tools · `tests/fixtures/` synthetic feeds · `data/` DB, logs, reports (gitignored)
 - `design/` Claude Design export for the Phase 6 web UI (reference only) · `design/NOTES.md` maps
   its screens to SPEC pages and data, and lists gaps and design tokens
@@ -288,6 +292,25 @@ uv run newsdesk health [--days 7]              # scheduler slots, LLM budgets, l
 - Schema additions to existing databases go through `db.ADDED_COLUMNS` (`ALTER TABLE` in
   `init_db`); `create_all` alone doesn't add columns. Don't add indexes there, since a
   migrated DB wouldn't get them.
+- Scheduling (2026-09-21): the Windows Task Scheduler runs the jobs, not `newsdesk
+  scheduler`, which only lives as long as its terminal.
+  - Three tasks in the `\Newsdesk\` task folder: pipeline (`newsdesk run`), digest
+    (`--send`), score. `scripts/install_tasks.ps1` registers them and is idempotent;
+    `-Remove` deletes them.
+  - Times come from `newsdesk schedule-times` (JSON from settings.yaml), so the tasks
+    can't drift from the app's schedule. Re-run the installer after changing it.
+  - `StartWhenAvailable` (run after a missed start) and `WakeToRun` are on; battery
+    limits are off; `MultipleInstances IgnoreNew`. They run as the logged-on user
+    (`.env` is theirs), so no admin rights and no stored password.
+  - Verified 2026-09-21: `Start-ScheduledTask Newsdesk-score` gave `LastTaskResult 0`
+    and scored 66 calls through the wrapper.
+  - `newsdesk scheduler` still exists for other platforms and for a foreground run.
+- Job locks (`app/locks.py`): `run`, `digest --send` and `score` each hold an OS file
+  lock in `data/locks/`, in both the CLI and the scheduler jobs. A job that can't take
+  its lock logs and exits 0, so a slow run and the next scheduled one never overlap.
+  One lock per job kind, so the 07:30 digest isn't blocked by a slow 07:00 run. A
+  dry-run digest takes no lock: it writes nothing. Windows locks are mandatory, so the
+  lock file can't even be read while it is held.
 - Scheduler:
   - APScheduler 3.x `BlockingScheduler`, in `settings.timezone`.
   - Nothing is caught up after downtime: the job store is in memory, and a cron job missed
@@ -422,6 +445,11 @@ uv run newsdesk health [--days 7]              # scheduler slots, LLM budgets, l
     order, and only where the playbook step would map impacts at all.
   - The rerank keeps the reasoning model: one call per run, and any failure (503s and its
     daily cap are both common) falls back to the computed importance order.
+  - The rerank retries once, not `llm.max_retries` (`RERANK_MAX_RETRIES`): retries spend
+    the reasoning model's 20-request day, and the fallback is fine. On 2026-09-20,
+    retries of 503s pushed it to 18 requests against a budget of 15.
+    `LLMClient.structured(max_retries=...)` is the per-call override; every other call
+    keeps the default.
   - Merging happens before writing, so impacts stay written-once. A call both layers make is
     one row with `origin=both`.
   - Known limitation: a rule disagreement only demotes impacts written in the same run. For a

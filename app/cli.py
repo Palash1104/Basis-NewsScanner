@@ -55,6 +55,7 @@ from app.llm.client import (
     make_llm_client,
 )
 from app.llm.prompts import IMPACT_PROMPT_VERSION
+from app.locks import job_lock
 from app.models import Article, RuleDisagreementRow, Run, Story, utcnow
 from app.net import make_client
 from app.pipeline.classify import non_news_reason
@@ -845,12 +846,20 @@ def run_once(settings: Settings, session_factory: sessionmaker[Session]) -> list
     return lines
 
 
+def _lock_dir(settings: Settings) -> Path:
+    return settings.resolve_path(settings.paths.lock_dir)
+
+
 @app.command()
 def run() -> None:
     """One full pipeline pass: fetch, dedupe, group, rank, summarize."""
     settings, session_factory = _bootstrap()
-    for line in run_once(settings, session_factory):
-        typer.echo(line)
+    with job_lock(_lock_dir(settings), "pipeline") as acquired:
+        if not acquired:
+            typer.echo("another pipeline run is still going; skipped this one")
+            return
+        for line in run_once(settings, session_factory):
+            typer.echo(line)
 
 
 @app.command()
@@ -864,6 +873,15 @@ def digest(
     if send and dry_run:
         raise typer.BadParameter("use either --send or --dry-run, not both")
     settings, session_factory = _bootstrap()
+    # Only a send is locked: a dry run writes nothing and can't double-deliver.
+    with job_lock(_lock_dir(settings), "digest") as acquired:
+        if send and not acquired:
+            typer.echo("another digest is being sent; skipped this one")
+            return
+        _digest(settings, session_factory, send)
+
+
+def _digest(settings: Settings, session_factory: sessionmaker[Session], send: bool) -> None:
     try:
         report = run_digest(
             session_factory,
@@ -982,6 +1000,14 @@ def score(
 ) -> None:
     """Score every call whose horizon is complete, and print the track record."""
     settings, session_factory = _bootstrap()
+    with job_lock(_lock_dir(settings), "score") as acquired:
+        if not acquired:
+            typer.echo("another scoring run is still going; skipped this one")
+            return
+        _score(settings, session_factory, rescore)
+
+
+def _score(settings: Settings, session_factory: sessionmaker[Session], rescore: bool) -> None:
     report = run_score(
         session_factory, settings, YahooPrices(settings.http.timeout_seconds), rescore=rescore
     )
@@ -1000,6 +1026,30 @@ def score(
     with session_factory() as session:
         for line in track_record_lines(session, settings):
             typer.echo(line)
+
+
+@app.command()
+def schedule_times() -> None:
+    """Print the times the scheduler uses, as JSON.
+
+    `scripts/install_tasks.ps1` reads this, so the Windows tasks are always the times in
+    settings.yaml rather than a second copy of them that can drift.
+    """
+    load_env()
+    settings = load_settings()
+    typer.echo(
+        json.dumps(
+            {
+                "timezone": settings.timezone,
+                "pipeline_hours": pipeline_hours(
+                    settings.schedule.pipeline_every_hours, settings.delivery.digest_times
+                ),
+                "digest_times": list(settings.delivery.digest_times),
+                "score_time": settings.schedule.score_time,
+            },
+            indent=2,
+        )
+    )
 
 
 @app.command()
@@ -1148,36 +1198,53 @@ def scheduler() -> None:
     delivery.digest_times (both in settings.timezone). Stop with Ctrl+C."""
     settings, session_factory = _bootstrap()
 
+    lock_dir = _lock_dir(settings)
+
     def pipeline_job() -> None:
         try:
-            for line in run_once(settings, session_factory):
-                log.info(line)
+            with job_lock(lock_dir, "pipeline") as acquired:
+                if not acquired:
+                    log.warning("skipped this pipeline run: the last one is still going")
+                    return
+                for line in run_once(settings, session_factory):
+                    log.info(line)
         except Exception:
             log.exception("scheduled pipeline run failed")
 
     def digest_job() -> None:
         try:
-            report = run_digest(
-                session_factory,
-                settings,
-                send=True,
-                token=get_secret("TELEGRAM_BOT_TOKEN"),
-                chat_id=get_secret("TELEGRAM_CHAT_ID"),
-            )
-            log.info("scheduled digest: %d stories, sent=%s", report.stories, report.sent)
+            with job_lock(lock_dir, "digest") as acquired:
+                if not acquired:
+                    log.warning("skipped this digest: another one is being sent")
+                    return
+                _send_digest()
         except Exception:
             log.exception("scheduled digest failed")
 
+    def _send_digest() -> None:
+        report = run_digest(
+            session_factory,
+            settings,
+            send=True,
+            token=get_secret("TELEGRAM_BOT_TOKEN"),
+            chat_id=get_secret("TELEGRAM_CHAT_ID"),
+        )
+        log.info("scheduled digest: %d stories, sent=%s", report.stories, report.sent)
+
     def score_job() -> None:
         try:
-            report = run_score(
-                session_factory, settings, YahooPrices(settings.http.timeout_seconds)
-            )
-            log.info(
-                "scheduled score: %d calls judged, %d references filled",
-                report.scores.total_scored,
-                report.prices.priced,
-            )
+            with job_lock(lock_dir, "score") as acquired:
+                if not acquired:
+                    log.warning("skipped this scoring run: the last one is still going")
+                    return
+                report = run_score(
+                    session_factory, settings, YahooPrices(settings.http.timeout_seconds)
+                )
+                log.info(
+                    "scheduled score: %d calls judged, %d references filled",
+                    report.scores.total_scored,
+                    report.prices.priced,
+                )
         except Exception:
             log.exception("scheduled scoring failed")
 

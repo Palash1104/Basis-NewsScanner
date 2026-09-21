@@ -711,10 +711,15 @@ newsdesk score                # score all due impacts (idempotent)
 newsdesk validate-tickers
 newsdesk scheduler            # APScheduler: run every schedule.pipeline_every_hours, digests at configured times, score daily (Phase 4)
 newsdesk health [--days 7]    # scheduler slots kept, LLM usage against the budgets, rerank fallbacks, layer B decline rate, rules at n>=5
+newsdesk schedule-times       # the schedule as JSON, for the Windows task installer
 newsdesk serve                # Phase 6 web UI
 ```
 
 Document equivalent cron lines in the README.
+
+**As built (2026-09-21):** on Windows the jobs run from Task Scheduler, not from a Python process that has to be kept alive. `scripts/install_tasks.ps1` registers one task per job in the `\Newsdesk\` task folder, taking the times from `newsdesk schedule-times` so they cannot drift from `settings.yaml`, with "run as soon as possible after a missed start" and "wake the computer" on. `scripts/run_task.ps1` is what each task executes: it runs the project's virtualenv from the project directory and appends output to `data/logs/tasks/<job>.log`. `newsdesk scheduler` remains for other platforms.
+
+**Overlap:** `run`, `digest --send` and `score` each take an OS file lock in `data/locks/` (`app/locks.py`). A job that finds its lock held logs and exits 0 rather than running twice over the same stories and the same SQLite file. Locks are per job kind, so a digest is never delayed by a slow pipeline run, and the kernel releases them if a job crashes.
 
 **`newsdesk health`** (added 2026-09-21) answers "is the scheduler doing its job": it reads the database only, so it is safe to run while the scheduler is running.
 
@@ -779,7 +784,7 @@ Done when all pages in section 11 work against real data.
   - Gemini: `generationConfig.responseMimeType: application/json` plus `responseJsonSchema`.
   - Anthropic: `output_config.format` with a `json_schema`.
 - **Validation failures.** Retry once, including the rejected output and the validation error in the retry. If it still fails, mark the story `failed`, log it, and continue.
-- **Transient errors.** Timeouts, 429 and 5xx are retried with exponential backoff (at most `llm.max_retries` times, waits capped at 60s).
+- **Transient errors.** Timeouts, 429 and 5xx are retried with exponential backoff (at most `llm.max_retries` times, waits capped at 60s). A call may lower that for itself (`structured(max_retries=...)`): the rerank retries once, because every attempt spends a request from the reasoning model's 20-a-day quota and its fallback (the computed importance order) costs almost nothing.
 - **Rate limits.** A client-side limiter keeps every run inside the provider's quotas: requests per minute, input tokens per minute, and requests per day.
   - Limits are configured per model in `llm.rate_limits`, and are required for Gemini models. Google's docs no longer publish free-tier numbers, so copy them from AI Studio (https://aistudio.google.com/rate-limit).
   - Current values for `gemini-3.5-flash-lite`: 15 RPM, 250,000 input TPM, 500 RPD.

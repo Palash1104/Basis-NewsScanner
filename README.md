@@ -66,9 +66,58 @@ errors and token counts.
 
 ## Scheduling
 
-The simplest option is to leave `uv run newsdesk scheduler` running. It runs the pipeline every
-3 hours on the hour (01:00, 04:00, 07:00 … 22:00 IST, so a run always precedes a digest) and
-sends digests at 07:30 and 19:30 IST. To use cron instead, the equivalent lines are:
+### Windows: the scheduled tasks (recommended)
+
+`uv run newsdesk scheduler` only runs while that terminal is open, so a reboot or a closed
+window silently stops the digest. Install the Windows tasks instead:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\install_tasks.ps1
+```
+
+That creates three tasks under `\Newsdesk\`, with the times read from `settings.yaml` (via
+`newsdesk schedule-times`), so re-run it after changing the schedule:
+
+| Task | Command | When |
+|---|---|---|
+| `Newsdesk-pipeline` | `newsdesk run` | 01:00, 04:00, 07:00 … 22:00 |
+| `Newsdesk-digest` | `newsdesk digest --send` | 07:30 and 19:30 |
+| `Newsdesk-score` | `newsdesk score` | 03:30 |
+
+They run as the logged-on user with the project's own virtualenv, need no administrator
+rights, start again after a reboot and login with no terminal open, run as soon as possible
+after a missed start, and may wake the machine. Output goes to `data\logs\tasks\<job>.log`
+(and, as always, `data\logs\newsdesk.log`).
+
+```powershell
+# what is installed, and when each task runs next
+Get-ScheduledTask -TaskPath "\Newsdesk\" | Select-Object TaskName, State
+Get-ScheduledTaskInfo -TaskPath "\Newsdesk\" -TaskName Newsdesk-pipeline |
+  Select-Object LastRunTime, LastTaskResult, NextRunTime   # LastTaskResult 0 = success
+
+# run one now, without waiting for its time
+Start-ScheduledTask -TaskPath "\Newsdesk\" -TaskName Newsdesk-pipeline
+Get-Content data\logs\tasks\run.log -Tail 20
+
+# pause and resume (a holiday, or while editing config)
+Get-ScheduledTask -TaskPath "\Newsdesk\" | Disable-ScheduledTask
+Get-ScheduledTask -TaskPath "\Newsdesk\" | Enable-ScheduledTask
+
+# remove them
+powershell -ExecutionPolicy Bypass -File scripts\install_tasks.ps1 -Remove
+```
+
+`uv run newsdesk health` afterwards says whether the slots were actually kept.
+
+**Two runs never overlap.** Each job kind holds a lock file in `data/locks/` while it runs, so
+a pipeline run still going when the next one starts makes the new one log "another pipeline
+run is still going" and exit cleanly. The locks are per job kind, so a digest is never held up
+by a slow run.
+
+### Other platforms
+
+`uv run newsdesk scheduler` runs the same three jobs in one foreground process (Ctrl+C stops
+it; restart it after editing `settings.yaml`). For cron, the equivalent lines are:
 
 ```
 CRON_TZ=Asia/Kolkata
@@ -77,25 +126,24 @@ CRON_TZ=Asia/Kolkata
 ```
 
 `CRON_TZ` is supported by cronie (most Linux distributions). If your cron doesn't support it,
-convert the times to the machine's time zone (07:30 IST is 02:00 UTC). On Windows, create two
-Task Scheduler tasks running `uv run newsdesk run` and `uv run newsdesk digest --send`, with
-the project folder as the start directory.
+convert the times to the machine's time zone (07:30 IST is 02:00 UTC). Add `newsdesk score`
+daily as well, and note that cron, like the scheduled tasks, does not catch up on runs missed
+while the machine was off (`anacron` does).
 
 ### Sleep, shutdown and missed runs
 
-The scheduler holds its jobs in memory and does not catch up on what it missed:
+| | Windows tasks | `newsdesk scheduler` |
+|---|---|---|
+| Asleep at the run time | runs on wake, or wakes the machine | runs on wake if inside the misfire grace (15 min for a run, 30 for a digest, 60 for scoring), otherwise skipped |
+| Off, or logged out | runs once, as soon as possible after login | skipped: the process wasn't there |
+| After a reboot | starts by itself | must be started by hand |
+| Two at once | the task waits; a run started by hand exits cleanly | the lock makes the second exit cleanly |
 
-- **The laptop sleeps briefly.** A job whose time passed still runs when the machine wakes, as
-  long as it wakes inside the misfire grace: 15 minutes for a pipeline run, 30 for a digest, 60
-  for scoring. Several missed fires collapse into one run (`coalesce`).
-- **The laptop sleeps longer, or the process is stopped or restarted.** Those slots are skipped,
-  and nothing runs until the next scheduled time. Start the scheduler again after a restart; it
-  does not start itself.
-- **Skipped slots rarely lose stories.** The next run re-fetches the whole
-  `pipeline.lookback_hours` window (12 hours), summaries and events skipped for quota are
-  carried over, and the digest covers everything summarized since the last digest that was sent
-  without errors. Downtime longer than the lookback window is what actually loses stories.
-- `uv run newsdesk health` lists the slots that were missed.
+**Skipped slots rarely lose stories.** The next run re-fetches the whole
+`pipeline.lookback_hours` window (12 hours), summaries and events skipped for quota are carried
+over, and the digest covers everything summarized since the last digest that was sent without
+errors. Downtime longer than the lookback window is what actually loses stories, and
+`uv run newsdesk health` lists the slots that were missed.
 
 ## Configuration
 

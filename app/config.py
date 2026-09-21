@@ -237,6 +237,8 @@ class ScheduleSettings(_Strict):
 class PathSettings(_Strict):
     database: str = "data/newsdesk.db"
     log_dir: str = "data/logs"
+    # One lock file per job kind, so a slow run and the next scheduled one can't overlap.
+    lock_dir: str = "data/locks"
 
 
 class Settings(_Strict):

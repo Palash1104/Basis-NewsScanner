@@ -4,9 +4,11 @@ from datetime import timedelta
 from sqlalchemy.orm import Session
 
 from app.config import Settings
+from app.llm.client import LLMClient, ProviderError
 from app.models import Article, Story
-from app.pipeline.rank import rank_stories, score_articles
+from app.pipeline.rank import RERANK_FALLBACK_NOTE, rank_stories, rerank_stories, score_articles
 from tests.conftest import NOW
+from tests.fakes import FakeProvider
 
 
 def _article(
@@ -94,3 +96,31 @@ def test_non_news_articles_add_nothing_to_importance(settings: Settings) -> None
     explainer = _article("What is a cyclone? Explained", "Paper B", "IN", 3, 0.5)
     explainer.non_news = True
     assert score_articles([*news, explainer], settings, NOW) == score_articles(news, settings, NOW)
+
+
+# ---------------------------------------------------------------- rerank
+
+
+def _story(session: Session, headline: str) -> Story:
+    story = Story(
+        first_seen_at=NOW, updated_at=NOW, headline=headline, source_count=2, regions=["US"]
+    )
+    session.add(story)
+    session.flush()
+    return story
+
+
+def test_a_503_rerank_is_tried_twice_then_falls_back(session: Session, settings: Settings) -> None:
+    """The reasoning model has a 20-request day, so a failing rerank must not spend it: one
+    retry, then the computed importance order (which is always good enough)."""
+    stories = [_story(session, "first"), _story(session, "second")]
+    fake = FakeProvider(
+        responder=lambda _: ProviderError("503 unavailable", transient=True, status=503)
+    )
+    llm = LLMClient(settings.llm, fake, sleep=lambda seconds: None)
+
+    ordered, note = rerank_stories(llm, stories, settings, limit=10)
+
+    assert len(fake.calls) == 2  # the attempt and one retry, not llm.max_retries
+    assert ordered == stories  # unchanged: the importance order stands
+    assert note is not None and note.startswith(RERANK_FALLBACK_NOTE)

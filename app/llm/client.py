@@ -385,9 +385,14 @@ class LLMClient:
         schema: type[T],
         max_tokens: int,
         purpose: str,
+        max_retries: int | None = None,
     ) -> StructuredResult[T]:
         """Ask for JSON matching `schema`. If it fails validation, retry once with the rejected
         answer and the validation error included.
+
+        `max_retries` overrides `llm.max_retries` for the transient retries of this call only.
+        A call with a safe fallback should keep it low: every attempt spends a request from the
+        daily quota, and a model that is 503-ing is rarely well a second later.
 
         Raises LLMQuotaError (stop calling), LLMCallError, or LLMOutputError.
         """
@@ -396,7 +401,14 @@ class LLMClient:
         error_text = ""
         for attempt in (1, 2):
             response = self._generate(
-                model, system, prompt, schema, max_tokens, purpose, is_retry=attempt > 1
+                model,
+                system,
+                prompt,
+                schema,
+                max_tokens,
+                purpose,
+                is_retry=attempt > 1,
+                max_retries=max_retries,
             )
             input_tokens += response.input_tokens
             output_tokens += response.output_tokens
@@ -425,10 +437,12 @@ class LLMClient:
         max_tokens: int,
         purpose: str,
         is_retry: bool = False,
+        max_retries: int | None = None,
     ) -> ProviderResponse:
         """One logical request: rate-limited, with retries for transient errors. Only the first
         attempt of new work counts against the daily budget; retries may use the full quota."""
-        attempts = self.settings.max_retries + 1
+        limit = self.settings.max_retries if max_retries is None else max_retries
+        attempts = limit + 1
         temperature = self.settings.temperature_for(model)
         for attempt in range(1, attempts + 1):
             reservation = None

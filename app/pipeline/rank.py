@@ -102,6 +102,12 @@ def pending_stories(session: Session, settings: Settings, now: datetime) -> list
 # health` counts these, so the text is a constant rather than a string written twice.
 RERANK_FALLBACK_NOTE = "rerank skipped, keeping the importance order"
 
+# One retry, not `llm.max_retries`. The reasoning model 503s often and has a 20-request day,
+# so retrying it costs quota the summaries need, and the fallback (the computed importance
+# order) is good enough that a missed rerank barely shows. Seen 2026-09-20: 18 requests
+# against a budget of 15, all of them retries of 503s.
+RERANK_MAX_RETRIES = 1
+
 
 def rerank_stories(
     llm: "LLMClient", stories: Sequence[Story], settings: Settings, limit: int
@@ -130,6 +136,7 @@ def rerank_stories(
             schema=StoryRanking,
             max_tokens=2048,
             purpose=f"rerank {len(candidates)} stories",
+            max_retries=RERANK_MAX_RETRIES,
         )
     except LLMError as exc:
         return list(stories), f"{RERANK_FALLBACK_NOTE}: {exc}"
