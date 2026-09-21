@@ -1,0 +1,160 @@
+{% extends "base.html" %}
+{% block title %}Newsdesk · design foundation{% endblock %}
+
+{% block content %}
+  <div class="screen-head">
+    <div>
+      <h1>Design foundation</h1>
+      <p class="sub">The export's own stylesheet, its tokens, and the dark theme it never defined</p>
+    </div>
+  </div>
+
+  <div class="note" style="margin-top: var(--space-6);">
+    <p>
+      Components come from <b>design-system.css</b>, vendored byte for byte from
+      <code>design/_ds/modernist-…/styles.css</code>. It is token-driven, so the dark theme is
+      an override of its custom properties, not a second set of rules. Switch with
+      <b>Theme</b> above: auto follows the OS, then light, then dark.
+    </p>
+  </div>
+
+  <div class="section-label"><span class="kicker">Colour</span><span class="line"></span></div>
+  <div class="swatches">
+    {% for name, token, note in semantic %}
+      <div class="swatch">
+        <div class="chip" style="background: var({{ token }})"></div>
+        <div class="label"><b>{{ name }}</b>{{ token }} · {{ note }}</div>
+      </div>
+    {% endfor %}
+  </div>
+
+  <div class="section-label">
+    <span class="kicker">Neutral ramp · reversed in dark</span><span class="line"></span>
+  </div>
+  <div class="swatches">
+    {% for step in steps %}
+      <div class="swatch">
+        <div class="chip" style="background: var(--color-neutral-{{ step }})"></div>
+        <div class="label"><b>neutral {{ step }}</b></div>
+      </div>
+    {% endfor %}
+  </div>
+
+  <div class="section-label">
+    <span class="kicker">Accent ramp · identical in both themes</span><span class="line"></span>
+  </div>
+  <div class="swatches">
+    {% for step in steps %}
+      <div class="swatch">
+        <div class="chip" style="background: var(--color-accent-{{ step }})"></div>
+        <div class="label"><b>accent {{ step }}</b></div>
+      </div>
+    {% endfor %}
+  </div>
+
+  <div class="section-label"><span class="kicker">Contrast</span><span class="line"></span></div>
+  <table class="table">
+    <thead>
+      <tr>
+        <th>Pair</th>
+        <th>Light</th>
+        <th>Dark</th>
+        <th>Needs</th>
+        <th>Verdict</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in contrast %}
+        <tr>
+          <td>{{ row.pair }}</td>
+          <td>{{ row.light }}</td>
+          <td>{{ row.dark }}</td>
+          <td>{{ row.needs }}</td>
+          <td>{{ row.verdict }}</td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <p class="sub" style="margin-top: var(--space-3); max-width: 62ch;">
+    Measured from the values in the stylesheet. The button keeps the export's accent, which is
+    4.20:1 against its label: below AA, and kept because it is the design's own colour. The
+    2px divider is a section rule, not a control, so 1.4.11 does not apply to it.
+  </p>
+
+  <div class="section-label"><span class="kicker">Type</span><span class="line"></span></div>
+  <div class="specimen">
+    <span class="kicker">Story 52</span>
+    <div style="font-family: var(--font-heading); font-weight: 800; font-size: 52px;
+      line-height: 1.04; letter-spacing: -0.015em;">Indonesia tightens nickel ore quotas</div>
+  </div>
+  <div class="specimen">
+    <span class="kicker">Page title 44</span>
+    <div style="font-family: var(--font-heading); font-weight: 800; font-size: 44px;
+      line-height: 1.12;">What moved, and why</div>
+  </div>
+  <div class="specimen">
+    <span class="kicker">Feed 27</span>
+    <div style="font-family: var(--font-heading); font-weight: 800; font-size: 27px;
+      line-height: 1.12; max-width: 30ch;">Fed holds rates, signals one cut this year</div>
+  </div>
+  <div class="specimen">
+    <span class="kicker">Plain english 15</span>
+    <div class="note" style="margin: 0;">
+      <p>Two to three sentences, at 15px over 1.6, ink at 85%, held to 62 characters.</p>
+    </div>
+  </div>
+  <div class="specimen">
+    <span class="kicker">Meta 11</span>
+    <div style="font-size: 11px; color: var(--color-muted);">07:40 IST · Economy &amp; Markets</div>
+  </div>
+  <div class="specimen">
+    <span class="kicker">Kicker 10</span>
+    <div class="kicker kicker-accent">Commodities affected</div>
+  </div>
+
+  <div class="section-label"><span class="kicker">Components</span><span class="line"></span></div>
+  <div class="sample-row">
+    <button type="button" class="btn btn-primary">Get the brief</button>
+    <button type="button" class="btn btn-secondary">Earlier stories</button>
+    <div class="seg">
+      <label class="seg-opt"><input type="radio" name="demo" checked />1D</label>
+      <label class="seg-opt"><input type="radio" name="demo" />1W</label>
+      <label class="seg-opt"><input type="radio" name="demo" />1M</label>
+    </div>
+    <input class="input" style="width: 260px;" placeholder="Search a story or an asset" />
+  </div>
+  <div class="sample-row">
+    <span class="tag tag-accent">playbook</span>
+    <span class="tag tag-neutral">first order</span>
+    <span class="tag tag-outline">2 rules</span>
+    <span class="up" style="font-weight: 800;">▲ +1.9%</span>
+    <span class="down" style="font-weight: 800;">▼ −5.3%</span>
+    <a href="/design">A link</a>
+  </div>
+
+  <table class="table">
+    <thead>
+      <tr>
+        <th>Rule</th>
+        <th>Horizon</th>
+        <th>Hit</th>
+        <th>Miss</th>
+        <th>Rate</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in sample_rows %}
+        <tr>
+          <td>{{ row.rule }}</td>
+          <td>{{ row.horizon }}</td>
+          <td>{{ row.hit }}</td>
+          <td>{{ row.miss }}</td>
+          <td>{{ row.rate }}</td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <p class="sub" style="margin-top: var(--space-3);">
+    Real track-record rows, so the table is checked against real text.
+  </p>
+{% endblock %}

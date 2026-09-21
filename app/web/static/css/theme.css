@@ -1,0 +1,105 @@
+/* Everything the design system does not answer, and nothing else.
+ *
+ * `design-system.css` is the export's own stylesheet, vendored byte for byte, and it is
+ * token-driven: overriding its custom properties is how a theme is added without touching a
+ * line of it. This file therefore holds exactly two things:
+ *
+ *   1. a dark theme, which the export does not define (design/NOTES.md 5, last bullet);
+ *   2. the handful of values the mockup hard-codes inline and the system has no token for
+ *      (price up/down, ink at 70/85%, the thinner rules), named here so pages can use them.
+ *
+ * Colours are the export's, including the primary button on --color-accent (#ec3013).
+ */
+
+:root {
+  /* The mockup's own inline values (design/NOTES.md 5, "Hard-coded in the mockup"). */
+  --color-up: var(--color-text); /* a price that rose: ink */
+  --color-down: var(--color-accent-700); /* a price that fell */
+  --color-link: var(--color-accent-700);
+  --color-link-hover: var(--color-accent-600);
+  --color-muted: color-mix(in srgb, var(--color-text) 70%, transparent);
+  --color-body-dim: color-mix(in srgb, var(--color-text) 85%, transparent);
+  --rule-strong: color-mix(in srgb, var(--color-text) 40%, transparent); /* = --color-divider */
+  --rule-medium: color-mix(in srgb, var(--color-text) 25%, transparent);
+  --rule-light: color-mix(in srgb, var(--color-text) 20%, transparent);
+  --rule-faint: color-mix(in srgb, var(--color-text) 15%, transparent);
+
+  /* Mockup geometry that the system has no token for (design/NOTES.md 5, "Mockup layout"). */
+  --canvas-width: 1280px;
+  --page-padding: 40px;
+  --rail-width: 320px;
+  --meta-column-width: 104px;
+  --chip-min-width: 196px;
+}
+
+/* The same warm family, inverted: ink becomes the page, paper becomes the text. The neutral
+ * ramp is reversed so 100 stays the step nearest the ground; the accent ramp is untouched,
+ * and which step a page uses changes instead. Measured in app/web/palette.py. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --color-bg: #1a1918;
+    --color-surface: #242221;
+    --color-text: #edeae8;
+
+    --color-neutral-100: #2d2b2b;
+    --color-neutral-200: #444141;
+    --color-neutral-300: #605d5d;
+    --color-neutral-400: #7d7979;
+    --color-neutral-500: #9b9797;
+    --color-neutral-600: #bab6b6;
+    --color-neutral-700: #d7d3d3;
+    --color-neutral-800: #eae7e7;
+    --color-neutral-900: #f8f4f4;
+
+    /* accent-700 is too dark to read on ink, so links and falling prices move up the ramp. */
+    --color-link: var(--color-accent-400);
+    --color-link-hover: var(--color-accent-300);
+    --color-down: var(--color-accent-400);
+  }
+}
+
+:root[data-theme="dark"] {
+  --color-bg: #1a1918;
+  --color-surface: #242221;
+  --color-text: #edeae8;
+
+  --color-neutral-100: #2d2b2b;
+  --color-neutral-200: #444141;
+  --color-neutral-300: #605d5d;
+  --color-neutral-400: #7d7979;
+  --color-neutral-500: #9b9797;
+  --color-neutral-600: #bab6b6;
+  --color-neutral-700: #d7d3d3;
+  --color-neutral-800: #eae7e7;
+  --color-neutral-900: #f8f4f4;
+
+  --color-link: var(--color-accent-400);
+  --color-link-hover: var(--color-accent-300);
+  --color-down: var(--color-accent-400);
+}
+
+/* The system's tags read their colour from the accent ramp, which inverts badly on ink. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .tag-accent {
+    background: color-mix(in srgb, var(--color-accent-400) 16%, transparent);
+    color: var(--color-accent-300);
+  }
+  :root:not([data-theme="light"]) .tag-neutral {
+    background: var(--color-neutral-100);
+    color: var(--color-neutral-800);
+  }
+}
+
+:root[data-theme="dark"] .tag-accent {
+  background: color-mix(in srgb, var(--color-accent-400) 16%, transparent);
+  color: var(--color-accent-300);
+}
+
+:root[data-theme="dark"] .tag-neutral {
+  background: var(--color-neutral-100);
+  color: var(--color-neutral-800);
+}
+
+html {
+  color-scheme: light dark;
+}

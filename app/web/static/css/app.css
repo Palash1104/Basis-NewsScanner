@@ -1,0 +1,307 @@
+/* Screen layout, translated from the mockup's inline styles
+ * (design/Basis - Commodity News App.dc.html). Values are the mockup's; anything the design
+ * system has a token or a class for uses that instead of a repeated literal.
+ *
+ * Components (.btn, .input, .seg, .tag, .card, .table, .hr) come from design-system.css and
+ * are not restyled here.
+ */
+
+/* ---------------------------------------------------------------- fonts */
+
+/* Archivo is variable (wght 100-900), so one file per subset covers 400, 600 and 800.
+ * Vendored from Google Fonts, licence in fonts/OFL.txt; nothing is fetched at runtime. */
+@font-face {
+  font-family: Archivo;
+  font-style: normal;
+  font-weight: 100 900;
+  font-stretch: 100%;
+  font-display: swap;
+  src: url("../fonts/archivo-latin.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC,
+    U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215,
+    U+FEFF, U+FFFD;
+}
+
+/* Latin Extended carries the rupee sign (U+20B9), which prices need. */
+@font-face {
+  font-family: Archivo;
+  font-style: normal;
+  font-weight: 100 900;
+  font-stretch: 100%;
+  font-display: swap;
+  src: url("../fonts/archivo-latin-ext.woff2") format("woff2");
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304,
+    U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0,
+    U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+/* ---------------------------------------------------------------- header */
+
+.masthead {
+  display: flex;
+  align-items: center;
+  gap: 28px;
+  padding: var(--space-4) var(--page-padding);
+  border-bottom: 2px solid var(--color-divider);
+  background: var(--color-bg);
+  position: sticky;
+  top: 0;
+  z-index: 5;
+}
+
+.masthead-brand {
+  font-family: var(--font-heading);
+  font-weight: var(--font-heading-weight);
+  font-size: 22px;
+  letter-spacing: -0.02em;
+  margin-right: var(--space-2);
+  color: var(--color-text);
+  text-decoration: none;
+}
+
+.masthead-divider {
+  width: 1px;
+  height: 22px;
+  background: var(--rule-medium);
+}
+
+.masthead-nav {
+  display: flex;
+  align-items: center;
+  gap: 28px;
+}
+
+.masthead-nav a,
+.masthead-nav .pending {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  text-decoration: none;
+  color: var(--color-text);
+}
+
+.masthead-nav a:hover {
+  color: var(--color-link);
+}
+
+.masthead-nav a[aria-current="page"] {
+  color: var(--color-link);
+}
+
+.masthead-nav .pending {
+  color: var(--color-muted);
+  cursor: default;
+}
+
+.masthead-tools {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+/* ---------------------------------------------------------------- ticker */
+
+/* The mockup's "Moving now" strip. Redefined, because there is no live feed behind it:
+ * these are moves since each story broke, stamped with the last pipeline run. */
+.ticker {
+  display: flex;
+  align-items: stretch;
+  border-bottom: 2px solid var(--color-divider);
+  background: var(--color-surface);
+  overflow-x: auto;
+}
+
+.ticker-label,
+.ticker-asof {
+  padding: 10px var(--space-4);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  display: flex;
+  align-items: center;
+  white-space: nowrap;
+}
+
+.ticker-label {
+  padding-left: var(--page-padding);
+  color: var(--color-link);
+  border-right: 1px solid var(--rule-medium);
+}
+
+.ticker-asof {
+  margin-left: auto;
+  padding-right: var(--page-padding);
+  color: var(--color-muted);
+  border-left: 1px solid var(--rule-medium);
+}
+
+.ticker-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 10px 18px;
+  border-right: 1px solid var(--rule-faint);
+  white-space: nowrap;
+}
+
+.ticker-item .code {
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+}
+
+.ticker-item .change {
+  font-size: 11px;
+}
+
+.ticker-empty {
+  padding: 10px 18px;
+  font-size: 11px;
+  color: var(--color-muted);
+  display: flex;
+  align-items: center;
+}
+
+.up {
+  color: var(--color-up);
+}
+
+.down {
+  color: var(--color-down);
+}
+
+/* ---------------------------------------------------------------- page and footer */
+
+.screen {
+  padding: var(--page-padding) var(--page-padding) 64px;
+  max-width: var(--canvas-width);
+}
+
+.screen-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-6);
+  padding-bottom: 20px;
+  border-bottom: 2px solid var(--color-divider);
+}
+
+.screen-head h1 {
+  font-size: 44px;
+  margin: 0 0 6px;
+}
+
+.screen-head .sub {
+  margin: 0;
+  font-size: 14px;
+  color: var(--color-muted);
+}
+
+.colophon {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  padding: var(--space-4) var(--page-padding);
+  border-top: 2px solid var(--color-divider);
+  font-size: 12px;
+  color: var(--color-muted);
+}
+
+.colophon .disclaimer {
+  font-style: italic;
+}
+
+/* ---------------------------------------------------------------- style guide */
+
+.swatches {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: var(--space-3);
+  margin-bottom: var(--space-6);
+}
+
+.swatch .chip {
+  height: 56px;
+  border: 1px solid var(--rule-light);
+}
+
+.swatch .label {
+  padding: var(--space-2) 0;
+  font-size: 11px;
+  color: var(--color-muted);
+}
+
+.swatch .label b {
+  display: block;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-text);
+}
+
+.specimen {
+  display: grid;
+  grid-template-columns: var(--meta-column-width) minmax(0, 1fr);
+  gap: 28px;
+  padding: var(--space-4) 0;
+  border-bottom: 1px solid var(--rule-medium);
+  align-items: baseline;
+}
+
+.kicker {
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--color-muted);
+}
+
+.kicker-accent {
+  color: var(--color-link);
+}
+
+.sample-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  margin: var(--space-4) 0 var(--space-6);
+}
+
+.note {
+  display: flex;
+  gap: var(--space-3);
+  max-width: 62ch;
+  margin-bottom: 20px;
+}
+
+.note::before {
+  content: "";
+  flex: none;
+  width: 2px;
+  background: var(--color-text);
+}
+
+.note p {
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.6;
+  color: var(--color-body-dim);
+}
+
+.section-label {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: var(--space-8) 0 var(--space-3);
+}
+
+.section-label .line {
+  flex: 1;
+  height: 1px;
+  background: var(--rule-light);
+}

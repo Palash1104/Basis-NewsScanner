@@ -4,6 +4,7 @@
 import asyncio
 import json
 import logging
+import socket
 import sys
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
@@ -1026,6 +1027,54 @@ def _score(settings: Settings, session_factory: sessionmaker[Session], rescore: 
     with session_factory() as session:
         for line in track_record_lines(session, settings):
             typer.echo(line)
+
+
+# 8765 was taken on the author's machine by another Python process, so the default is one
+# that is unlikely to collide. Any port works: `newsdesk serve --port N`.
+WEB_PORT = 8787
+
+
+def _port_in_use(host: str, port: int) -> bool:
+    """A clear message beats uvicorn's bind traceback for a command started by hand."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        return probe.connect_ex((host, port)) == 0
+
+
+@app.command()
+def serve(
+    host: Annotated[str, typer.Option("--host", help="Interface to bind.")] = "127.0.0.1",
+    port: Annotated[int, typer.Option("--port", help="Port to listen on.")] = WEB_PORT,
+    reload: Annotated[
+        bool, typer.Option("--reload", help="Restart on code changes (development).")
+    ] = False,
+) -> None:
+    """Serve the web UI on localhost (SPEC 11). It only reads the database, so it is safe to
+    run while the scheduled pipeline is writing."""
+    import uvicorn
+
+    load_env()
+    settings = load_settings()
+    setup_logging(settings)
+    database = settings.resolve_path(settings.paths.database)
+    if not database.exists():
+        typer.echo(f"no database at {database}: run `newsdesk run` first", err=True)
+        raise typer.Exit(code=1)
+
+    if _port_in_use(host, port):
+        typer.echo(
+            f"port {port} on {host} is already in use; try `newsdesk serve --port {port + 1}`",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+    typer.echo(f"Newsdesk web UI on http://{host}:{port}/  (Ctrl+C to stop)")
+    if reload:
+        # --reload needs an import string rather than an app object.
+        uvicorn.run("app.web.main:app_from_env", factory=True, host=host, port=port, reload=True)
+        return
+    from app.web.main import create_app
+
+    uvicorn.run(create_app(settings), host=host, port=port, log_level="info")
 
 
 @app.command()

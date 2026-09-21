@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{% block title %}Newsdesk{% endblock %}</title>
+    <script>
+      // Before first paint, so a saved theme never flashes the other one.
+      try {
+        var saved = localStorage.getItem("newsdesk-theme");
+        if (saved === "light" || saved === "dark") {
+          document.documentElement.setAttribute("data-theme", saved);
+        }
+      } catch (e) {}
+    </script>
+    <link rel="preload" href="{{ url_for('static', path='fonts/archivo-latin.woff2') }}"
+      as="font" type="font/woff2" crossorigin />
+    <link rel="stylesheet" href="{{ url_for('static', path='css/design-system.css') }}" />
+    <link rel="stylesheet" href="{{ url_for('static', path='css/theme.css') }}" />
+    <link rel="stylesheet" href="{{ url_for('static', path='css/app.css') }}" />
+    <script src="{{ url_for('static', path='js/htmx.min.js') }}" defer></script>
+    <script src="{{ url_for('static', path='js/theme.js') }}" defer></script>
+  </head>
+  <body>
+    <header class="masthead">
+      <a class="masthead-brand" href="/">NEWSDESK</a>
+      <span class="masthead-divider"></span>
+      <nav class="masthead-nav">
+        {% for item in nav %}
+          {% if item.href %}
+            <a href="{{ item.href }}"
+              {% if item.name == active %}aria-current="page"{% endif %}>{{ item.label }}</a>
+          {% else %}
+            <span class="pending" title="not built yet: {{ item.note }}">{{ item.label }}</span>
+          {% endif %}
+        {% endfor %}
+      </nav>
+      <div class="masthead-tools">
+        {% block tools %}{% endblock %}
+        <button type="button" class="btn btn-secondary" data-theme-toggle>Theme: auto</button>
+      </div>
+    </header>
+
+    {% block ticker %}
+      <div class="ticker">
+        <div class="ticker-label">Moving since news</div>
+        {% if ticker %}
+          {% for item in ticker %}
+            <div class="ticker-item">
+              <span class="code">{{ item.name }}</span>
+              <span class="change {{ 'up' if item.up else 'down' }}">{{ item.move }}</span>
+            </div>
+          {% endfor %}
+        {% else %}
+          <div class="ticker-empty">No priced calls in the last {{ ticker_hours }} hours.</div>
+        {% endif %}
+        <div class="ticker-asof">as of {{ ticker_as_of }}</div>
+      </div>
+    {% endblock %}
+
+    <main class="screen">{% block content %}{% endblock %}</main>
+
+    <footer class="colophon">
+      <span class="disclaimer">Research notes, not financial advice.</span>
+      <span>All times {{ timezone }}.</span>
+      <span>Reads the database; never writes to it.</span>
+    </footer>
+  </body>
+</html>

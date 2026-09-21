@@ -33,6 +33,33 @@ def make_engine(db_path: Path | str) -> Engine:
     return engine
 
 
+def make_read_only_engine(db_path: Path | str) -> Engine:
+    """An engine that cannot write, for the web UI (SPEC 11).
+
+    The scheduled pipeline writes to this file every three hours, so the reader beside it:
+
+    - sets `query_only`, so SQLite refuses every write and a bug in a page can never touch
+      the data;
+    - does **not** set `journal_mode`, unlike `make_engine`: that statement takes a write
+      lock, which is the one thing a reader must never do here. The file is already WAL, and
+      WAL readers never block the writer or each other;
+    - keeps a short `busy_timeout`, since a page should fail fast rather than hang.
+    """
+    path = Path(db_path)
+    if not path.exists():
+        raise FileNotFoundError(f"no database at {path}: run `newsdesk run` first")
+    engine = create_engine(f"sqlite:///{path.as_posix()}")
+
+    @event.listens_for(engine, "connect")
+    def _read_only_pragmas(dbapi_connection: Any, _record: Any) -> None:
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA busy_timeout=5000")
+        cursor.execute("PRAGMA query_only=ON")
+        cursor.close()
+
+    return engine
+
+
 # Columns added after their table was first created. create_all() only creates missing tables,
 # so these are added with ALTER TABLE when an existing database lacks them.
 ADDED_COLUMNS: dict[str, dict[str, str]] = {
@@ -89,3 +116,8 @@ def init_db(engine: Engine) -> None:
 
 def make_session_factory(engine: Engine) -> sessionmaker[Session]:
     return sessionmaker(bind=engine, expire_on_commit=False)
+
+
+def make_read_only_session_factory(engine: Engine) -> sessionmaker[Session]:
+    """Sessions for the web UI: no autoflush, so reading never tries to write."""
+    return sessionmaker(bind=engine, expire_on_commit=False, autoflush=False)

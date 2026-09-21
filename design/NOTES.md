@@ -339,3 +339,42 @@ those are listed separately, with the token each one equals where there is one.
 - **Icons:** Lucide per the design-system readme, but the mockup uses none.
 - **Lint:** `_adherence.oxlintrc.json` warns on raw hex, raw px and non-Archivo fonts, and the mockup itself breaks those rules. When implementing, map values to tokens (e.g. `#ae1800` → `var(--color-accent-700)`).
 - **No dark theme tokens.** §11 requires one, so dark values would have to be designed.
+
+---
+
+## 6. Dark theme and contrast (Phase 6 step 0, 2026-09-21)
+
+The export is light-only (section 5, last bullet) and SPEC 11 requires both themes, so the dark
+one is derived here rather than imported. It keeps the warm hue family and reverses the neutral
+ramp, so `--neutral-100` is always the step nearest the page ground in either theme.
+
+| Semantic token | Light | Dark |
+|---|---|---|
+| `--color-bg` | `#f3f2f2` | `#1a1918` |
+| `--color-surface` | `#eae9e9` | `#242221` |
+| `--color-raised` | `#f8f4f4` | `#2e2b2a` |
+| `--color-text` | `#201e1d` | `#edeae8` |
+| `--color-text-muted` | ink 70% | paper 70% |
+| `--color-divider` | ink 40% | paper 40% |
+| `--color-link` | `--accent-700` `#ae1800` | `--accent-400` `#ff9783` |
+| `--color-button-bg` / `-fg` | `#dd2b0f` / white | `#ff9783` / `#201e1d` |
+| `--color-up` / `--color-down` | ink / `#ae1800` | paper / `#ff9783` |
+
+The accent ramp itself is identical in both themes; which step is used changes instead. Links and
+"price down" share a colour in both, as the mockup does.
+
+**Two departures from the export, both measured.** The light theme as given fails WCAG AA:
+
+- `.text-muted` at 55% ink is **3.66:1** on the page ground. Body text needs 4.5:1, so muted text
+  is ink at 70% (**5.79:1**), which is also what the mockup itself uses. 55% survives as
+  `--color-text-faint` for decoration only.
+- White on the primary accent `#ec3013` is **4.20:1**, and button labels are 14px/800, which is
+  not "large text" for WCAG. The primary button therefore rests on `--accent-600` `#dd2b0f`
+  (**4.74:1**) and hovers to `--accent-700` (**7.17:1**) - one step along the system's own ramp.
+
+The 2px divider stays at 40% ink (**2.41:1**): it is a section rule, not a control, and 1.4.11
+does not apply to it.
+
+`static/css/tokens.css` is what the browser paints; `app/web/palette.py` holds the same values as
+data with the contrast checks, and `tests/test_web.py` proves every pair passes AA in both themes
+and that the two files agree.
