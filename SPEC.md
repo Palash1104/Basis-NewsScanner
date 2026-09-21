@@ -201,17 +201,17 @@ delivery:
 
 **articles**: id, url (normalized, unique), source_name, source_region (`US` | `IN` | `GLOBAL`), source_weight, title, snippet, published_at, fetched_at, story_id (nullable FK).
 
-**stories**: id, first_seen_at (earliest article published_at), updated_at, headline, summary, category, regions (JSON), sources_disagree (bool), disagreement_note, importance_score, source_count, region_diversity, status (`new` | `summarized` | `analyzed` | `failed`, plus `needs_resummary` from regrouping), processed_article_count, processed_source_regions (JSON), prompt_version. Extra columns not in this list: `model`, `summary_pending`, and `event_pending` (an event is owed: set when a summary is written, cleared when the event is stored).
+**stories**: id, first_seen_at (earliest article published_at), updated_at, headline, summary, category, regions (JSON), sources_disagree (bool), disagreement_note, importance_score, source_count, region_diversity, status (`new` | `summarized` | `analyzed` | `failed`, plus `needs_resummary` from regrouping), processed_article_count, processed_source_regions (JSON), prompt_version. Extra columns not in this list: `model`, **`temperature`** and **`seed`** (the sampling settings the summary was produced with, added 2026-09-21), `summary_pending`, and `event_pending` (an event is owed: set when a summary is written, cleared when the event is stored).
 
-**events**: id, story_id, event_type, countries (JSON), regions (JSON), entities (JSON), companies (JSON), channels (JSON), severity, policy_stance, **policy_actor** (added in Phase 2: the authority whose stance `policy_stance` describes), is_new_development, model, prompt_version, created_at. A story gets a new row each time it is re-extracted; the latest row is its current event.
+**events**: id, story_id, event_type, countries (JSON), regions (JSON), entities (JSON), companies (JSON), channels (JSON), severity, policy_stance, **policy_actor** (added in Phase 2: the authority whose stance `policy_stance` describes), is_new_development, model, prompt_version, **temperature**, **seed** (added 2026-09-21), created_at. A story gets a new row each time it is re-extracted; the latest row is its current event.
 
-**impacts**: id, story_id, **event_id** (added in Phase 2: which extraction produced it, so the track record can group by event type and prompt version), symbol, direction (`up` | `down`), mechanism, order (`first` | `second`), confidence (`high` | `medium` | `low`), horizon (`intraday` | `days` | `weeks`; null for playbook impacts, which don't state one), origin (`playbook` | `llm` | `both`), rule_id (nullable), conflict (bool), reference_time, reference_price, move_at_detection_pct (all three filled by the Phase 3 price check), created_at.
+**impacts**: id, story_id, **event_id** (added in Phase 2: which extraction produced it, so the track record can group by event type and prompt version), symbol, direction (`up` | `down`), mechanism, order (`first` | `second`), confidence (`high` | `medium` | `low`), horizon (`intraday` | `days` | `weeks`; null for playbook impacts, which don't state one), origin (`playbook` | `llm` | `both`), rule_id (nullable), conflict (bool), **model**, **prompt_version**, **temperature**, **seed** (added 2026-09-21: layer B's provenance, null on `origin=playbook`, where no model was involved), reference_time, reference_price, move_at_detection_pct (all three filled by the Phase 3 price check), created_at.
 
 Impacts are written once and never edited: each one is the call as it was made, which section 7.9 scores. Re-extracting a story adds only impacts it doesn't already have.
 
 **impact_scores**: id, impact_id, horizon_days, asset_return, benchmark_symbol, benchmark_return, excess_return, threshold, outcome (`hit` | `miss` | `no_move` | `unscorable`), scored_at. Unique on (impact_id, horizon_days).
 
-**rule_disagreements** (added in Phase 5): id, story_id, event_id, rule_id, reason, model, prompt_version, created_at. Where the LLM impact layer said a playbook rule doesn't fit an event (7.7). The rule's impacts are still written, at low confidence when they are written in the same run.
+**rule_disagreements** (added in Phase 5): id, story_id, event_id, rule_id, reason, model, prompt_version, temperature, seed, created_at. Where the LLM impact layer said a playbook rule doesn't fit an event (7.7). The rule's impacts are still written, at low confidence when they are written in the same run.
 
 **price_cache**: symbol, interval, ts (bar start, stored UTC), open, high, low, close, **volume** (added in Phase 3). Unique on (symbol, interval, ts). Intervals in use: `60m` for reference prices and the latest price, `1d` for the volatility baseline. Volume is needed because a zero-volume daily bar is how Yahoo marks an exchange holiday for `.NS` stocks, and those bars must be kept out of the baseline.
 
@@ -478,7 +478,7 @@ For each impact and each horizon N in `horizons_trading_days`, once N trading da
   - `unscorable`: missing data
 - Hit rate = hits ÷ (hits + misses). Also report the no_move share.
 
-Aggregate track records by: rule_id, event_type, origin (playbook / llm / both), confidence, horizon, prompt_version. Only show a rate when n ≥ `min_samples_to_show_rate`.
+Aggregate track records by: rule_id, event_type, origin (playbook / llm / both), confidence, horizon, prompt_version, **temperature** and **seed** (the last three are the extraction's, from `impacts.event_id`: they decided which rules fired). Only show a rate when n ≥ `min_samples_to_show_rate`.
 
 Add a short note in the README that overlapping news on the same asset makes attribution noisy; this is a sanity check, not a rigorous backtest.
 
@@ -793,7 +793,9 @@ Done when all pages in section 11 work against real data.
   - **As built (2026-09-21):** `gemini-3.5-flash-lite` runs at temperature 0 with a fixed `llm.seed`, against that advice, because summaries and event extraction are classification tasks whose variance changed which playbook rules fired and so polluted the track record (7.9).
   - Temperature 0 by itself is not enough: re-extracting the same 20 fixtures gave 7/20 identical events. With the seed it is 20/20. Google doesn't promise determinism, so re-check after a model change.
   - The seed is Gemini-only; Anthropic ignores it.
-- Every stored LLM output records `model` and `prompt_version`. Bump `PROMPT_VERSION` whenever prompt text changes.
+- Every stored LLM output records `model`, `prompt_version`, `temperature` and `seed` (`stories`, `events`, `impacts`, `rule_disagreements`). Bump `PROMPT_VERSION` whenever prompt text changes.
+  - They are built in one place, `LLMSettings.provenance()`, so a row can never claim settings other than the ones sent. The seed is recorded only for providers that take one.
+  - `temperature` and `seed` are track-record groups (7.9), so a change to either splits the record instead of mixing calls made under different settings. Older rows, which predate these columns, group as `(none)`. `newsdesk score` prints those two tables only once more than one value has been judged.
 - **Token logging.** Log input and output tokens per call and total per run, from the provider's usage data:
   - Gemini: `usageMetadata.promptTokenCount` is input; `candidatesTokenCount + thoughtsTokenCount` is output.
   - Anthropic: `usage.input_tokens` / `usage.output_tokens`.

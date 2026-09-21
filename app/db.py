@@ -43,10 +43,27 @@ ADDED_COLUMNS: dict[str, dict[str, str]] = {
         "model": "VARCHAR(64)",
         "summary_pending": "BOOLEAN NOT NULL DEFAULT 0",
         "event_pending": "BOOLEAN NOT NULL DEFAULT 0",
+        # Added 2026-09-21 with temperature 0 and a fixed seed: every stored LLM output
+        # records the sampling settings it was produced with.
+        "temperature": "FLOAT",
+        "seed": "INTEGER",
     },
     "events": {
         # Added with event prompt v2, after the first extractions had been stored.
         "policy_actor": "VARCHAR(64)",
+        "temperature": "FLOAT",
+        "seed": "INTEGER",
+    },
+    "impacts": {
+        # Layer B's provenance; null on origin=playbook.
+        "model": "VARCHAR(64)",
+        "prompt_version": "VARCHAR(32)",
+        "temperature": "FLOAT",
+        "seed": "INTEGER",
+    },
+    "rule_disagreements": {
+        "temperature": "FLOAT",
+        "seed": "INTEGER",
     },
     "ticker_checks": {
         # Added in Phase 4: trading-day counting needs each exchange's time zone.

@@ -26,6 +26,21 @@ def test_temperature_only_for_listed_models(settings: Settings) -> None:
     assert settings.llm.temperature_for("model-b") is None
 
 
+def test_provenance_records_the_sampling_settings_sent(settings: Settings) -> None:
+    settings.llm.temperature = {"model-a": 0.2}
+    settings.llm.seed = 7
+    call = settings.llm.provenance("model-a", "summary-v3")
+    assert (call.model, call.prompt_version) == ("model-a", "summary-v3")
+    assert (call.temperature, call.seed) == (0.2, 7)
+    assert settings.llm.provenance("model-b", "summary-v3").temperature is None
+
+
+def test_no_seed_is_recorded_for_a_provider_that_ignores_it(settings: Settings) -> None:
+    settings.llm.seed = 7
+    settings.llm.provider = "anthropic"
+    assert settings.llm.seed_for("claude-haiku-4-5") is None
+
+
 def test_feeds_file_loads_and_outlets_have_one_region() -> None:
     feeds = load_feeds(include_disabled=True)
     assert feeds

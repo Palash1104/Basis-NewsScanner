@@ -189,9 +189,20 @@ uv run python scripts/impact_gate.py [--model summary|reasoning] [--story ID...]
     re-check after any model change.
   - No looping or truncation appeared in 40 extractions at temperature 0.
   - Temperature and seed are per provider and per model, so the LLM impact layer (same
-    flash-lite model) is at 0 with the same seed. A per-call override would be needed to
-    treat it differently.
-  - Anthropic has no seed parameter; the setting is ignored there.
+    flash-lite model) is at 0 with the same seed. All three tasks are kept on the same
+    settings on purpose (user, 2026-09-21): there is no per-call override.
+  - Anthropic has no seed parameter; the setting is ignored there, and no seed is stored.
+  - Every row holding model output records `model`, `prompt_version`, `temperature` and
+    `seed`: `stories` (summary), `events` (extraction), `impacts` and `rule_disagreements`
+    (layer B). They come from `settings.llm.provenance(model, prompt_version)`, the only
+    place that decides them, so a row can't claim settings other than the ones sent.
+    - On `impacts` the four columns are layer B's and are null on `origin=playbook`, which
+      no model touched. The extraction's own provenance is on the event.
+    - `temperature` and `seed` are track-record groups, taken from the impact's event,
+      because that extraction decided which rules fired. Rows written before 2026-09-21
+      group as `(none)`.
+    - `newsdesk score` prints the temperature and seed tables only when more than one value
+      has been judged, so they stay out of the way while the settings are fixed.
 - Pipeline code never imports a provider or SDK: it calls `LLMClient.structured()` only.
 - Never call Gemini without rate limits: `make_llm_client` refuses if `llm.rate_limits` has no
   entry for the summary model. Values come from https://aistudio.google.com/rate-limit (Google's
@@ -384,8 +395,8 @@ uv run python scripts/impact_gate.py [--model summary|reasoning] [--story ID...]
     present, and never rewritten except by `--rescore`. A late bar is picked up next run.
   - Giving up is explicit: no reference after `reference_grace_days`, or a horizon overdue by
     `score_grace_days`, becomes a final `unscorable` row so the job stops retrying.
-  - The track record groups by rule_id, event_type, origin, confidence, horizon_days and
-    prompt_version (the last two come through `impacts.event_id`). Rates are hidden below
+  - The track record groups by rule_id, event_type, origin, confidence, horizon_days,
+    prompt_version, temperature and seed (the last four come through `impacts.event_id`). Rates are hidden below
     `min_samples_to_show_rate` (5) judged calls.
   - n counts asset-calls, not independent events, so the distinct story count is reported
     next to it. The digest shows at most one track-record line per story.

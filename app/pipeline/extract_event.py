@@ -104,6 +104,7 @@ def extract_events(
     one failing story never stops the others, but a used-up quota stops the step."""
     result = ExtractResult()
     model = settings.llm.summary_model
+    provenance = settings.llm.provenance(model, EVENT_PROMPT_VERSION)
     for index, story in enumerate(stories):
         carried = ", carried over from an earlier run" if story.event_pending else ""
         articles = event_articles(story, settings)
@@ -153,7 +154,9 @@ def extract_events(
                 policy_actor=event.policy_actor,
                 is_new_development=event.is_new_development,
                 model=output.model,
-                prompt_version=EVENT_PROMPT_VERSION,
+                prompt_version=provenance.prompt_version,
+                temperature=provenance.temperature,
+                seed=provenance.seed,
                 created_at=now,
             )
         )

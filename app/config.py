@@ -2,6 +2,7 @@
 
 import os
 import re
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 from urllib.parse import urlsplit
@@ -91,6 +92,32 @@ class LLMSettings(_Strict):
     def temperature_for(self, model: str) -> float | None:
         """Temperature to send for `model`, or None to use the model's default."""
         return self.temperature.get(model)
+
+    def seed_for(self, model: str) -> int | None:
+        """The seed actually sent for `model`. Gemini takes one; Anthropic has no equivalent,
+        so nothing is recorded there rather than recording a seed that was ignored."""
+        return self.seed if self.provider == "gemini" else None
+
+    def provenance(self, model: str, prompt_version: str) -> "CallProvenance":
+        """What to store alongside an output produced by `model` (SPEC section 14)."""
+        return CallProvenance(
+            model=model,
+            prompt_version=prompt_version,
+            temperature=self.temperature_for(model),
+            seed=self.seed_for(model),
+        )
+
+
+@dataclass(frozen=True)
+class CallProvenance:
+    """How one stored LLM output was produced. Stored on every row holding model output
+    (stories, events, impacts, rule_disagreements) so the track record can be split if the
+    model, the prompt, the temperature or the seed ever changes."""
+
+    model: str
+    prompt_version: str
+    temperature: float | None = None
+    seed: int | None = None
 
 
 class HttpSettings(_Strict):

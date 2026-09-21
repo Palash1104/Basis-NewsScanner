@@ -319,7 +319,18 @@ def mark_unreferenced(session: DbSession, settings: Settings, now: datetime) -> 
 # ---------------------------------------------------------------- track record
 
 
-GROUPS = ("rule_id", "event_type", "origin", "confidence", "horizon_days", "prompt_version")
+# `prompt_version`, `temperature` and `seed` are the extraction's, from impacts.event_id:
+# they are what decided which rules fired, so a change to any of them splits the record.
+GROUPS = (
+    "rule_id",
+    "event_type",
+    "origin",
+    "confidence",
+    "horizon_days",
+    "prompt_version",
+    "temperature",
+    "seed",
+)
 
 
 @dataclass
@@ -349,27 +360,35 @@ class TrackRow:
         return self.judged >= minimum
 
 
+def _sampling_key(value: float | int | None) -> str:
+    """Temperature and seed are both optional: rows written before they were recorded, and
+    providers without a seed, group together as "(none)"."""
+    return "(none)" if value is None else str(value)
+
+
 def track_record(session: DbSession, group: str, horizon: int | None = None) -> list[TrackRow]:
     """Counts per group (SPEC 7.9). `stories` is kept because one story produces many
     correlated calls, so n is not a count of independent events."""
     if group not in GROUPS:
         raise ValueError(f"unknown track-record group {group!r}")
     query = (
-        select(ImpactScore, Impact, Event.event_type, Event.prompt_version, Impact.story_id)
+        select(ImpactScore, Impact, Event, Impact.story_id)
         .join(Impact, ImpactScore.impact_id == Impact.id)
         .join(Event, Impact.event_id == Event.id, isouter=True)
     )
     if horizon is not None:
         query = query.where(ImpactScore.horizon_days == horizon)
     rows: dict[tuple[str, int], TrackRow] = {}
-    for score, impact, event_type, prompt_version, story_id in session.execute(query):
+    for score, impact, event, story_id in session.execute(query):
         key = {
             "rule_id": impact.rule_id or "(none)",
-            "event_type": event_type or "(none)",
+            "event_type": event.event_type if event else "(none)",
             "origin": impact.origin,
             "confidence": impact.confidence,
             "horizon_days": str(score.horizon_days),
-            "prompt_version": prompt_version or "(none)",
+            "prompt_version": event.prompt_version if event else "(none)",
+            "temperature": _sampling_key(event.temperature if event else None),
+            "seed": _sampling_key(event.seed if event else None),
         }[group]
         row = rows.setdefault((key, score.horizon_days), TrackRow(key, score.horizon_days))
         if score.outcome == HIT:

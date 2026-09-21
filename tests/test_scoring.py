@@ -315,12 +315,22 @@ def test_impacts_that_never_get_a_reference_price_become_unscorable(
 # ---------------------------------------------------------------- track record
 
 
-def _scored(session: Session, rule: str, outcome: str, horizon: int = 1) -> None:
+def _scored(
+    session: Session,
+    rule: str,
+    outcome: str,
+    horizon: int = 1,
+    temperature: float | None = None,
+    seed: int | None = None,
+) -> Impact:
     impact = _impact(session, "XOM", "up", rule=rule)
+    impact.event.temperature = temperature
+    impact.event.seed = seed
     session.add(
         ImpactScore(impact_id=impact.id, horizon_days=horizon, outcome=outcome, scored_at=STORY_AT)
     )
     session.flush()
+    return impact
 
 
 def test_track_record_counts_by_group_and_keeps_the_story_count(session: Session) -> None:
@@ -337,6 +347,25 @@ def test_track_record_counts_by_group_and_keeps_the_story_count(session: Session
     assert {row.key for row in track_record(session, "event_type")} == {"geopolitical_conflict"}
     assert {row.key for row in track_record(session, "origin")} == {"playbook"}
     assert {row.key for row in track_record(session, "prompt_version")} == {"event-v2"}
+    # Sampling settings come from the extraction, and rows stored before they were recorded
+    # group together rather than being dropped.
+    assert {row.key for row in track_record(session, "temperature")} == {"(none)"}
+    assert {row.key for row in track_record(session, "seed")} == {"(none)"}
+
+
+def test_a_sampling_change_splits_the_track_record(session: Session) -> None:
+    """The reason temperature and seed are stored: calls made under different settings are
+    not one record (SPEC 14)."""
+    _scored(session, "oil_supply_shock", HIT, temperature=0.0, seed=20260921)
+    _scored(session, "oil_supply_shock", MISS, temperature=0.0, seed=20260921)
+    _scored(session, "oil_supply_shock", MISS, temperature=1.0, seed=20260921)
+
+    by_temperature = {row.key: row for row in track_record(session, "temperature")}
+    assert (by_temperature["0.0"].hits, by_temperature["0.0"].misses) == (1, 1)
+    assert (by_temperature["1.0"].hits, by_temperature["1.0"].misses) == (0, 1)
+    assert {row.key for row in track_record(session, "seed")} == {"20260921"}
+    # The rule's own record still covers every call it made.
+    assert track_record(session, "rule_id")[0].judged == 3
 
 
 def test_a_rate_is_only_shown_once_there_are_enough_judged_calls(session: Session) -> None:

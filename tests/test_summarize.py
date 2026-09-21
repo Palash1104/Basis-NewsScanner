@@ -101,6 +101,9 @@ def test_success_updates_story(session: Session, settings: Settings) -> None:
     assert story.processed_source_regions == ["IN", "US"]
     assert story.prompt_version == SUMMARY_PROMPT_VERSION
     assert story.model == settings.llm.summary_model
+    # SPEC 14: the sampling settings are stored too, so the track record can be split later.
+    assert story.temperature == settings.llm.temperature_for(settings.llm.summary_model)
+    assert story.seed == settings.llm.seed
     assert story.updated_at == NOW
 
 

@@ -7,7 +7,7 @@ from datetime import datetime
 
 from sqlalchemy.orm import Session
 
-from app.config import Settings
+from app.config import CallProvenance, Settings
 from app.llm.client import (
     LLMCallError,
     LLMClient,
@@ -106,6 +106,7 @@ def summarize_stories(
     that story and every later one that still needs a summary are marked summary_pending."""
     result = SummarizeResult()
     model = settings.llm.summary_model
+    provenance = settings.llm.provenance(model, SUMMARY_PROMPT_VERSION)
     for index, story in enumerate(stories):
         articles = news_articles(story)
         reason = resummarize_reason(story, articles)
@@ -149,7 +150,7 @@ def summarize_stories(
             log.warning("story %d marked failed: %s", story.id, exc)
             story.status = "failed"
             story.summary_pending = False
-            _record_processed(story, articles, model)
+            _record_processed(story, articles, provenance)
             session.commit()
             result.failed.append((story.id, str(exc)))
             continue
@@ -167,14 +168,18 @@ def summarize_stories(
         # still finds it next run if this one stops early.
         story.event_pending = True
         story.updated_at = now
-        _record_processed(story, articles, model)
+        _record_processed(story, articles, provenance)
         session.commit()
         result.summarized.append(story.id)
     return result
 
 
-def _record_processed(story: Story, articles: Sequence[Article], model: str) -> None:
+def _record_processed(
+    story: Story, articles: Sequence[Article], provenance: CallProvenance
+) -> None:
     story.processed_article_count = len(articles)
     story.processed_source_regions = source_regions(articles)
-    story.prompt_version = SUMMARY_PROMPT_VERSION
-    story.model = model
+    story.prompt_version = provenance.prompt_version
+    story.model = provenance.model
+    story.temperature = provenance.temperature
+    story.seed = provenance.seed

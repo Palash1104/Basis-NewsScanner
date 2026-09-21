@@ -469,6 +469,17 @@ def test_the_llm_layer_adds_calls_merges_them_and_records_disagreements(
         assert nifty.rule_id == "us_tariffs_on_india" and nifty.horizon == "days"
         assert nifty.confidence == "low"  # the rule is disputed, so its call is demoted
         assert not any(i.symbol == "MADEUP.NS" for i in impacts)
+        # Layer B's provenance is on the calls it made and on nothing else.
+        temperature = settings.llm.temperature_for(settings.llm.summary_model)
+        assert (nifty.model, nifty.prompt_version) == (settings.llm.summary_model, "impact-v1")
+        assert (nifty.temperature, nifty.seed) == (temperature, settings.llm.seed)
+        playbook_only = next(i for i in impacts if i.origin == "playbook")
+        assert (playbook_only.model, playbook_only.seed) == (None, None)
         disagreements = session.scalars(select(RuleDisagreementRow)).all()
         assert {d.rule_id for d in disagreements} == {"us_tariffs_on_india"}
         assert "not in force yet" in disagreements[0].reason
+        assert disagreements[0].model == settings.llm.summary_model
+        assert (disagreements[0].temperature, disagreements[0].seed) == (
+            temperature,
+            settings.llm.seed,
+        )

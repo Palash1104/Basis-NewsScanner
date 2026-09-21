@@ -379,6 +379,7 @@ def run_pipeline(
                     key=lambda i: rank_of.get(i, 10**6),
                 )
                 llm_budget = settings.impacts.llm_max_stories_per_run if assets else 0
+                layer_b = settings.llm.provenance(settings.llm.summary_model, IMPACT_PROMPT_VERSION)
                 for story_id in analyzed:
                     story = session.get(Story, story_id)
                     if story is None or story.latest_event is None:
@@ -418,7 +419,7 @@ def run_pipeline(
                     merged = merge_impacts(
                         calls_in, model_calls, {d.rule_id for d in disagreements}
                     )
-                    created = store_calls(session, story, event, merged, now)
+                    created = store_calls(session, story, event, merged, now, layer_b)
                     for disagreement in disagreements:
                         session.add(
                             RuleDisagreementRow(
@@ -426,8 +427,10 @@ def run_pipeline(
                                 event_id=event.id,
                                 rule_id=disagreement.rule_id,
                                 reason=disagreement.reason,
-                                model=settings.llm.summary_model,
-                                prompt_version=IMPACT_PROMPT_VERSION,
+                                model=layer_b.model,
+                                prompt_version=layer_b.prompt_version,
+                                temperature=layer_b.temperature,
+                                seed=layer_b.seed,
                                 created_at=now,
                             )
                         )
@@ -928,12 +931,20 @@ def run_score(
         return ScoreRunReport(run.id, priced, scores, unreferenced)
 
 
+def _varies(session: Session, group: str) -> bool:
+    """Whether judged calls exist under more than one value of `group`."""
+    return len({row.key for row in track_record(session, group)}) > 1
+
+
 def track_record_lines(session: Session, settings: Settings) -> list[str]:
     """The track-record tables. Counts are always shown; rates only once there are enough
     judged calls to mean anything."""
     minimum = settings.scoring.min_samples_to_show_rate
     lines = []
-    for group in ("rule_id", "event_type", "origin", "confidence", "horizon_days"):
+    groups = ["rule_id", "event_type", "origin", "confidence", "horizon_days"]
+    # Sampling settings are fixed, so a table per value is noise until one of them changes.
+    groups += [group for group in ("temperature", "seed") if _varies(session, group)]
+    for group in groups:
         rows = track_record(session, group)
         if not rows:
             continue

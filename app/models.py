@@ -70,6 +70,11 @@ class Story(Base):
     prompt_version: Mapped[str | None] = mapped_column(String(32))
     # Not in SPEC section 6, but section 14 requires every stored LLM output to record its model.
     model: Mapped[str | None] = mapped_column(String(64))
+    # The sampling settings the summary was produced with, so the track record can be split if
+    # either ever changes. Null on rows written before 2026-09-21, and the seed is null for
+    # providers that have none.
+    temperature: Mapped[float | None] = mapped_column(Float)
+    seed: Mapped[int | None] = mapped_column(Integer)
     # Not in SPEC section 6: set when a summary was skipped because the LLM quota ran out, so the
     # next run summarizes it first even if it has dropped out of the top stories.
     summary_pending: Mapped[bool] = mapped_column(default=False)
@@ -112,6 +117,9 @@ class Event(Base):
     is_new_development: Mapped[bool] = mapped_column()
     model: Mapped[str] = mapped_column(String(64))
     prompt_version: Mapped[str] = mapped_column(String(32))
+    # Sampling settings, stored for the same reason as on stories.
+    temperature: Mapped[float | None] = mapped_column(Float)
+    seed: Mapped[int | None] = mapped_column(Integer)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime)
 
     story: Mapped[Story] = relationship(back_populates="events")
@@ -139,6 +147,12 @@ class Impact(Base):
     origin: Mapped[str] = mapped_column(String(16))  # playbook | llm | both
     rule_id: Mapped[str | None] = mapped_column(String(64), index=True)
     conflict: Mapped[bool] = mapped_column(default=False)
+    # What produced the model's half of the call (SPEC section 14). Null on origin=playbook,
+    # where no model was involved; the extraction's own provenance is on the event.
+    model: Mapped[str | None] = mapped_column(String(64))
+    prompt_version: Mapped[str | None] = mapped_column(String(32))
+    temperature: Mapped[float | None] = mapped_column(Float)
+    seed: Mapped[int | None] = mapped_column(Integer)
     # Filled in by the Phase 3 price check.
     reference_time: Mapped[datetime | None] = mapped_column(UTCDateTime)
     reference_price: Mapped[float | None] = mapped_column(Float)
@@ -166,6 +180,8 @@ class RuleDisagreementRow(Base):
     reason: Mapped[str] = mapped_column(Text)
     model: Mapped[str] = mapped_column(String(64))
     prompt_version: Mapped[str] = mapped_column(String(32))
+    temperature: Mapped[float | None] = mapped_column(Float)
+    seed: Mapped[int | None] = mapped_column(Integer)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime)
 
 

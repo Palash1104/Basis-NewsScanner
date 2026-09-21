@@ -26,7 +26,7 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy.orm import Session
 
-from app.config import CONFIG_DIR, AssetConfig
+from app.config import CONFIG_DIR, AssetConfig, CallProvenance
 from app.llm.schemas import Channel, EventType, PolicyStance, Severity
 from app.models import Event, Impact, Story
 
@@ -204,13 +204,21 @@ def apply_rules(
 
 
 def store_calls(
-    session: Session, story: Story, event: Event, calls: Sequence["MergedCall"], now: datetime
+    session: Session,
+    story: Story,
+    event: Event,
+    calls: Sequence["MergedCall"],
+    now: datetime,
+    llm: CallProvenance | None = None,
 ) -> list[Impact]:
     """Write calls the story doesn't already have, and mark it analyzed.
 
     A call the story already has (same rule, symbol and direction) is left alone, so
     re-analysis adds rather than rewrites. Any symbol called both ways is marked as a
     conflict ("mixed signals" in the digest).
+
+    `llm` is the layer-B call this run made, recorded on the calls it produced (origin `llm`
+    or `both`) and left null on the playbook's own, which no model touched.
     """
     existing = {(impact.rule_id, impact.symbol, impact.direction) for impact in story.impacts}
     created: list[Impact] = []
@@ -219,6 +227,7 @@ def store_calls(
         if key in existing:
             continue
         existing.add(key)
+        from_model = llm if call.origin != ORIGIN_PLAYBOOK else None
         impact = Impact(
             story=story,
             event=event,
@@ -230,6 +239,10 @@ def store_calls(
             horizon=call.horizon,
             origin=call.origin,
             rule_id=call.rule_id,
+            model=from_model.model if from_model else None,
+            prompt_version=from_model.prompt_version if from_model else None,
+            temperature=from_model.temperature if from_model else None,
+            seed=from_model.seed if from_model else None,
             created_at=now,
         )
         session.add(impact)
