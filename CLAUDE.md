@@ -176,7 +176,22 @@ uv run python scripts/impact_gate.py [--model summary|reasoning] [--story ID...]
   or LLM call must never crash a run: record it in `runs.errors` and continue.
 - Model IDs and provider only from `settings.yaml` (`llm.provider`: gemini | anthropic; model IDs
   must match the provider). Temperature is per model ID (`llm.temperature`); leave out models
-  that reject it (claude-sonnet-5) or where the provider advises against it (Gemini 3: keep 1.0).
+  that reject it (claude-sonnet-5).
+- `gemini-3.5-flash-lite` runs at temperature 0 with a fixed `llm.seed` (user, 2026-09-21),
+  although Google advises leaving Gemini 3 at 1.0 because lower values can cause looping.
+  Reason: summaries and event extraction are classification tasks, and their variance changed
+  which rules fired, which pollutes the track record.
+  - **Temperature 0 alone is not reproducible on Gemini.** Extracting the same 20 fixtures
+    twice at temperature 0 gave 7/20 identical events and 0/3 identical generated summaries;
+    severity flipped between `moderate` and `escalation` on three stories, which changes
+    which rules fire. Adding the seed gave 20/20 events and 20/20 summaries identical.
+  - Google doesn't promise determinism even with a seed, so treat it as best effort and
+    re-check after any model change.
+  - No looping or truncation appeared in 40 extractions at temperature 0.
+  - Temperature and seed are per provider and per model, so the LLM impact layer (same
+    flash-lite model) is at 0 with the same seed. A per-call override would be needed to
+    treat it differently.
+  - Anthropic has no seed parameter; the setting is ignored there.
 - Pipeline code never imports a provider or SDK: it calls `LLMClient.structured()` only.
 - Never call Gemini without rate limits: `make_llm_client` refuses if `llm.rate_limits` has no
   entry for the summary model. Values come from https://aistudio.google.com/rate-limit (Google's

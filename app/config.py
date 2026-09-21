@@ -67,6 +67,9 @@ class LLMSettings(_Strict):
     rate_limits: dict[str, RateLimitSettings] = Field(default_factory=dict)
     # Daily request quotas reset at midnight in this time zone (Pacific time for Gemini).
     rate_limit_day_timezone: str = "America/Los_Angeles"
+    # A fixed sampling seed, so identical requests give identical answers (Gemini only;
+    # Anthropic has no equivalent and ignores it). None lets the provider choose.
+    seed: int | None = None
 
     @model_validator(mode="after")
     def _models_match_provider(self) -> "LLMSettings":

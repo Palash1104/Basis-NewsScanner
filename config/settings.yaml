@@ -14,9 +14,21 @@ llm:
   # reasoning_model: claude-sonnet-5, temperature: {claude-haiku-4-5: 0.2}, and set
   # ANTHROPIC_API_KEY. (claude-sonnet-5 rejects temperature, so leave it out.)
   #
-  # Temperature per model ID; models not listed use their default. Google recommends keeping
-  # Gemini 3 models at their default of 1.0 (lower values can cause looping), so none is set.
-  temperature: {}
+  # Temperature per model ID; models not listed use their default.
+  #
+  # Set to 0 on 2026-09-21, against Google's advice for Gemini 3 (they suggest leaving it at
+  # 1.0 because lower values can cause looping). Summaries and event extraction are
+  # classification tasks, and run-to-run variance changed which playbook rules fired, which
+  # pollutes the Phase 4 track record. No looping or truncation was seen in 40 extractions.
+  #
+  # This is per model, and summaries, event extraction and the LLM impact layer all use
+  # flash-lite, so layer B is at 0 too. Its output is scored like any other call, so the same
+  # argument applies; a per-call override would be needed to treat it differently.
+  temperature: { gemini-3.5-flash-lite: 0 }
+  # Temperature 0 on its own is not reproducible on Gemini: re-extracting the same 20
+  # fixtures changed severity, channels or countries on 13 of them, which changes which
+  # playbook rules fire. With this seed the same request returns the same answer.
+  seed: 20260921
   timeout_seconds: 60
   max_retries: 3 # retries for timeouts, 429 and 5xx, with exponential backoff (max 60s wait)
   # Client-side limits per model ID, so runs never exceed the quota. Required for Gemini

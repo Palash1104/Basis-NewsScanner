@@ -174,7 +174,9 @@ class GeminiProvider:
         api_key: str,
         timeout_seconds: float,
         transport: httpx.BaseTransport | None = None,
+        seed: int | None = None,
     ) -> None:
+        self._seed = seed
         self._api_key = api_key
         self._http = httpx.Client(
             base_url=GEMINI_API_BASE, timeout=timeout_seconds, transport=transport
@@ -197,6 +199,12 @@ class GeminiProvider:
         }
         if temperature is not None:
             generation_config["temperature"] = temperature
+        if self._seed is not None:
+            # Temperature 0 alone is not reproducible on Gemini: the same request can come
+            # back with different countries, channels or severity. A fixed seed makes
+            # identical requests return identical output (checked over the 20 event
+            # fixtures). Google doesn't promise determinism, so this is best effort.
+            generation_config["seed"] = self._seed
         body = {
             "systemInstruction": {"parts": [{"text": system}]},
             "contents": [{"role": "user", "parts": [{"text": user}]}],
@@ -511,7 +519,7 @@ def make_llm_client(
                 "requests per minute, input tokens per minute and requests per day from "
                 "https://aistudio.google.com/rate-limit into config/settings.yaml."
             )
-        provider = GeminiProvider(api_key, settings.timeout_seconds)
+        provider = GeminiProvider(api_key, settings.timeout_seconds, seed=settings.seed)
     else:
         provider = AnthropicProvider(api_key, settings.timeout_seconds)
 

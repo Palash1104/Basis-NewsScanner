@@ -2,13 +2,13 @@
  "_about": "Real event extractions for stored stories, made by scripts/event_fixtures.py. Used to check the event prompt and to test the playbook against real events.",
  "model": "gemini-3.5-flash-lite",
  "prompt_version": "event-v3",
- "extracted_at": "2026-09-20T16:11:04.111913+00:00",
+ "extracted_at": "2026-09-21T05:34:50.177161+00:00",
  "events": [
   {
    "story_id": 2,
    "label": "geopolitics: US sanctions law allowing tariffs on India",
-   "headline": "Trump signs Russia sanctions bill allowing high tariffs on India",
-   "summary": "President Trump signed a new Russia sanctions bill into law. This law gives him the power to impose up to 100 percent tariffs on countries like India that buy Russian oil, which could impact relations and energy security.",
+   "headline": "Trump Signs Russia Sanctions Bill Impacting India and China",
+   "summary": "President Trump signed a new sanctions bill that allows tariffs of up to 100 percent on countries buying Russian oil. This gives the United States leverage against nations like India and China, potentially affecting relations and energy security.",
    "summary_source": "stored",
    "regions": [
     "US",
@@ -18,9 +18,9 @@
    "articles": [
     {
      "source_name": "The Indian Express",
-     "title": "Trump signs Russia sanction bill into law giving him power to impose 100% tariffs on India",
+     "title": "Jaishankar to travel to US for UNGA High Level Session, likely to discuss Russia sanctions Bill",
      "snippet": "",
-     "published_at": "2026-09-18T23:30:42+00:00"
+     "published_at": "2026-09-20T15:19:48+00:00"
     },
     {
      "source_name": "BBC",
@@ -51,11 +51,14 @@
     "event_type": "sanctions_trade_policy",
     "countries": [
      "United States",
-     "Russia",
      "India",
-     "China"
+     "China",
+     "Russia"
     ],
-    "entities": [],
+    "entities": [
+     "U.S. House",
+     "UNGA High Level Session"
+    ],
     "companies": [],
     "channels": [
      "tariffs_trade",
@@ -70,11 +73,14 @@
     "event_type": "sanctions_trade_policy",
     "countries": [
      "United States",
-     "Russia",
      "India",
-     "China"
+     "China",
+     "Russia"
     ],
-    "entities": [],
+    "entities": [
+     "U.S. House",
+     "UNGA High Level Session"
+    ],
     "companies": [],
     "channels": [
      "tariffs_trade",
@@ -87,15 +93,15 @@
    },
    "notes": [],
    "tokens": [
-    1186,
-    124
+    1187,
+    145
    ]
   },
   {
    "story_id": 111,
    "label": "geopolitics: Saudi-Houthi strikes, Riyadh air-raid alerts",
-   "headline": "Houthis launch missile and drone attacks targeting the Saudi capital of Riyadh.",
-   "summary": "The Houthi militia launched missiles and drones at Riyadh and Saudi oil facilities, and the coalition successfully intercepted a ballistic missile. This escalation raises fears of a rapid crisis in West Asia and a large Saudi response, impacting regional stability.",
+   "headline": "Houthis Battle Government Forces and Target Riyadh as Tensions Rise",
+   "summary": "Houthi forces clashed with Saudi-backed government troops in Yemen and launched attacks targeting the Saudi capital of Riyadh. This escalation threatens regional stability and causes stocks in the region to fall.",
    "summary_source": "stored",
    "regions": [
     "US",
@@ -104,15 +110,21 @@
    "articles": [
     {
      "source_name": "The New York Times",
-     "title": "In Significant Escalation, Houthis Attack Saudi Capital",
-     "snippet": "The Houthis, an Iranian-backed militia, said they had fired a wave of missiles and drones at Riyadh, and on Saudi oil facilities.",
-     "published_at": "2026-09-20T06:38:21+00:00"
+     "title": "Houthis Push to Expand Territory as Tensions With Saudi Arabia Rise",
+     "snippet": "The Iran-backed Houthi militia was engaged in fierce battles with the Saudi-backed government forces in Yemen on Sunday, as it seeks to maintain momentum in the war.",
+     "published_at": "2026-09-20T16:10:15+00:00"
     },
     {
      "source_name": "The Hindu",
-     "title": "U.S. fears rapid escalation in West Asia after Houthis attack Riyadh",
-     "snippet": "The Riyadh-led coalition confirmed on September 19, 2026 evening on X that a ballistic missile launched by the Houthis towards the capital was \"successfully intercepted and destroyed\"",
-     "published_at": "2026-09-20T06:26:29+00:00"
+     "title": "Trump claims Houthis agree not to fight U.S., as attacks mount on Saudi allies",
+     "snippet": "Trump’s latest comments to Fox News came as close U.S. ally Saudi Arabia is under growing pressure, with a missile targeting the capital Riyadh on Saturday, September 19.",
+     "published_at": "2026-09-20T15:26:11+00:00"
+    },
+    {
+     "source_name": "Reuters",
+     "title": "Saudi, Gulf stocks fall after Houthis claim Riyadh attacks",
+     "snippet": "",
+     "published_at": "2026-09-20T12:59:36+00:00"
     },
     {
      "source_name": "BBC",
@@ -125,20 +137,13 @@
      "title": "Secret Oman meeting: What did Houthis tell US as Saudi Arabia seeks help?",
      "snippet": "",
      "published_at": "2026-09-17T08:38:59+00:00"
-    },
-    {
-     "source_name": "Al Jazeera",
-     "title": "‘There will be a very sizeable Saudi response’ to Houthi attacks",
-     "snippet": "Nawaf Obaid tells Al Jazeera that Saudi Arabia’s response to Houthi attacks from Yemen will be massive.",
-     "published_at": "2026-09-20T09:30:51+00:00"
     }
    ],
    "event": {
     "event_type": "geopolitical_conflict",
     "countries": [
      "Saudi Arabia",
-     "Yemen",
-     "Iran"
+     "Yemen"
     ],
     "entities": [
      "Houthis",
@@ -148,8 +153,7 @@
     "channels": [
      "oil_supply",
      "shipping_routes",
-     "risk_sentiment",
-     "safe_haven_demand"
+     "risk_sentiment"
     ],
     "severity": "escalation",
     "policy_stance": "not_applicable",
@@ -160,8 +164,7 @@
     "event_type": "geopolitical_conflict",
     "countries": [
      "Saudi Arabia",
-     "Yemen",
-     "Iran"
+     "Yemen"
     ],
     "entities": [
      "Houthis",
@@ -171,8 +174,7 @@
     "channels": [
      "oil_supply",
      "shipping_routes",
-     "risk_sentiment",
-     "safe_haven_demand"
+     "risk_sentiment"
     ],
     "severity": "escalation",
     "policy_stance": "not_applicable",
@@ -181,8 +183,8 @@
    },
    "notes": [],
    "tokens": [
-    1247,
-    149
+    1218,
+    135
    ]
   },
   {
@@ -216,11 +218,15 @@
      "Saudi Arabia"
     ],
     "entities": [
-     "Houthis"
+     "Houthis",
+     "China",
+     "Iran",
+     "Saudi Arabia"
     ],
     "companies": [],
     "channels": [
      "shipping_routes",
+     "oil_supply",
      "risk_sentiment"
     ],
     "severity": "de_escalation",
@@ -236,11 +242,15 @@
      "Saudi Arabia"
     ],
     "entities": [
-     "Houthis"
+     "Houthis",
+     "China",
+     "Iran",
+     "Saudi Arabia"
     ],
     "companies": [],
     "channels": [
      "shipping_routes",
+     "oil_supply",
      "risk_sentiment"
     ],
     "severity": "de_escalation",
@@ -251,7 +261,7 @@
    "notes": [],
    "tokens": [
     983,
-    127
+    150
    ]
   },
   {
@@ -390,10 +400,12 @@
     "event_type": "geopolitical_conflict",
     "countries": [
      "United States",
-     "Denmark"
+     "Denmark",
+     "Greenland"
     ],
     "entities": [
-     "Greenland"
+     "Greenland",
+     "European Union"
     ],
     "companies": [],
     "channels": [
@@ -409,10 +421,12 @@
     "event_type": "geopolitical_conflict",
     "countries": [
      "United States",
-     "Denmark"
+     "Denmark",
+     "Greenland"
     ],
     "entities": [
-     "Greenland"
+     "Greenland",
+     "European Union"
     ],
     "companies": [],
     "channels": [
@@ -427,7 +441,7 @@
    "notes": [],
    "tokens": [
     1245,
-    122
+    134
    ]
   },
   {
@@ -461,7 +475,8 @@
      "Ukraine"
     ],
     "entities": [
-     "U.S. State Department"
+     "U.S. State Department",
+     "Joe Biden"
     ],
     "companies": [],
     "channels": [
@@ -480,7 +495,8 @@
      "Ukraine"
     ],
     "entities": [
-     "U.S. State Department"
+     "U.S. State Department",
+     "Joe Biden"
     ],
     "companies": [],
     "channels": [
@@ -495,7 +511,7 @@
    "notes": [],
    "tokens": [
     1051,
-    124
+    130
    ]
   },
   {
@@ -533,8 +549,9 @@
      "North Korea"
     ],
     "entities": [
+     "IAEA",
      "United Nations",
-     "IAEA"
+     "KCNA"
     ],
     "companies": [],
     "channels": [
@@ -551,8 +568,9 @@
      "North Korea"
     ],
     "entities": [
+     "IAEA",
      "United Nations",
-     "IAEA"
+     "KCNA"
     ],
     "companies": [],
     "channels": [
@@ -566,14 +584,14 @@
    "notes": [],
    "tokens": [
     1096,
-    114
+    120
    ]
   },
   {
    "story_id": 63,
    "label": "central bank: Federal Reserve raises rates",
-   "headline": "US Federal Reserve raises interest rates to fight persistent inflation",
-   "summary": "The US Federal Reserve raised its key interest rate for the first time in three years to fight high inflation and the effects of rising gas prices. This decision creates pressure on other central banks, like India's Reserve Bank, as they consider their own upcoming rate choices amid currency pressures.",
+   "headline": "US Federal Reserve raises interest rates to combat high inflation",
+   "summary": "The US Federal Reserve raised its key interest rate for the first time since 2023 to fight high inflation and the effects of renewed US-Iran conflict. This decision puts pressure on India's central bank to consider its own interest rate hikes due to currency and inflation pressures.",
    "summary_source": "generated",
    "regions": [],
    "articles": [
@@ -606,12 +624,14 @@
      "Reserve Bank of India"
     ],
     "companies": [
+     "Emkay",
      "HDFC Bank"
     ],
     "channels": [
      "us_interest_rates",
      "inflation",
-     "usd_strength"
+     "usd_strength",
+     "oil_supply"
     ],
     "severity": "major",
     "policy_stance": "hawkish",
@@ -628,12 +648,14 @@
      "Reserve Bank of India"
     ],
     "companies": [
+     "Emkay",
      "HDFC Bank"
     ],
     "channels": [
      "us_interest_rates",
      "inflation",
-     "usd_strength"
+     "usd_strength",
+     "oil_supply"
     ],
     "severity": "major",
     "policy_stance": "hawkish",
@@ -642,15 +664,15 @@
    },
    "notes": [],
    "tokens": [
-    1257,
-    142
+    1258,
+    155
    ]
   },
   {
    "story_id": 132,
    "label": "central bank: Bank of England seen holding rates",
-   "headline": "Bank of England holds interest rates steady amid rising inflation",
-   "summary": "The Bank of England kept its benchmark interest rate steady at 3.75 percent as inflation rose to 3.1 percent. This matters because growing price pressures from energy costs could lead to tighter monetary policies and future rate hikes.",
+   "headline": "Bank of England holds interest rates steady as inflation rises",
+   "summary": "The Bank of England kept its benchmark interest rate at 3.75 percent while pausing gilt sales as inflation rose to 3.1 percent. This matters because rising energy costs and inflation risks could lead to tighter monetary policies and future rate hikes.",
    "summary_source": "generated",
    "regions": [],
    "articles": [
@@ -719,7 +741,7 @@
    },
    "notes": [],
    "tokens": [
-    1275,
+    1278,
     124
    ]
   },
@@ -727,7 +749,7 @@
    "story_id": 39,
    "label": "currency: rupee slips below 96 per dollar",
    "headline": "Indian Rupee Settles Lower Against U.S. Dollar After Early Losses",
-   "summary": "The Indian rupee dropped below the 96 level against the U.S. dollar in early trade before ending slightly lower at 95.94. This movement matters because currency values affect the cost of imports and overall economic stability.",
+   "summary": "The Indian rupee ended slightly lower against the U.S. dollar after briefly slipping below the 96 level earlier in the day. This currency movement impacts the national economy and reflects ongoing global financial changes.",
    "summary_source": "generated",
    "regions": [],
    "articles": [
@@ -747,15 +769,15 @@
    "event": {
     "event_type": "macro_data_release",
     "countries": [
-     "India",
-     "United States"
+     "India"
     ],
     "entities": [
      "RBI"
     ],
     "companies": [],
     "channels": [
-     "inr_exchange_rate"
+     "inr_exchange_rate",
+     "oil_supply"
     ],
     "severity": "de_escalation",
     "policy_stance": "not_applicable",
@@ -765,15 +787,15 @@
    "raw_event": {
     "event_type": "macro_data_release",
     "countries": [
-     "India",
-     "United States"
+     "India"
     ],
     "entities": [
      "RBI"
     ],
     "companies": [],
     "channels": [
-     "inr_exchange_rate"
+     "inr_exchange_rate",
+     "oil_supply"
     ],
     "severity": "de_escalation",
     "policy_stance": "not_applicable",
@@ -782,8 +804,8 @@
    },
    "notes": [],
    "tokens": [
-    1067,
-    118
+    1060,
+    119
    ]
   },
   {
@@ -1050,10 +1072,7 @@
      "United States"
     ],
     "entities": [
-     "Richard A Stone",
-     "Carol Normandin",
-     "Ken Parker",
-     "Emily Normandin-Parker"
+     "California"
     ],
     "companies": [
      "Uber"
@@ -1061,7 +1080,7 @@
     "channels": [
      "company_specific"
     ],
-    "severity": "minor",
+    "severity": "moderate",
     "policy_stance": "not_applicable",
     "policy_actor": null,
     "is_new_development": true
@@ -1072,10 +1091,7 @@
      "United States"
     ],
     "entities": [
-     "Richard A Stone",
-     "Carol Normandin",
-     "Ken Parker",
-     "Emily Normandin-Parker"
+     "California"
     ],
     "companies": [
      "Uber"
@@ -1083,7 +1099,7 @@
     "channels": [
      "company_specific"
     ],
-    "severity": "minor",
+    "severity": "moderate",
     "policy_stance": "not_applicable",
     "policy_actor": null,
     "is_new_development": true
@@ -1091,7 +1107,7 @@
    "notes": [],
    "tokens": [
     1153,
-    140
+    116
    ]
   },
   {
@@ -1144,15 +1160,14 @@
      "India"
     ],
     "entities": [
-     "White House",
-     "Boston-based appeals court"
+     "White House"
     ],
     "companies": [],
     "channels": [
      "immigration_visas",
      "sector_specific"
     ],
-    "severity": "escalation",
+    "severity": "major",
     "policy_stance": "not_applicable",
     "policy_actor": null,
     "is_new_development": true
@@ -1164,15 +1179,14 @@
      "India"
     ],
     "entities": [
-     "White House",
-     "Boston-based appeals court"
+     "White House"
     ],
     "companies": [],
     "channels": [
      "immigration_visas",
      "sector_specific"
     ],
-    "severity": "escalation",
+    "severity": "major",
     "policy_stance": "not_applicable",
     "policy_actor": null,
     "is_new_development": true
@@ -1180,7 +1194,7 @@
    "notes": [],
    "tokens": [
     1360,
-    129
+    119
    ]
   },
   {
@@ -1243,7 +1257,8 @@
      "Irregular"
     ],
     "channels": [
-     "sector_specific"
+     "sector_specific",
+     "company_specific"
     ],
     "severity": "moderate",
     "policy_stance": "not_applicable",
@@ -1268,7 +1283,8 @@
      "Irregular"
     ],
     "channels": [
-     "sector_specific"
+     "sector_specific",
+     "company_specific"
     ],
     "severity": "moderate",
     "policy_stance": "not_applicable",
@@ -1278,7 +1294,7 @@
    "notes": [],
    "tokens": [
     1311,
-    148
+    155
    ]
   },
   {
@@ -1482,14 +1498,14 @@
     "entities": [
      "Kennedy Center",
      "Trump-Kennedy Centre",
-     "Foggy Bottom",
-     "Washington"
+     "Washington",
+     "Foggy Bottom"
     ],
     "companies": [],
     "channels": [
      "none"
     ],
-    "severity": "moderate",
+    "severity": "minor",
     "policy_stance": "not_applicable",
     "policy_actor": null,
     "is_new_development": true
@@ -1502,14 +1518,14 @@
     "entities": [
      "Kennedy Center",
      "Trump-Kennedy Centre",
-     "Foggy Bottom",
-     "Washington"
+     "Washington",
+     "Foggy Bottom"
     ],
     "companies": [],
     "channels": [
      "none"
     ],
-    "severity": "moderate",
+    "severity": "minor",
     "policy_stance": "not_applicable",
     "policy_actor": null,
     "is_new_development": true
@@ -1523,24 +1539,24 @@
   {
    "story_id": 29,
    "label": "politics: Russian parliamentary elections",
-   "headline": "Russians Head to the Polls for Parliamentary Elections",
-   "summary": "Russians are voting to choose lawmakers for their parliament in the country's first nationwide parliamentary race since the invasion of Ukraine. The election serves as a test of public discontent while the Kremlin seeks legitimacy and dominance.",
+   "headline": "Russians vote in parliamentary elections amid Ukraine war and economic strain.",
+   "summary": "Russians are heading to the polls to choose lawmakers for their parliament in the country's first nationwide parliamentary race since the invasion of Ukraine. The vote serves as a test of support for the war and public discontent with a struggling economy.",
    "summary_source": "stored",
    "regions": [
     "Global"
    ],
    "articles": [
     {
+     "source_name": "AP News",
+     "title": "Russia wraps up first wartime parliamentary election with Kremlin dominance all but assured",
+     "snippet": "",
+     "published_at": "2026-09-20T13:47:00+00:00"
+    },
+    {
      "source_name": "The Hindu",
      "title": "Russian election, cast as test of support for Ukraine war, enters final day",
      "snippet": "Most anti-war candidates ‌were barred from the ballot; those who did run from the liberal Yabloko party said they feared for their freedom after courts handed long jail terms to two senior party figures before the vote for comments about the conflict deemed illegal by authorities",
      "published_at": "2026-09-20T07:54:58+00:00"
-    },
-    {
-     "source_name": "Al Jazeera",
-     "title": "Russia’s elections are more than political theatre",
-     "snippet": "For the Kremlin, parliamentary elections remain a mechanism for political participation, feedback and legitimacy.",
-     "published_at": "2026-09-19T06:46:17+00:00"
     },
     {
      "source_name": "CNBC",
@@ -1549,16 +1565,16 @@
      "published_at": "2026-09-17T05:00:01+00:00"
     },
     {
+     "source_name": "Al Jazeera",
+     "title": "Russia’s elections are more than political theatre",
+     "snippet": "For the Kremlin, parliamentary elections remain a mechanism for political participation, feedback and legitimacy.",
+     "published_at": "2026-09-19T06:46:17+00:00"
+    },
+    {
      "source_name": "NPR",
      "title": "Russians head to the polls to choose lawmakers for their parliament",
      "snippet": "Russians head to the polls to choose lawmakers for their parliament, the Duma. It's Russia's first nationwide parliamentary race since launching its full scale invasion of Ukraine in 2022.",
      "published_at": "2026-09-18T23:04:57+00:00"
-    },
-    {
-     "source_name": "Hindustan Times",
-     "title": "Russia’s sham election is descending into farce",
-     "snippet": "The parliamentary vote may be followed by a bigger mobilisation for war",
-     "published_at": "2026-09-17T16:18:05+00:00"
     }
    ],
    "event": {
@@ -1603,7 +1619,7 @@
    },
    "notes": [],
    "tokens": [
-    1278,
+    1274,
     126
    ]
   }

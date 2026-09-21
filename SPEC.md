@@ -789,7 +789,10 @@ Done when all pages in section 11 work against real data.
     | Every 3 hours | 103 / 136 | 206 / 272 |
 
   - Every 3 hours is set from Phase 2 (2026-09-19). Runs line up with the digest hours, so each digest still follows a run by 30 minutes.
-- **Temperature.** Use a low temperature only where the provider recommends it (e.g. `claude-haiku-4-5`). Google recommends keeping Gemini 3 models at their default of 1.0, because lower values can cause looping.
+- **Temperature and reproducibility.** Use a low temperature only where the provider recommends it (e.g. `claude-haiku-4-5`). Google recommends keeping Gemini 3 models at their default of 1.0, because lower values can cause looping.
+  - **As built (2026-09-21):** `gemini-3.5-flash-lite` runs at temperature 0 with a fixed `llm.seed`, against that advice, because summaries and event extraction are classification tasks whose variance changed which playbook rules fired and so polluted the track record (7.9).
+  - Temperature 0 by itself is not enough: re-extracting the same 20 fixtures gave 7/20 identical events. With the seed it is 20/20. Google doesn't promise determinism, so re-check after a model change.
+  - The seed is Gemini-only; Anthropic ignores it.
 - Every stored LLM output records `model` and `prompt_version`. Bump `PROMPT_VERSION` whenever prompt text changes.
 - **Token logging.** Log input and output tokens per call and total per run, from the provider's usage data:
   - Gemini: `usageMetadata.promptTokenCount` is input; `candidatesTokenCount + thoughtsTokenCount` is output.
