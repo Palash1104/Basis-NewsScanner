@@ -142,6 +142,10 @@ class PipelineSettings(_Strict):
     # How many of a region's stories join the rerank's candidates, so the model can order
     # them before the slots are filled.
     reserved_candidate_pool: int = Field(default=10, ge=0)
+    # How old a story may be (from first_seen_at) and still take a reserved slot. The general
+    # pool is unaffected: this only stops the reserve from spending its five slots on stories
+    # that have been sitting unsummarized for days.
+    reserved_max_age_hours: int | None = Field(default=48, gt=0)
     max_articles_per_story_for_llm: int = Field(gt=0)
     snippet_max_chars: int = Field(default=500, gt=0)
 

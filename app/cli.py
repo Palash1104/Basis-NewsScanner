@@ -102,7 +102,7 @@ from app.pipeline.scoring import (
     track_record,
     unpriced_impacts,
 )
-from app.pipeline.sections import may_take_reserved_slot, only_from
+from app.pipeline.sections import fresh_enough, may_take_reserved_slot, only_from
 from app.pipeline.summarize import news_articles, resummarize_reason, summarize_stories
 from app.schedule import pipeline_hours
 
@@ -313,10 +313,12 @@ def run_pipeline(
                     report.errors.append({"stage": "rank", "error": note})
 
             def _can_reserve(story: Story) -> bool:
-                # A reserved slot is for news the digest would otherwise never carry: not
-                # sport or filler, and only where a summary is actually owed.
-                return may_take_reserved_slot(story) and (
-                    resummarize_reason(story, news_articles(story)) is not None
+                # A reserved slot is for news the digest would otherwise never carry: recent,
+                # not sport or filler, and only where a summary is actually owed.
+                return (
+                    fresh_enough(story, now, settings.pipeline.reserved_max_age_hours)
+                    and may_take_reserved_slot(story)
+                    and resummarize_reason(story, news_articles(story)) is not None
                 )
 
             top = select_with_reserved(top, settings, eligible=_can_reserve)
@@ -662,6 +664,7 @@ def run_digest(
                 settings.delivery.max_impacts_in_digest,
                 labels,
                 story_track_line(story, rules, settings.scoring.min_samples_to_show_rate, names),
+                now=now,
             )
             for story in stories
         ]

@@ -68,6 +68,7 @@ pipeline:
   # against a cutoff of 4.69. Inside max_stories_per_run, so it costs no LLM calls.
   reserved_slots: { IN: 5 }
   reserved_candidate_pool: 10
+  reserved_max_age_hours: 48
   max_articles_per_story_for_llm: 5
   # The reasoning model reorders this many top stories by real-world significance
   # before summarizing (SPEC 7.4). It decides which stories are summarized and which

@@ -15,19 +15,20 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Annotated
 
-from fastapi import Depends, FastAPI, Request
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.config import AssetConfig, Settings, load_assets, load_settings
 from app.db import make_read_only_engine, make_read_only_session_factory
 from app.models import Impact, Run, utcnow
 from app.pipeline.prices import format_move
 from app.pipeline.scoring import track_record
-from app.presentation import ORDER_WORDS
+from app.presentation import ORDER_WORDS, ORIGIN_LABEL, story_age
 from app.web import palette, queries
 
 log = logging.getLogger(__name__)
@@ -61,6 +62,9 @@ NAV = (
 REGION_FILTERS = (("", "All"), ("US", "US"), ("India", "India"), ("Global", "Global"))
 RANGE_OPTIONS = (("1d", "1D"), ("1w", "1W"), ("1m", "1M"))
 SPARK_WIDTH, SPARK_HEIGHT, SPARK_PAD = 68, 22, 2
+# The mockup's story detail draws a bigger line, at 300x64 with a 2px stroke.
+STORY_SPARK_WIDTH, STORY_SPARK_HEIGHT, STORY_SPARK_PAD = 300, 64, 6
+STORY_WINDOW = "1m"  # the story page shows the longest window the cache can fill
 
 
 @dataclass(frozen=True)
@@ -176,8 +180,16 @@ def sample_track_rows(session: Session, limit: int = 4) -> list[dict[str, str]]:
 
 
 def _in_zone(value: datetime | None, settings: Settings) -> str:
-    """Times are stored UTC and shown in settings.timezone (SPEC 0)."""
-    return value.astimezone(settings.tz).strftime("%H:%M") if value else ""
+    """Times are stored UTC and shown in settings.timezone (SPEC 0).
+
+    Today's times are bare, as in the mockup ("06:20"); anything older carries its date,
+    because a page can hold a story from last week next to one from this morning.
+    """
+    if value is None:
+        return ""
+    local = value.astimezone(settings.tz)
+    today = datetime.now(settings.tz).date()
+    return local.strftime("%H:%M" if local.date() == today else "%d %b %H:%M")
 
 
 def _unit(asset: AssetConfig | None) -> str:
@@ -272,6 +284,42 @@ def create_app(
         # HTMX asks for the list alone; a plain visit gets the whole page.
         name = "_feed.html" if request.headers.get("hx-request") else "index.html"
         return templates.TemplateResponse(request, name, context)
+
+    @web.get("/story/{story_id}", response_class=HTMLResponse)
+    def story(request: Request, session: ReadSession, story_id: int) -> HTMLResponse:
+        """One story: what it says, every call it made, and how those calls are doing."""
+        now = utcnow()
+        assets: dict[str, AssetConfig] = request.app.state.assets
+        found = queries.load_story(session, story_id)
+        if found is None:
+            raise HTTPException(status_code=404, detail=f"no story {story_id}")
+        detail = queries.story_detail(
+            session, found, assets, settings, now, track_record(session, "rule_id")
+        )
+        symbols = [call.symbol for call in detail.calls.shown]
+        context = base_context(request, session, active="today", now=now)
+        context |= {
+            "detail": detail,
+            "sparklines": queries.series_for(session, symbols, STORY_WINDOW, now),
+            "units": {symbol: _unit(assets.get(symbol)) for symbol in symbols},
+            "points": lambda item: queries.sparkline_points(
+                item, STORY_SPARK_WIDTH, STORY_SPARK_HEIGHT, STORY_SPARK_PAD
+            ),
+            "order_words": ORDER_WORDS,
+            "origin_label": ORIGIN_LABEL,
+            "age": story_age(found, now),
+        }
+        return templates.TemplateResponse(request, "story.html", context)
+
+    @web.exception_handler(StarletteHTTPException)
+    def not_found(request: Request, exc: StarletteHTTPException) -> HTMLResponse:
+        """A typed-in URL that doesn't exist gets a page, not a JSON blob."""
+        if exc.status_code != 404:
+            raise exc
+        with session_factory() as session:  # type: ignore[misc]
+            context = base_context(request, session, active="today")
+        context |= {"detail_text": str(exc.detail)}
+        return templates.TemplateResponse(request, "not_found.html", context, status_code=404)
 
     @web.get("/design", response_class=HTMLResponse)
     def design(request: Request, session: ReadSession) -> HTMLResponse:

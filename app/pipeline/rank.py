@@ -181,7 +181,10 @@ def reserved_pool(
     seen = {story.id for story in exclude}
     picked: list[Story] = []
     for region in settings.pipeline.reserved_slots:
-        for story in regional_candidates(stories, region, pool):
+        candidates = regional_candidates(
+            stories, region, pool, now, settings.pipeline.reserved_max_age_hours
+        )
+        for story in candidates:
             if story.id not in seen:
                 seen.add(story.id)
                 picked.append(story)

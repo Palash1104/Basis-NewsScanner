@@ -357,12 +357,22 @@ powershell -ExecutionPolicy Bypass -File scripts/install_tasks.ps1 [-Remove]   #
     "ipl" inside diplomats, "celeb" inside celebrate). Unknown sections (Google News
     redirects, ~10% of Indian articles) are not eligible: candidates are many, slots are few.
   - It also skips stories that don't need a summary, so a slot is never spent on a no-op.
+  - `reserved_max_age_hours` (48, from `first_seen_at`) stops the reserve working through the
+    backlog instead of covering today. Measured on run 25: a 24h cap would have dropped 3 of
+    the 5 picks (Sensex 34.9h, SBI strike 26.2h, BRICS exports 56.2h) for an FTA ratification,
+    a comedian's cancelled shows and a railway reshuffle, so 48h was chosen (user,
+    2026-09-22). The pool that run held 326 stories under 24h old and 26 older.
   - First live run (25, 2026-09-21): the rerank 503'd, so the fallback path ran, and the five
     slots went to Sensex/Nifty, BRICS exports, the SBI strike advisory, Kerala floods and
     Trump's India tariffs. All five were tagged `India` by the summary; no sport.
   - **US has no reserve** (user, 2026-09-21): only 73 US-only stories in 48h, max importance
     2.88, all single-outlet features, and 21 of 30 summarized stories already carry a `US`
     tag. **Re-check after a week of scheduled runs** with the same analysis before deciding.
+- Story age (`presentation.story_age`): a story summarized more than 12 hours after it was
+  first reported carries its age, because the reserved slots and carried-over summaries both
+  surface stories a day or more old. Hours up to 48, then days. The digest's meta line reads
+  "first reported 3d ago"; the feed puts "3d ago" on the timestamp line, which is the time it
+  describes; the story page spells out the phrase.
 - Daily price listings (`classify.py` `_PRICE_LISTING`): "Petrol, diesel prices today…",
   "Gold rate today", "Check rates in Delhi, Mumbai" are non-news, like roundups. A price
   *event* (a hike, a duty cut, a 50-month high) and a market preview ("Will Nifty extend

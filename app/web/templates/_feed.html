@@ -19,7 +19,9 @@
     <article class="story">
       <div class="story-meta">
         {% if story.category %}<span class="kicker kicker-accent">{{ story.category }}</span>{% endif %}
-        <span class="meta-line">{{ story.first_seen_at | ist }}</span>
+        <span class="meta-line">
+          {{ story.first_seen_at | ist }}{% if item.age %} · {{ item.age }}{% endif %}
+        </span>
         {% if story.regions %}
           <span class="meta-line">{{ story.regions | join(" · ") }}</span>
         {% endif %}
@@ -27,7 +29,9 @@
       </div>
 
       <div class="story-body">
-        <h2 class="story-headline">{{ story.headline }}</h2>
+        <h2 class="story-headline">
+          <a href="/story/{{ story.id }}">{{ story.headline }}</a>
+        </h2>
 
         {% if story.summary %}
           <div class="note"><p>{{ story.summary }}</p></div>

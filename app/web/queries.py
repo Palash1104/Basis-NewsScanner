@@ -16,10 +16,10 @@ from sqlalchemy.orm import Session, selectinload
 from app.config import AssetConfig, Settings
 from app.db import SEARCH_TABLE
 from app.delivery.format import SourceLink, pick_sources
-from app.models import Article, PriceBar, Story
-from app.pipeline.prices import DAILY, INTRADAY, move_labels
+from app.models import Article, Event, Impact, ImpactScore, PriceBar, RuleDisagreementRow, Story
+from app.pipeline.prices import DAILY, INTRADAY, format_move, move_labels
 from app.pipeline.scoring import TrackRow, story_track_line
-from app.presentation import AssetCall, StoryCalls, story_calls
+from app.presentation import AssetCall, StoryCalls, call_rank, story_age, story_calls
 
 # How far back the feed looks by default, and how many stories a page holds. Two days rather
 # than one: the pipeline runs eight times a day, but a day with a long gap (a laptop asleep,
@@ -54,6 +54,9 @@ class FeedStory:
     calls: StoryCalls
     sources: list[SourceLink] = field(default_factory=list)
     track_record: str | None = None
+    # "3d ago", only when the story broke well before it was summarized. It sits on the
+    # timestamp's own line, which is the time it is describing.
+    age: str | None = None
 
     @property
     def shown(self) -> list[AssetCall]:
@@ -133,9 +136,7 @@ def feed_page(
         # The reserved slots often summarize Indian stories days after they broke, and
         # windowing on first_seen_at alone would hide exactly those.
         cutoff = now - timedelta(hours=hours)
-        statement = statement.where(
-            (Story.first_seen_at >= cutoff) | (Story.updated_at >= cutoff)
-        )
+        statement = statement.where((Story.first_seen_at >= cutoff) | (Story.updated_at >= cutoff))
     if category:
         statement = statement.where(Story.category == category)
 
@@ -178,6 +179,7 @@ def feed_stories(
             calls=story_calls(story.impacts, assets, MAX_CALLS_PER_STORY, labels),
             sources=pick_sources(story.articles),
             track_record=story_track_line(story, rules, minimum, names),
+            age=story_age(story, now),
         )
         for story in stories
     ]
@@ -301,3 +303,108 @@ def story_count(session: Session, now: datetime, hours: int = FEED_HOURS) -> int
 
 def article_sources(story: Story) -> list[Article]:
     return [article for article in story.articles if not article.non_news]
+
+
+# ---------------------------------------------------------------- one story
+
+
+@dataclass
+class ScoredImpact:
+    """One call and how it turned out, for the story page."""
+
+    impact: Impact
+    name: str
+    unit: str
+    move: str | None
+    move_up: bool | None
+    label: str | None
+    scores: list[ImpactScore]
+
+
+@dataclass
+class StoryDetail:
+    """Everything /story/{id} shows: what the story says, what it called, and how those
+    calls are doing."""
+
+    story: Story
+    calls: StoryCalls
+    impacts: list[ScoredImpact]
+    articles: list[Article]
+    event: Event | None
+    disagreements: list[RuleDisagreementRow]
+    track_record: str | None = None
+
+    @property
+    def priced(self) -> int:
+        return sum(1 for row in self.impacts if row.move is not None)
+
+    @property
+    def judged(self) -> int:
+        return sum(1 for row in self.impacts if row.scores)
+
+
+def load_story(session: Session, story_id: int) -> Story | None:
+    return session.scalars(
+        select(Story)
+        .where(Story.id == story_id)
+        .options(
+            selectinload(Story.articles),
+            selectinload(Story.events),
+            selectinload(Story.impacts).selectinload(Impact.scores),
+        )
+    ).first()
+
+
+def story_detail(
+    session: Session,
+    story: Story,
+    assets: dict[str, AssetConfig],
+    settings: Settings,
+    now: datetime,
+    rules: Sequence[TrackRow],
+) -> StoryDetail:
+    """The story page's data. The calls are grouped exactly as the digest groups them, and
+    the table below them keeps every row, because that is what the scores hang off."""
+    labels = move_labels(session, story.impacts, assets, settings, now)
+    ranked = sorted(story.impacts, key=lambda impact: (*call_rank(impact), impact.symbol))
+    impacts = []
+    for impact in ranked:
+        asset = assets.get(impact.symbol)
+        move = up = None
+        priced = impact.reference_price is not None and impact.move_at_detection_pct is not None
+        if asset and priced:
+            move = format_move(asset, impact.reference_price, impact.move_at_detection_pct)
+            up = impact.move_at_detection_pct >= 0
+        impacts.append(
+            ScoredImpact(
+                impact=impact,
+                name=asset.display_name if asset else impact.symbol,
+                unit=" · ".join(
+                    part for part in ((asset.exchange, asset.currency) if asset else ()) if part
+                ),
+                move=move,
+                move_up=up,
+                label=labels.get(impact.id),
+                scores=sorted(impact.scores, key=lambda score: score.horizon_days),
+            )
+        )
+
+    names = {asset.symbol: asset.display_name for asset in assets.values()}
+    disagreements = list(
+        session.scalars(
+            select(RuleDisagreementRow)
+            .where(RuleDisagreementRow.story_id == story.id)
+            .order_by(RuleDisagreementRow.created_at.desc())
+        )
+    )
+    return StoryDetail(
+        story=story,
+        calls=story_calls(story.impacts, assets, len(story.impacts) or 1, labels),
+        impacts=impacts,
+        articles=sorted(story.articles, key=lambda article: article.published_at),
+        event=story.latest_event,
+        disagreements=disagreements,
+        track_record=story_track_line(
+            story, rules, settings.scoring.min_samples_to_show_rate, names
+        ),
+    )

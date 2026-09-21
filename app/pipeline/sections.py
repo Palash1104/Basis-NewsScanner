@@ -10,6 +10,7 @@ Sections are read as whole path segments, never as substrings of a headline slug
 
 import re
 from collections.abc import Sequence
+from datetime import datetime, timedelta
 from urllib.parse import urlsplit
 
 from app.models import Story
@@ -129,6 +130,17 @@ def may_take_reserved_slot(story: Story) -> bool:
     return any(url_sections(a.url) and not is_soft_section(a.url) for a in articles)
 
 
+def fresh_enough(story: Story, now: datetime, max_age_hours: int | None) -> bool:
+    """Whether a story is young enough for a reserved slot, measured from `first_seen_at`.
+
+    Hundreds of single-region stories wait unsummarized, some for days. Without a cap the
+    reserve would work through the backlog instead of covering what is happening now.
+    """
+    if max_age_hours is None:
+        return True
+    return story.first_seen_at >= now - timedelta(hours=max_age_hours)
+
+
 def source_regions(story: Story) -> set[str]:
     """The regions of the feeds a story came from (not the regions its summary is about)."""
     news = {a.source_region for a in story.articles if not a.non_news}
@@ -139,8 +151,16 @@ def only_from(story: Story, region: str) -> bool:
     return source_regions(story) == {region}
 
 
-def regional_candidates(stories: Sequence[Story], region: str, limit: int) -> list[Story]:
+def regional_candidates(
+    stories: Sequence[Story],
+    region: str,
+    limit: int,
+    now: datetime | None = None,
+    max_age_hours: int | None = None,
+) -> list[Story]:
     """The best stories carried only by that region's outlets, most important first."""
     single = [story for story in stories if only_from(story, region)]
+    if now is not None:
+        single = [story for story in single if fresh_enough(story, now, max_age_hours)]
     single.sort(key=lambda story: story.importance_score, reverse=True)
     return single[:limit]

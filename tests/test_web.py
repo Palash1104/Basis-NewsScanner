@@ -1,8 +1,10 @@
+import re
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import select
 from sqlalchemy.exc import OperationalError
 
 from app.config import Settings, load_assets
@@ -13,7 +15,7 @@ from app.db import (
     make_read_only_session_factory,
     make_session_factory,
 )
-from app.models import Article, Impact, Run, Story
+from app.models import Article, Event, Impact, ImpactScore, RuleDisagreementRow, Run, Story
 from app.web import palette, queries
 from app.web.main import create_app, ticker_items
 
@@ -445,3 +447,210 @@ def test_a_story_summarized_today_shows_even_if_it_broke_earlier(
     client = TestClient(create_app(settings, make_read_only_session_factory(engine)))
     body = client.get("/", params={"region": "India"}).text
     assert "software exports rise 8.2%" in body  # the apostrophe is HTML-escaped
+
+
+# ---------------------------------------------------------------- one story
+
+
+def _story_id(client: TestClient) -> int:
+    """The Red Sea story, found the way a reader would: from a link on the feed."""
+    body = client.get("/").text
+    match = re.search(r'href="/story/(\d+)">Houthi', body)
+    assert match, "the feed should link its headlines to the story page"
+    return int(match.group(1))
+
+
+def test_the_feed_links_to_the_story_page(client: TestClient) -> None:
+    assert client.get(f"/story/{_story_id(client)}").status_code == 200
+
+
+def test_the_story_page_shows_what_the_story_says(client: TestClient) -> None:
+    body = client.get(f"/story/{_story_id(client)}").text
+    assert "Houthi attacks close the Red Sea to tankers" in body
+    assert "Shipping is rerouting around the Cape." in body
+    assert "Geopolitics" in body and "Global" in body
+
+
+def test_the_story_page_lists_every_call_not_just_the_top_ones(client: TestClient) -> None:
+    body = client.get(f"/story/{_story_id(client)}").text
+    assert "Every call, and how it is doing" in body
+    for expected in ["Brent crude", "US 10-year yield", "Gold", "oil_supply_shock"]:
+        assert expected in body, expected
+    assert "playbook" in body and "LLM" in body  # both origins are named
+
+
+def test_the_story_page_shows_mixed_signals_and_both_mechanisms(client: TestClient) -> None:
+    body = client.get(f"/story/{_story_id(client)}").text
+    assert "mixed signals" in body
+    assert "Safe-haven demand vs Higher yields" in body
+
+
+def test_an_unpriced_call_and_a_missing_reference_are_spelled_out(client: TestClient) -> None:
+    body = client.get(f"/story/{_story_id(client)}").text
+    assert "no price yet" in body
+    assert "waiting for its market" in body
+
+
+def test_a_call_with_no_score_yet_says_not_due(client: TestClient) -> None:
+    assert "not due yet" in client.get(f"/story/{_story_id(client)}").text
+
+
+def test_scores_are_shown_with_their_workings(client: TestClient, database: Path) -> None:
+    """A hit is only meaningful next to the benchmark and the threshold it beat."""
+    story_id = _story_id(client)
+    engine = make_engine(database)
+    with make_session_factory(engine)() as session:
+        impact = session.scalars(select(Impact).where(Impact.symbol == "BZ=F")).one()
+        session.add(
+            ImpactScore(
+                impact_id=impact.id,
+                horizon_days=1,
+                asset_return=0.031,
+                benchmark_symbol="^GSPC",
+                benchmark_return=0.004,
+                excess_return=0.027,
+                threshold=0.012,
+                outcome="hit",
+                scored_at=NOW,
+            )
+        )
+        session.commit()
+    engine.dispose()
+
+    body = client.get(f"/story/{story_id}").text
+    assert "1d hit" in body
+    assert "asset +3.1%" in body and "^GSPC" in body
+    assert "excess +2.7%" in body and "needs 1.2%" in body
+
+
+def test_the_event_and_its_provenance_are_shown(client: TestClient, database: Path) -> None:
+    story_id = _story_id(client)
+    engine = make_engine(database)
+    with make_session_factory(engine)() as session:
+        session.add(
+            Event(
+                story_id=story_id,
+                event_type="geopolitical_conflict",
+                countries=["Yemen", "Saudi Arabia"],
+                regions=["Global"],
+                entities=["Houthis"],
+                companies=[],
+                channels=["oil_supply", "shipping_routes"],
+                severity="escalation",
+                policy_stance="not_applicable",
+                policy_actor=None,
+                is_new_development=True,
+                model="gemini-3.5-flash-lite",
+                prompt_version="event-v3",
+                temperature=0.0,
+                seed=20260921,
+                created_at=NOW,
+            )
+        )
+        session.commit()
+    engine.dispose()
+
+    body = client.get(f"/story/{story_id}").text
+    assert "geopolitical_conflict" in body and "escalation" in body
+    assert "Yemen, Saudi Arabia" in body
+    assert "oil_supply, shipping_routes" in body
+    assert "event-v3" in body and "temperature 0.0" in body and "seed 20260921" in body
+
+
+def test_a_story_with_no_event_says_so(client: TestClient) -> None:
+    assert "No event extracted" in client.get(f"/story/{_story_id(client)}").text
+
+
+def test_rule_disagreements_are_shown_with_their_reason(client: TestClient, database: Path) -> None:
+    story_id = _story_id(client)
+    engine = make_engine(database)
+    with make_session_factory(engine)() as session:
+        session.add(
+            RuleDisagreementRow(
+                story_id=story_id,
+                event_id=None,
+                rule_id="us_nato_defense_spending",
+                reason="the story is about shipping, not defence budgets",
+                model="gemini-3.5-flash-lite",
+                prompt_version="impact-v1",
+                temperature=0.0,
+                seed=20260921,
+                created_at=NOW,
+            )
+        )
+        session.commit()
+    engine.dispose()
+
+    body = client.get(f"/story/{story_id}").text
+    assert "Where the model disputed a rule" in body
+    assert "us_nato_defense_spending" in body
+    assert "the story is about shipping, not defence budgets" in body
+    assert "impact-v1" in body
+
+
+def test_every_source_article_is_listed_with_its_link(client: TestClient) -> None:
+    body = client.get(f"/story/{_story_id(client)}").text
+    assert "Tankers avoid the Red Sea" in body and "reuters.example/red-sea" in body
+    assert "Freight rates jump" in body and "ft.example/red-sea" in body
+
+
+def test_the_summary_provenance_is_on_the_page(client: TestClient, database: Path) -> None:
+    story_id = _story_id(client)
+    engine = make_engine(database)
+    with make_session_factory(engine)() as session:
+        story = session.get(Story, story_id)
+        story.model = "gemini-3.5-flash-lite"
+        story.prompt_version = "summary-v3"
+        story.temperature = 0.0
+        story.seed = 20260921
+        session.commit()
+    engine.dispose()
+
+    body = client.get(f"/story/{story_id}").text
+    assert "summary-v3" in body and "temperature 0.0" in body and "seed 20260921" in body
+
+
+def test_a_story_that_does_not_exist_gets_a_page_not_a_json_blob(client: TestClient) -> None:
+    response = client.get("/story/999999")
+    assert response.status_code == 404
+    assert "Not found" in response.text
+    assert "<html" in response.text
+
+
+def test_a_story_with_no_calls_says_so_on_its_page(client: TestClient, database: Path) -> None:
+    engine = make_read_only_engine(database)
+    with make_read_only_session_factory(engine)() as session:
+        quiet = session.scalars(select(Story).where(Story.headline.like("Parliament%"))).one()
+    assert "No market impact identified." in client.get(f"/story/{quiet.id}").text
+
+
+def test_an_older_story_carries_its_age_on_the_feed(database: Path, settings: Settings) -> None:
+    """The time shown is when the story broke, so the age belongs on that line, not a new one."""
+    engine = make_engine(database)
+    with make_session_factory(engine)() as session:
+        session.add(
+            Story(
+                first_seen_at=NOW - timedelta(days=3),
+                updated_at=NOW - timedelta(minutes=10),
+                headline="India-New Zealand FTA ratified",
+                summary="It comes into force next month.",
+                status="summarized",
+                category="Economy & Markets",
+                regions=["India"],
+                importance_score=3.3,
+            )
+        )
+        session.commit()
+    engine.dispose()
+
+    engine = make_read_only_engine(database)
+    client = TestClient(create_app(settings, make_read_only_session_factory(engine)))
+    body = client.get("/", params={"region": "India"}).text
+    assert "India-New Zealand FTA ratified" in body
+    assert "d ago" in body
+
+
+def test_a_fresh_story_carries_no_age(client: TestClient) -> None:
+    body = client.get("/").text
+    assert "Houthi attacks close the Red Sea to tankers" in body
+    assert "first reported" not in body

@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 from app.config import AssetConfig
 from app.models import Article, Impact, Story
 from app.pipeline.dedupe import normalize_source
-from app.presentation import AssetCall, story_calls
+from app.presentation import AssetCall, story_age, story_calls
 
 TELEGRAM_LIMIT = 4096
 MAX_SOURCE_LINKS = 3
@@ -37,6 +37,7 @@ class DigestItem:
     sources: list[SourceLink]
     impacts: list[str] = field(default_factory=list)  # formatted impact lines
     track_record: str | None = None  # only when a contributing rule has enough judged calls
+    age: str | None = None  # "first reported 3d ago", only when the story broke well earlier
 
 
 def pick_sources(articles: Sequence[Article], limit: int = MAX_SOURCE_LINKS) -> list[SourceLink]:
@@ -117,7 +118,9 @@ def digest_item(
     max_impacts: int = 6,
     labels: dict[int, str] | None = None,
     track_record: str | None = None,
+    now: datetime | None = None,
 ) -> DigestItem:
+    age = story_age(story, now) if now else None
     return DigestItem(
         headline=story.headline,
         summary=story.summary or "",
@@ -127,6 +130,7 @@ def digest_item(
         sources=pick_sources(story.articles),
         impacts=impact_lines(story.impacts, assets, max_impacts, labels) if assets else [],
         track_record=track_record,
+        age=f"first reported {age}" if age else None,
     )
 
 
@@ -142,7 +146,9 @@ def _text(value: str) -> str:
 
 def format_story(item: DigestItem) -> str:
     lines = [f"<b>{_text(item.headline)}</b>"]
-    meta = " · ".join(part for part in (item.category, ", ".join(item.regions)) if part)
+    meta = " · ".join(
+        part for part in (item.category, ", ".join(item.regions), item.age) if part
+    )
     if meta:
         lines.append(f"<i>{_text(meta)}</i>")
     lines.append(_text(item.summary))

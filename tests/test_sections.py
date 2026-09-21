@@ -2,6 +2,7 @@ from datetime import UTC, datetime, timedelta
 
 from app.models import Article, Story
 from app.pipeline.sections import (
+    fresh_enough,
     is_soft_section,
     may_take_reserved_slot,
     only_from,
@@ -150,3 +151,41 @@ def test_recent_articles_are_what_regions_are_read_from() -> None:
     story = _story(HARD[0])
     story.articles[0].published_at = NOW - timedelta(days=2)
     assert only_from(story, "IN")
+
+
+# ---------------------------------------------------------------- freshness
+
+
+def test_a_recent_story_is_fresh_enough() -> None:
+    story = _story(HARD[0])
+    story.first_seen_at = NOW - timedelta(hours=23)
+    assert fresh_enough(story, NOW, 24)
+
+
+def test_a_story_older_than_the_cap_is_not() -> None:
+    """Hundreds of Indian stories wait unsummarized; without a cap the reserve would work
+    through the backlog instead of covering what is happening now."""
+    story = _story(HARD[0])
+    story.first_seen_at = NOW - timedelta(hours=25)
+    assert not fresh_enough(story, NOW, 24)
+
+
+def test_no_cap_means_no_age_limit() -> None:
+    story = _story(HARD[0])
+    story.first_seen_at = NOW - timedelta(days=30)
+    assert fresh_enough(story, NOW, None)
+
+
+def test_the_candidate_pool_drops_stale_stories() -> None:
+    fresh = _story(HARD[0])
+    fresh.first_seen_at = NOW - timedelta(hours=6)
+    fresh.importance_score = 2.0
+    stale = _story(HARD[1])
+    stale.first_seen_at = NOW - timedelta(hours=40)
+    stale.importance_score = 9.0  # more important, and still not eligible
+
+    picked = regional_candidates([stale, fresh], "IN", limit=5, now=NOW, max_age_hours=24)
+
+    assert picked == [fresh]
+    # Without a cap the older, higher-scoring story wins.
+    assert regional_candidates([stale, fresh], "IN", limit=5)[0] is stale

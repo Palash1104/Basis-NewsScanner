@@ -11,9 +11,10 @@ show.
 
 from collections.abc import Sequence
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta
 
 from app.config import AssetConfig
-from app.models import Impact
+from app.models import Impact, Story
 from app.pipeline.prices import format_move
 
 _ORDER_RANK = {"first": 0, "second": 1}
@@ -67,8 +68,33 @@ class StoryCalls:
         return bool(self.shown or self.extra)
 
 
-def _rank(impact: Impact) -> tuple[int, int]:
+# A story summarized this long after it broke is worth dating: the reserved slots and the
+# carry-over of pending summaries both surface stories a day or more old, and a reader
+# should not have to guess whether "Kerala floods" happened this morning.
+AGE_WORTH_SAYING = timedelta(hours=12)
+# Past this, hours stop being useful and days read better.
+AGE_IN_DAYS_AFTER = timedelta(hours=48)
+
+
+def story_age(story: Story, now: datetime) -> str | None:
+    """How long ago a story was first reported ("14h ago", "3d ago"), or None when it broke
+    and was summarized close enough together that saying so adds nothing."""
+    if story.updated_at - story.first_seen_at <= AGE_WORTH_SAYING:
+        return None
+    age = now - story.first_seen_at
+    if age < timedelta(0):
+        return None
+    if age >= AGE_IN_DAYS_AFTER:
+        return f"{int(age.total_seconds() // 86400)}d ago"
+    return f"{int(age.total_seconds() // 3600)}h ago"
+
+
+def call_rank(impact: Impact) -> tuple[int, int]:
+    """First-order before second-order, then by confidence: the order every reader sees."""
     return _ORDER_RANK[impact.order], _CONFIDENCE_RANK[impact.confidence]
+
+
+_rank = call_rank
 
 
 def _display(symbol: str, assets: dict[str, AssetConfig], direction: str) -> str:

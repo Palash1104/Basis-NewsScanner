@@ -493,3 +493,250 @@
   font-size: 12px;
   color: var(--color-muted);
 }
+
+/* ---------------------------------------------------------------- one story */
+
+/* The mockup's story detail: a 52px headline, a 19px intro, then the assets it moves. */
+.back {
+  margin: 0 0 var(--space-4);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.story-page {
+  max-width: 900px;
+}
+
+.story-page-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  font-size: 11px;
+  color: var(--color-muted);
+  padding-bottom: var(--space-3);
+}
+
+.story-page-headline {
+  font-size: 52px;
+  line-height: 1.04;
+  margin: 0 0 var(--space-4);
+  max-width: 24ch;
+  text-wrap: pretty;
+}
+
+.lede {
+  font-size: 19px;
+  line-height: 1.5;
+  max-width: 58ch;
+  color: var(--color-body-dim);
+}
+
+.callout {
+  border-top: 2px solid var(--color-accent);
+  padding-top: var(--space-3);
+  max-width: 62ch;
+  font-size: 14px;
+}
+
+.story-page .story-track {
+  font-size: 12px;
+  font-style: italic;
+  color: var(--color-muted);
+}
+
+/* One asset the story moves: name and unit, a 300x64 line, the move, then why. */
+.asset-row {
+  display: grid;
+  grid-template-columns: 200px 300px minmax(0, 1fr);
+  gap: var(--space-4);
+  align-items: center;
+  padding: 18px 0;
+  border-bottom: 1px solid var(--rule-medium);
+}
+
+.asset-row-conflict {
+  border-top: 2px solid var(--color-accent);
+}
+
+.asset-id {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.asset-name {
+  font-size: 17px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+}
+
+.asset-name .arrow {
+  font-weight: 400;
+}
+
+.asset-unit {
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-muted);
+}
+
+.spark-large {
+  overflow: visible;
+}
+
+.spark-large .up {
+  stroke: var(--color-up);
+}
+
+.spark-large .down {
+  stroke: var(--color-down);
+}
+
+.asset-move {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-2);
+  font-size: 17px;
+  font-weight: 800;
+}
+
+.asset-window {
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-muted);
+}
+
+.asset-nochart,
+.story-page .muted {
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--color-muted);
+}
+
+.asset-why {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-2);
+}
+
+.asset-why p {
+  margin: 0;
+  font-size: 13px;
+  color: var(--color-body-dim);
+  max-width: 62ch;
+}
+
+.asset-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+/* The scores table under the assets. */
+.cell-note {
+  font-size: 11px;
+  color: var(--color-muted);
+}
+
+.score + .score {
+  margin-top: var(--space-1);
+}
+
+.score-hit {
+  color: var(--color-up);
+  font-weight: 800;
+}
+
+.score-miss {
+  color: var(--color-down);
+  font-weight: 800;
+}
+
+.score-no_move,
+.score-unscorable {
+  color: var(--color-muted);
+}
+
+.disagreement {
+  border-top: 2px solid var(--color-accent);
+  margin-bottom: var(--space-3);
+  max-width: 62ch;
+}
+
+.disagreement p {
+  margin: 0 0 var(--space-2);
+  font-size: 14px;
+}
+
+.event-grid {
+  display: grid;
+  grid-template-columns: 150px minmax(0, 1fr);
+  gap: 6px var(--space-4);
+  margin: 0 0 var(--space-3);
+  font-size: 14px;
+}
+
+.event-grid dt {
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-muted);
+  padding-top: 3px;
+}
+
+.event-grid dd {
+  margin: 0;
+}
+
+/* The source articles, in the mockup's watchlist-news row shape. */
+.article {
+  display: grid;
+  grid-template-columns: 120px minmax(0, 1fr);
+  gap: var(--space-4);
+  padding: 20px 0;
+  border-bottom: 1px solid var(--rule-light);
+}
+
+.article-aside {
+  opacity: 0.75;
+}
+
+.article-when {
+  font-size: 11px;
+  color: var(--color-muted);
+}
+
+.article-body a {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.article-source {
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-muted);
+  margin-top: 2px;
+}
+
+.article-snippet {
+  margin: var(--space-2) 0 0;
+  font-size: 13px;
+  color: var(--color-body-dim);
+  max-width: 62ch;
+}
+
+.provenance {
+  margin-top: var(--space-6);
+  font-size: 11px;
+}

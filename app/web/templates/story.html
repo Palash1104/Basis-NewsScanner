@@ -1,0 +1,251 @@
+{% extends "base.html" %}
+{% block title %}BASIS · {{ detail.story.headline }}{% endblock %}
+
+{% block content %}
+  {% set story = detail.story %}
+  <p class="back"><a href="/">&larr; Today</a></p>
+
+  <article class="story-page">
+    <div class="story-page-meta">
+      {% if story.category %}<span class="kicker kicker-accent">{{ story.category }}</span>{% endif %}
+      <span>
+        {{ story.first_seen_at | ist }}{% if age %} · first reported {{ age }}{% endif %}
+      </span>
+      {% if story.regions %}<span>{{ story.regions | join(" · ") }}</span>{% endif %}
+      <span>{{ detail.articles | length }} article{{ "" if detail.articles | length == 1 else "s" }}</span>
+    </div>
+
+    <h1 class="story-page-headline">{{ story.headline }}</h1>
+
+    {% if story.summary %}<p class="lede">{{ story.summary }}</p>{% endif %}
+
+    {% if story.sources_disagree and story.disagreement_note %}
+      <p class="callout"><b>Sources disagree:</b> {{ story.disagreement_note }}</p>
+    {% endif %}
+
+    {% if detail.track_record %}<p class="story-track">{{ detail.track_record }}</p>{% endif %}
+
+    <div class="section-label">
+      <span class="kicker">Assets affected</span><span class="line"></span>
+    </div>
+
+    {% if detail.calls.shown %}
+      <div class="asset-rows">
+        {% for call in detail.calls.shown %}
+          <div class="asset-row{% if call.conflict %} asset-row-conflict{% endif %}">
+            <div class="asset-id">
+              <span class="asset-name">
+                {%- if call.conflict %}<span class="arrow" title="called both ways">↕</span>
+                {%- elif call.direction == "up" %}<span class="arrow" title="called up">▲</span>
+                {%- else %}<span class="arrow" title="called down">▼</span>{% endif %}
+                {{ call.name }}
+              </span>
+              {% if units.get(call.symbol) %}
+                <span class="asset-unit">{{ units[call.symbol] }}</span>
+              {% endif %}
+            </div>
+            {% set series = sparklines.get(call.symbol) %}
+            {% if series and series.points %}
+              <svg class="spark-large" viewBox="0 0 300 64" width="300" height="64" aria-hidden="true">
+                <polyline points="{{ points(series) }}" fill="none" stroke-width="2"
+                  vector-effect="non-scaling-stroke" stroke-linejoin="round"
+                  class="{{ 'up' if series.rose else 'down' }}" />
+              </svg>
+            {% else %}
+              <span class="asset-nochart">no cached prices</span>
+            {% endif %}
+            <div class="asset-move">
+              {% if call.move %}
+                <span class="{{ 'up' if call.move_up else 'down' }}">{{ call.move }}</span>
+                <span class="asset-window">since news</span>
+                {% if call.label %}<span class="tag tag-outline">{{ call.label }}</span>{% endif %}
+              {% else %}
+                <span class="asset-nochart">no price yet</span>
+              {% endif %}
+            </div>
+            <div class="asset-why">
+              <div class="asset-tags">
+                {% if call.conflict %}
+                  <span class="tag tag-outline">mixed signals</span>
+                {% else %}
+                  <span class="tag tag-neutral">{{ order_words[call.order] }}</span>
+                  <span class="tag tag-neutral">{{ call.confidence }}</span>
+                {% endif %}
+                <span class="tag tag-accent">{{ call.origin_label }}</span>
+                {% if call.rule_count > 1 %}
+                  <span class="tag tag-outline">{{ call.rule_count }} rules</span>
+                {% endif %}
+              </div>
+              <p>{{ call.mechanism }}</p>
+            </div>
+          </div>
+        {% endfor %}
+      </div>
+    {% else %}
+      <p class="story-none">No market impact identified.</p>
+    {% endif %}
+
+    {% if detail.impacts %}
+      <div class="section-label">
+        <span class="kicker">Every call, and how it is doing</span><span class="line"></span>
+      </div>
+      <p class="sub">
+        {{ detail.impacts | length }} call{{ "" if detail.impacts | length == 1 else "s" }} ·
+        {{ detail.priced }} priced · {{ detail.judged }} judged. Scores are the close N trading
+        days on, against the asset's own volatility; the move above is since the news broke.
+      </p>
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Asset</th>
+            <th>Call</th>
+            <th>Rule</th>
+            <th>Origin</th>
+            <th>Reference</th>
+            <th>Since news</th>
+            <th>Scores</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in detail.impacts %}
+            <tr>
+              <td>
+                <b>{{ row.name }}</b>
+                {% if row.unit %}<div class="cell-note">{{ row.unit }}</div>{% endif %}
+              </td>
+              <td>
+                {{ "▲ up" if row.impact.direction == "up" else "▼ down" }}
+                <div class="cell-note">
+                  {{ order_words[row.impact.order] }} · {{ row.impact.confidence }}
+                  {%- if row.impact.horizon %} · {{ row.impact.horizon }}{% endif %}
+                  {%- if row.impact.conflict %} · mixed signals{% endif %}
+                </div>
+              </td>
+              <td>{{ row.impact.rule_id or "—" }}</td>
+              <td>{{ origin_label.get(row.impact.origin, row.impact.origin) }}</td>
+              <td>
+                {% if row.impact.reference_price is not none %}
+                  {{ "%.2f" | format(row.impact.reference_price) }}
+                  <div class="cell-note">{{ row.impact.reference_time | ist }}</div>
+                {% else %}
+                  <span class="muted">waiting for its market</span>
+                {% endif %}
+              </td>
+              <td>
+                {% if row.move %}
+                  <span class="{{ 'up' if row.move_up else 'down' }}">{{ row.move }}</span>
+                  {% if row.label %}<div class="cell-note">{{ row.label }}</div>{% endif %}
+                {% else %}
+                  <span class="muted">—</span>
+                {% endif %}
+              </td>
+              <td>
+                {% if row.scores %}
+                  {% for score in row.scores %}
+                    <div class="score score-{{ score.outcome }}">
+                      {{ score.horizon_days }}d {{ score.outcome | replace("_", " ") }}
+                      {% if score.excess_return is not none %}
+                        <span class="cell-note">
+                          asset {{ "%+.1f" | format(score.asset_return * 100) }}%
+                          {%- if score.benchmark_symbol %} · vs {{ score.benchmark_symbol }}
+                            {{ "%+.1f" | format(score.benchmark_return * 100) }}%{% endif %}
+                          · excess {{ "%+.1f" | format(score.excess_return * 100) }}%
+                          {%- if score.threshold is not none %}
+                            · needs {{ "%.1f" | format(score.threshold * 100) }}%{% endif %}
+                        </span>
+                      {% endif %}
+                    </div>
+                  {% endfor %}
+                {% else %}
+                  <span class="muted">not due yet</span>
+                {% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% endif %}
+
+    {% if detail.disagreements %}
+      <div class="section-label">
+        <span class="kicker">Where the model disputed a rule</span><span class="line"></span>
+      </div>
+      {% for row in detail.disagreements %}
+        <div class="panel disagreement">
+          <p class="kicker kicker-accent">{{ row.rule_id }}</p>
+          <p>{{ row.reason }}</p>
+          <p class="cell-note">
+            {{ row.model }} · {{ row.prompt_version }}
+            {%- if row.temperature is not none %} · temperature {{ row.temperature }}{% endif %}
+            {%- if row.seed is not none %} · seed {{ row.seed }}{% endif %}
+            · {{ row.created_at | ist }}
+          </p>
+        </div>
+      {% endfor %}
+      <p class="sub">
+        The rule's calls were still written. They were demoted to low confidence only if they
+        were written in the same run: an impact is the call as it was made.
+      </p>
+    {% endif %}
+
+    <div class="section-label">
+      <span class="kicker">The event the model extracted</span><span class="line"></span>
+    </div>
+    {% if detail.event %}
+      <div class="panel event">
+        <dl class="event-grid">
+          <dt>type</dt><dd>{{ detail.event.event_type }}</dd>
+          <dt>severity</dt><dd>{{ detail.event.severity }}</dd>
+          <dt>policy stance</dt><dd>{{ detail.event.policy_stance }}</dd>
+          <dt>policy actor</dt><dd>{{ detail.event.policy_actor or "—" }}</dd>
+          <dt>countries</dt><dd>{{ detail.event.countries | join(", ") or "—" }}</dd>
+          <dt>regions</dt><dd>{{ detail.event.regions | join(", ") or "—" }}</dd>
+          <dt>entities</dt><dd>{{ detail.event.entities | join(", ") or "—" }}</dd>
+          <dt>companies</dt><dd>{{ detail.event.companies | join(", ") or "—" }}</dd>
+          <dt>channels</dt><dd>{{ detail.event.channels | join(", ") or "—" }}</dd>
+          <dt>new development</dt><dd>{{ "yes" if detail.event.is_new_development else "no" }}</dd>
+        </dl>
+        <p class="cell-note">
+          {{ detail.event.model }} · {{ detail.event.prompt_version }}
+          {%- if detail.event.temperature is not none %}
+            · temperature {{ detail.event.temperature }}{% endif %}
+          {%- if detail.event.seed is not none %} · seed {{ detail.event.seed }}{% endif %}
+          · extracted {{ detail.event.created_at | ist }}
+        </p>
+      </div>
+    {% else %}
+      <p class="story-none">
+        No event extracted{% if story.event_pending %}: owed, and the next run will do it{% endif %}.
+      </p>
+    {% endif %}
+
+    <div class="section-label">
+      <span class="kicker">Sources</span><span class="line"></span>
+    </div>
+    <div class="articles">
+      {% for article in detail.articles %}
+        <div class="article{% if article.non_news %} article-aside{% endif %}">
+          <div class="article-when">
+            <div>{{ article.published_at | ist }}</div>
+            <div class="cell-note">{{ article.source_region }}</div>
+          </div>
+          <div class="article-body">
+            <a href="{{ article.url }}" rel="noreferrer noopener" target="_blank">{{ article.title }}</a>
+            <div class="article-source">
+              {{ article.source_name }}
+              {%- if article.non_news %} · not counted as a source{% endif %}
+            </div>
+            {% if article.snippet %}<p class="article-snippet">{{ article.snippet }}</p>{% endif %}
+          </div>
+        </div>
+      {% endfor %}
+    </div>
+
+    <p class="sub provenance">
+      Summary: {{ story.model or "—" }} · {{ story.prompt_version or "—" }}
+      {%- if story.temperature is not none %} · temperature {{ story.temperature }}{% endif %}
+      {%- if story.seed is not none %} · seed {{ story.seed }}{% endif %}
+      · written {{ story.updated_at | ist }} · story {{ story.id }} · status {{ story.status }}
+    </p>
+  </article>
+{% endblock %}

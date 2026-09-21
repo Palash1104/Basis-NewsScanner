@@ -12,6 +12,7 @@ from app.delivery.format import (
     FOOTER,
     DigestItem,
     SourceLink,
+    digest_item,
     format_digest,
     format_story,
     impact_lines,
@@ -19,7 +20,7 @@ from app.delivery.format import (
     telegram_length,
 )
 from app.delivery.telegram import TelegramError, get_me, send_messages
-from app.models import Article, Impact
+from app.models import Article, Impact, Story
 from tests.conftest import NOW
 
 KOLKATA = ZoneInfo("Asia/Kolkata")
@@ -330,3 +331,43 @@ def test_yield_moves_are_shown_in_points_with_the_unit() -> None:
 def test_impacts_without_a_price_show_the_name_alone() -> None:
     (line,) = impact_lines([_impact("BZ=F", "up")], ASSETS, limit=6)
     assert line.startswith("▲ Brent crude · 1st · medium · playbook")
+
+
+# ---------------------------------------------------------------- story age
+
+
+def _aged(first_seen_hours: int, summarized_hours: int) -> Story:
+    """A story that broke `first_seen_hours` ago and was summarized `summarized_hours` ago."""
+    return Story(
+        first_seen_at=NOW - timedelta(hours=first_seen_hours),
+        updated_at=NOW - timedelta(hours=summarized_hours),
+        headline="Kerala floods",
+        summary="Rain.",
+        category="Science & Health",
+        regions=["India"],
+        status="summarized",
+    )
+
+
+def test_a_story_summarized_long_after_it_broke_is_dated(settings: Settings) -> None:
+    """The reserved slots and carried-over summaries both surface older stories; a reader
+    should not have to guess whether this happened this morning."""
+    item = digest_item(_aged(first_seen_hours=30, summarized_hours=1), now=NOW)
+    assert item.age == "first reported 30h ago"
+    assert "Science &amp; Health · India · first reported 30h ago" in format_story(item)
+
+
+def test_a_story_older_than_two_days_is_counted_in_days(settings: Settings) -> None:
+    item = digest_item(_aged(first_seen_hours=80, summarized_hours=2), now=NOW)
+    assert item.age == "first reported 3d ago"
+
+
+def test_a_story_summarized_as_it_broke_is_not_dated(settings: Settings) -> None:
+    """Most stories are summarized within a run or two, and saying "2h ago" adds nothing."""
+    item = digest_item(_aged(first_seen_hours=3, summarized_hours=1), now=NOW)
+    assert item.age is None
+    assert "first reported" not in format_story(item)
+
+
+def test_the_age_is_left_out_when_no_time_is_given(settings: Settings) -> None:
+    assert digest_item(_aged(first_seen_hours=40, summarized_hours=1)).age is None
