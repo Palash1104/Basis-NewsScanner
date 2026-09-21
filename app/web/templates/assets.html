@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% block title %}BASIS · assets{% endblock %}
+
+{% block content %}
+  <div class="screen-head">
+    <div>
+      <h1>Assets</h1>
+      <p class="sub">
+        {{ rows | length }} of {{ universe }} in the universe have been called · most recently
+        called first
+      </p>
+    </div>
+  </div>
+
+  {% if rows %}
+    <table class="table assets-table">
+      <thead>
+        <tr>
+          <th>Asset</th>
+          <th>Last called</th>
+          <th>Calls</th>
+          <th>Stories</th>
+          <th>Judged</th>
+          <th>Rate</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in rows %}
+          <tr>
+            <td>
+              <a href="/asset/{{ row.asset.symbol | urlencode }}"><b>{{ row.asset.display_name }}</b></a>
+              <div class="cell-note">
+                {{ row.asset.symbol }}{% if row.asset.exchange %} · {{ row.asset.exchange }}{% endif %}
+                {%- if row.asset.currency %} · {{ row.asset.currency }}{% endif %}
+              </div>
+            </td>
+            <td>{{ row.last_called | ist }}</td>
+            <td>{{ row.calls }}</td>
+            <td>{{ row.stories }}</td>
+            <td>
+              {{ row.judged }}
+              {% if row.no_move %}<div class="cell-note">{{ row.no_move }} no move</div>{% endif %}
+            </td>
+            <td>
+              {% if row.shows_rate(minimum, min_stories) %}
+                {% if row.stories < early_below_stories %}
+                  <span class="muted">{{ "%.0f" | format(row.rate * 100) }}%</span>
+                  <span class="tag tag-neutral tag-early">early</span>
+                {% else %}
+                  <b>{{ "%.0f" | format(row.rate * 100) }}%</b>
+                {% endif %}
+              {% else %}
+                <span class="muted">
+                  n={{ row.judged }}, {{ row.stories }}
+                  {{- " story" if row.stories == 1 else " stories" }}, too few
+                </span>
+              {% endif %}
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    <p class="sub track-note">
+      Assets nobody has called are left out: the universe is {{ universe }} symbols and an
+      empty row says nothing. A direction call right by chance &asymp; 50%; no-move calls are
+      excluded from the rate.
+    </p>
+  {% else %}
+    <p class="feed-note">No calls stored yet.</p>
+  {% endif %}
+{% endblock %}

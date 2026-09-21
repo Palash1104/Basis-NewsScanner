@@ -790,3 +790,137 @@
   font-size: 12px;
   color: var(--color-muted);
 }
+
+/* ---------------------------------------------------------------- assets */
+
+.assets-table td:first-child {
+  max-width: 30ch;
+}
+
+/* The mockup's watchlist card, for one asset. */
+.asset-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 300px auto;
+  gap: var(--space-6);
+  align-items: center;
+  padding: var(--space-6) 0;
+  border-bottom: 2px solid var(--color-divider);
+}
+
+.asset-card h1 {
+  font-size: 32px;
+  margin: 0 0 var(--space-1);
+}
+
+.asset-card-unit {
+  margin: 0;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-muted);
+}
+
+.asset-card-price {
+  margin: var(--space-3) 0 0;
+  font-size: 25px;
+  font-weight: 800;
+  font-family: var(--font-heading);
+}
+
+.asset-card-price .cell-note {
+  display: block;
+  font-family: var(--font-body);
+  font-size: 11px;
+  font-weight: 400;
+}
+
+.spark-card {
+  overflow: visible;
+}
+
+.spark-card .up {
+  stroke: var(--color-up);
+}
+
+.spark-card .down {
+  stroke: var(--color-down);
+}
+
+.asset-card-record {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 190px;
+}
+
+.asset-card-record b {
+  font-family: var(--font-heading);
+  font-size: 32px;
+  font-weight: 800;
+  line-height: 1.1;
+}
+
+.drivers {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: var(--space-8);
+}
+
+.driver-list {
+  list-style: none;
+  margin: var(--space-2) 0 0;
+  padding: 0;
+  font-size: 14px;
+}
+
+.driver-list li {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: 6px 0;
+  border-bottom: 1px solid var(--rule-light);
+}
+
+.driver-list b {
+  font-variant-numeric: tabular-nums;
+}
+
+.asset-story {
+  display: grid;
+  grid-template-columns: 120px minmax(0, 1fr);
+  gap: var(--space-4);
+  padding: 20px 0;
+  border-bottom: 1px solid var(--rule-light);
+}
+
+.asset-story-when {
+  font-size: 11px;
+  color: var(--color-muted);
+}
+
+.asset-story-headline {
+  font-family: var(--font-heading);
+  font-weight: 800;
+  font-size: 17px;
+  line-height: 1.2;
+}
+
+.asset-story-call {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: var(--space-2);
+  font-size: 12px;
+}
+
+.call-direction {
+  font-weight: 800;
+}
+
+.asset-story-why {
+  margin: var(--space-1) 0 0;
+  font-size: 12px;
+  color: var(--color-muted);
+  max-width: 62ch;
+}

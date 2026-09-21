@@ -53,7 +53,7 @@ SEMANTIC_SWATCHES = (
 NAV = (
     {"name": "today", "label": "Today", "href": "/", "note": ""},
     {"name": "track", "label": "Track record", "href": "/track-record", "note": ""},
-    {"name": "assets", "label": "Assets", "href": None, "note": "step 4"},
+    {"name": "assets", "label": "Assets", "href": "/assets", "note": ""},
     {"name": "runs", "label": "Runs", "href": None, "note": "step 5"},
 )
 # The style guide stays reachable at /design, but it is not in the design's nav, so it is not
@@ -65,6 +65,10 @@ SPARK_WIDTH, SPARK_HEIGHT, SPARK_PAD = 68, 22, 2
 # The mockup's story detail draws a bigger line, at 300x64 with a 2px stroke.
 STORY_SPARK_WIDTH, STORY_SPARK_HEIGHT, STORY_SPARK_PAD = 300, 64, 6
 STORY_WINDOW = "1m"  # the story page shows the longest window the cache can fill
+# The mockup's watchlist card draws 300x72; the asset page is that card.
+CARD_SPARK_WIDTH, CARD_SPARK_HEIGHT, CARD_SPARK_PAD = 300, 72, 7
+ASSET_WINDOW = "1m"
+ASSET_WINDOW_LABEL = "last month of daily bars"
 
 
 @dataclass(frozen=True)
@@ -190,6 +194,15 @@ def _in_zone(value: datetime | None, settings: Settings) -> str:
     local = value.astimezone(settings.tz)
     today = datetime.now(settings.tz).date()
     return local.strftime("%H:%M" if local.date() == today else "%d %b %H:%M")
+
+
+def _rate_gates(settings: Settings) -> dict[str, int]:
+    """The thresholds a rate must clear before it is shown, and before it stops being early."""
+    return {
+        "minimum": settings.scoring.min_samples_to_show_rate,
+        "min_stories": settings.scoring.min_stories_to_show_rate,
+        "early_below_stories": settings.scoring.early_rate_below_stories,
+    }
 
 
 def _unit(asset: AssetConfig | None) -> str:
@@ -331,6 +344,38 @@ def create_app(
         }
         name = "_track_tables.html" if request.headers.get("hx-request") else "track_record.html"
         return templates.TemplateResponse(request, name, context)
+
+    @web.get("/assets", response_class=HTMLResponse)
+    def asset_index(request: Request, session: ReadSession) -> HTMLResponse:
+        """Every universe asset that has been called, most recently called first."""
+        assets: dict[str, AssetConfig] = request.app.state.assets
+        context = base_context(request, session, active="assets")
+        context |= {
+            "rows": queries.asset_rows(session, assets, settings),
+            "universe": len(assets),
+        } | _rate_gates(settings)
+        return templates.TemplateResponse(request, "assets.html", context)
+
+    @web.get("/asset/{symbol}", response_class=HTMLResponse)
+    def asset_page(request: Request, session: ReadSession, symbol: str) -> HTMLResponse:
+        """One asset: what keeps moving it, and whether those calls were right."""
+        now = utcnow()
+        assets: dict[str, AssetConfig] = request.app.state.assets
+        asset = assets.get(symbol)
+        if asset is None:
+            raise HTTPException(status_code=404, detail=f"{symbol} is not in the universe")
+        detail = queries.asset_detail(session, asset, settings, now, window=ASSET_WINDOW)
+        context = base_context(request, session, active="assets", now=now)
+        context |= {
+            "detail": detail,
+            "window_label": ASSET_WINDOW_LABEL,
+            "points": lambda item: queries.sparkline_points(
+                item, CARD_SPARK_WIDTH, CARD_SPARK_HEIGHT, CARD_SPARK_PAD
+            ),
+            "order_words": ORDER_WORDS,
+            "origin_label": ORIGIN_LABEL,
+        } | _rate_gates(settings)
+        return templates.TemplateResponse(request, "asset.html", context)
 
     @web.exception_handler(StarletteHTTPException)
     def not_found(request: Request, exc: StarletteHTTPException) -> HTMLResponse:

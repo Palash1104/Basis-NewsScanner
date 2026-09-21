@@ -1,0 +1,128 @@
+{% extends "base.html" %}
+{% block title %}BASIS · {{ detail.asset.display_name }}{% endblock %}
+
+{% block content %}
+  {% set asset = detail.asset %}
+  {% set row = detail.row %}
+  <p class="back"><a href="/assets">&larr; Assets</a></p>
+
+  {# The mockup's watchlist card, for the asset it is actually about. #}
+  <div class="asset-card">
+    <div class="asset-card-id">
+      <h1>{{ asset.display_name }}</h1>
+      <p class="asset-card-unit">
+        {{ asset.symbol }}
+        {%- if asset.exchange %} · {{ asset.exchange }}{% endif %}
+        {%- if asset.currency %} · {{ asset.currency }}{% endif %}
+        {%- if asset.up_means %} · up means {{ asset.up_means }}{% endif %}
+      </p>
+      {% if detail.latest_close is not none %}
+        <p class="asset-card-price">
+          {{ "%.2f" | format(detail.latest_close) }}
+          <span class="cell-note">last cached close · {{ window_label }}</span>
+        </p>
+      {% else %}
+        <p class="asset-card-price"><span class="muted">no cached prices</span></p>
+      {% endif %}
+    </div>
+    {% if detail.series.points %}
+      <svg class="spark-card" viewBox="0 0 300 72" width="300" height="72" aria-hidden="true">
+        <polyline points="{{ points(detail.series) }}" fill="none" stroke-width="2"
+          vector-effect="non-scaling-stroke" stroke-linejoin="round"
+          class="{{ 'up' if detail.series.rose else 'down' }}" />
+      </svg>
+    {% endif %}
+    <div class="asset-card-record">
+      <span class="kicker">Track record</span>
+      {% if row.shows_rate(minimum, min_stories) %}
+        {% if row.stories < early_below_stories %}
+          <b class="muted">{{ "%.0f" | format(row.rate * 100) }}%</b>
+          <span class="tag tag-neutral tag-early">early</span>
+        {% else %}
+          <b>{{ "%.0f" | format(row.rate * 100) }}%</b>
+        {% endif %}
+      {% else %}
+        <b class="muted">n={{ row.judged }}</b>
+      {% endif %}
+      <span class="cell-note">
+        {{ row.hits }} hit · {{ row.misses }} miss · {{ row.no_move }} no move ·
+        {{ row.calls }} calls from {{ row.stories }}
+        {{- " story" if row.stories == 1 else " stories" }}
+      </span>
+    </div>
+  </div>
+
+  <div class="section-label">
+    <span class="kicker">What moves it</span><span class="line"></span>
+  </div>
+  {% if detail.channels or detail.rules %}
+    <div class="drivers">
+      <div>
+        <p class="kicker">Channels the events ran through</p>
+        <ul class="driver-list">
+          {% for channel, count in detail.channels %}
+            <li><span>{{ channel | replace("_", " ") }}</span><b>{{ count }}</b></li>
+          {% endfor %}
+        </ul>
+      </div>
+      <div>
+        <p class="kicker">Rules that called it</p>
+        <ul class="driver-list">
+          {% for rule, count in detail.rules %}
+            <li><span>{{ rule }}</span><b>{{ count }}</b></li>
+          {% endfor %}
+          {% if not detail.rules %}
+            <li><span class="muted">only the model's own calls</span></li>
+          {% endif %}
+        </ul>
+      </div>
+    </div>
+    <p class="sub">
+      Counts, not a score: this is what has driven calls on {{ asset.display_name }}, not a
+      measure of exposure.
+    </p>
+  {% else %}
+    <p class="story-none">No events recorded behind these calls yet.</p>
+  {% endif %}
+
+  <div class="section-label">
+    <span class="kicker">Stories that called it</span><span class="line"></span>
+  </div>
+  {% for item in detail.stories %}
+    <article class="asset-story">
+      <div class="asset-story-when">
+        <div>{{ item.story.first_seen_at | ist }}</div>
+        {% if item.story.category %}<div class="cell-note">{{ item.story.category }}</div>{% endif %}
+      </div>
+      <div class="asset-story-body">
+        <a class="asset-story-headline" href="/story/{{ item.story.id }}">{{ item.story.headline }}</a>
+        {% for row in item.impacts %}
+          <div class="asset-story-call">
+            <span class="call-direction">
+              {{ "▲ up" if row.impact.direction == "up" else "▼ down" }}
+            </span>
+            <span class="tag tag-neutral">{{ order_words[row.impact.order] }}</span>
+            <span class="tag tag-neutral">{{ row.impact.confidence }}</span>
+            <span class="tag tag-accent">{{ origin_label.get(row.impact.origin, row.impact.origin) }}</span>
+            {% if row.impact.rule_id %}<span class="tag tag-outline">{{ row.impact.rule_id }}</span>{% endif %}
+            {% if row.move %}
+              <span class="{{ 'up' if row.move_up else 'down' }}">{{ row.move }}</span>
+              <span class="asset-window">since news</span>
+            {% else %}
+              <span class="muted">no price yet</span>
+            {% endif %}
+            {% for score in row.scores %}
+              <span class="score score-{{ score.outcome }}">
+                {{ score.horizon_days }}d {{ score.outcome | replace("_", " ") }}
+              </span>
+            {% endfor %}
+            {% if not row.scores %}<span class="muted">not due yet</span>{% endif %}
+          </div>
+          <p class="asset-story-why">{{ row.impact.mechanism }}</p>
+        {% endfor %}
+      </div>
+    </article>
+  {% else %}
+    <p class="story-none">Nothing has called this asset yet.</p>
+  {% endfor %}
+{% endblock %}

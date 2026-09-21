@@ -829,9 +829,7 @@ def test_a_rate_needs_stories_behind_it_as_well_as_calls(
     engine = make_engine(fresh)
     init_db(engine)
     with make_session_factory(engine)() as session:
-        story = Story(
-            first_seen_at=NOW, updated_at=NOW, headline="One story", status="analyzed"
-        )
+        story = Story(first_seen_at=NOW, updated_at=NOW, headline="One story", status="analyzed")
         session.add(story)
         session.flush()
         for index in range(6):  # six calls, all from that one story
@@ -849,9 +847,7 @@ def test_a_rate_needs_stories_behind_it_as_well_as_calls(
             session.add(impact)
             session.flush()
             session.add(
-                ImpactScore(
-                    impact_id=impact.id, horizon_days=1, outcome="hit", scored_at=NOW
-                )
+                ImpactScore(impact_id=impact.id, horizon_days=1, outcome="hit", scored_at=NOW)
             )
         session.commit()
     engine.dispose()
@@ -878,3 +874,94 @@ def test_the_page_says_what_chance_would_score(database: Path, settings: Setting
     body = _client(database, settings).get("/track-record").text
     assert "right by chance" in body and "50%" in body
     assert "No-move calls are excluded from the rate." in body
+
+
+# ---------------------------------------------------------------- assets
+
+
+def test_the_index_lists_only_assets_that_have_been_called(client: TestClient) -> None:
+    """The universe is 82 symbols; an empty row says nothing."""
+    body = client.get("/assets").text
+    assert "Brent crude" in body and "US 10-year yield" in body and "Gold" in body
+    assert "Wheat" not in body  # in the universe, never called in this fixture
+    assert "in the universe have been called" in body
+
+
+def test_the_index_links_each_asset_to_its_page(client: TestClient) -> None:
+    body = client.get("/assets").text
+    assert "/asset/BZ%3DF" in body or "/asset/BZ=F" in body
+
+
+def test_the_index_gates_rates_the_same_way_as_the_track_record(client: TestClient) -> None:
+    assert "too few" in client.get("/assets").text
+
+
+def test_an_asset_page_shows_the_calls_made_on_it(client: TestClient) -> None:
+    body = client.get("/asset/BZ=F").text
+    assert "Brent crude" in body
+    assert "Stories that called it" in body
+    assert "Houthi attacks close the Red Sea to tankers" in body
+    assert "oil_supply_shock" in body and "shipping risk" in body
+    assert "+2.4%" in body and "since news" in body
+
+
+def test_an_asset_page_counts_what_drives_it(client: TestClient, database: Path) -> None:
+    """The design's exposure panel, made from data we have: counts, not a score."""
+    engine = make_engine(database)
+    with make_session_factory(engine)() as session:
+        impact = session.scalars(select(Impact).where(Impact.symbol == "BZ=F")).one()
+        event = Event(
+            story_id=impact.story_id,
+            event_type="geopolitical_conflict",
+            countries=[],
+            regions=[],
+            entities=[],
+            companies=[],
+            channels=["oil_supply", "shipping_routes"],
+            severity="escalation",
+            policy_stance="not_applicable",
+            is_new_development=True,
+            model="m",
+            prompt_version="event-v3",
+            created_at=NOW,
+        )
+        session.add(event)
+        session.flush()
+        impact.event_id = event.id
+        session.commit()
+    engine.dispose()
+
+    body = client.get("/asset/BZ=F").text
+    assert "What moves it" in body
+    assert "oil supply" in body and "shipping routes" in body
+    assert "Counts, not a score" in body
+
+
+def test_an_asset_page_says_when_a_call_is_not_judged_yet(client: TestClient) -> None:
+    assert "not due yet" in client.get("/asset/BZ=F").text
+
+
+def test_an_asset_with_no_cached_prices_says_so(client: TestClient) -> None:
+    assert "no cached prices" in client.get("/asset/GC=F").text
+
+
+def test_a_symbol_outside_the_universe_is_a_404_page(client: TestClient) -> None:
+    response = client.get("/asset/MADEUP.NS")
+    assert response.status_code == 404
+    assert "Not found" in response.text and "not in the universe" in response.text
+
+
+def test_a_symbol_with_a_caret_survives_the_url(client: TestClient) -> None:
+    """^NSEI and friends are real symbols; the route must not mangle them."""
+    assert client.get("/asset/^NSEI").status_code == 200
+
+
+def test_assets_are_in_the_nav(client: TestClient) -> None:
+    assert 'href="/assets"' in client.get("/").text
+
+
+def test_the_asset_page_carries_its_own_track_record(database: Path, settings: Settings) -> None:
+    _judge(database, ["hit", "hit", "miss", "hit"])  # four stories calling Brent
+    body = _client(database, settings).get("/asset/BZ=F").text
+    assert "Track record" in body
+    assert "3 hit" in body and "1 miss" in body

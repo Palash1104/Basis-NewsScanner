@@ -6,9 +6,10 @@ spend its rate limit.
 """
 
 import re
+from collections import Counter
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session, selectinload
@@ -500,3 +501,172 @@ def track_tables(
         early_below_stories=settings.scoring.early_rate_below_stories,
     )
     return summary, [table for table in tables if table.rows]
+
+
+# ---------------------------------------------------------------- assets
+
+
+@dataclass(frozen=True)
+class AssetRow:
+    """One asset on the index: how often it is called, and how those calls have gone."""
+
+    asset: AssetConfig
+    calls: int
+    stories: int
+    last_called: datetime | None
+    hits: int
+    misses: int
+    no_move: int
+
+    @property
+    def judged(self) -> int:
+        return self.hits + self.misses
+
+    @property
+    def rate(self) -> float | None:
+        return self.hits / self.judged if self.judged else None
+
+    def shows_rate(self, minimum: int, min_stories: int) -> bool:
+        return self.judged >= minimum and self.stories >= min_stories
+
+
+@dataclass(frozen=True)
+class AssetStory:
+    """One story that called this asset, with what it said and how it turned out."""
+
+    story: Story
+    impacts: list[ScoredImpact]
+
+
+@dataclass(frozen=True)
+class AssetDetail:
+    """What keeps moving one asset, and whether those calls were right."""
+
+    asset: AssetConfig
+    row: AssetRow
+    stories: list[AssetStory]
+    channels: list[tuple[str, int]]
+    rules: list[tuple[str, int]]
+    series: Series
+    latest_close: float | None
+
+
+def asset_rows(
+    session: Session, assets: dict[str, AssetConfig], settings: Settings
+) -> list[AssetRow]:
+    """Every universe asset that has been called, most recently called first.
+
+    Assets nobody has called are left out rather than listed with zeroes: the universe is 82
+    symbols and an empty row says nothing.
+    """
+    counts = session.execute(
+        select(
+            Impact.symbol,
+            func.count(Impact.id),
+            func.count(func.distinct(Impact.story_id)),
+            func.max(Impact.created_at),
+        ).group_by(Impact.symbol)
+    ).all()
+    outcomes: dict[str, Counter[str]] = {}
+    for symbol, outcome in session.execute(
+        select(Impact.symbol, ImpactScore.outcome).join(
+            ImpactScore, ImpactScore.impact_id == Impact.id
+        )
+    ):
+        outcomes.setdefault(symbol, Counter())[outcome] += 1
+
+    rows = []
+    for symbol, calls, stories, last in counts:
+        asset = assets.get(symbol)
+        if asset is None:
+            continue  # dropped from the universe since the call was made
+        tally = outcomes.get(symbol, Counter())
+        rows.append(
+            AssetRow(
+                asset=asset,
+                calls=calls,
+                stories=stories,
+                last_called=last,
+                hits=tally["hit"],
+                misses=tally["miss"],
+                no_move=tally["no_move"],
+            )
+        )
+    rows.sort(key=lambda row: row.last_called or datetime.min.replace(tzinfo=UTC), reverse=True)
+    return rows
+
+
+def asset_detail(
+    session: Session,
+    asset: AssetConfig,
+    settings: Settings,
+    now: datetime,
+    window: str = DEFAULT_WINDOW,
+    limit: int = 25,
+) -> AssetDetail:
+    """One asset: the stories that called it, what drove them, and the outcomes.
+
+    The channel and rule counts are the design's "exposure" panel, made from data we have:
+    what keeps moving this asset, counted, not scored.
+    """
+    impacts = list(
+        session.scalars(
+            select(Impact)
+            .where(Impact.symbol == asset.symbol)
+            .options(
+                selectinload(Impact.scores),
+                selectinload(Impact.story).selectinload(Story.articles),
+                selectinload(Impact.event),
+            )
+            .order_by(Impact.created_at.desc())
+        )
+    )
+    labels = move_labels(session, impacts, {asset.symbol: asset}, settings, now)
+
+    by_story: dict[int, list[Impact]] = {}
+    for impact in impacts:
+        by_story.setdefault(impact.story_id, []).append(impact)
+
+    stories = []
+    for group in list(by_story.values())[:limit]:
+        story = group[0].story
+        rows = []
+        for impact in sorted(group, key=call_rank):
+            move = up = None
+            priced = impact.reference_price is not None and impact.move_at_detection_pct is not None
+            if priced:
+                move = format_move(asset, impact.reference_price, impact.move_at_detection_pct)
+                up = impact.move_at_detection_pct >= 0
+            rows.append(
+                ScoredImpact(
+                    impact=impact,
+                    name=asset.display_name,
+                    unit=" · ".join(part for part in (asset.exchange, asset.currency) if part),
+                    move=move,
+                    move_up=up,
+                    label=labels.get(impact.id),
+                    scores=sorted(impact.scores, key=lambda score: score.horizon_days),
+                )
+            )
+        stories.append(AssetStory(story=story, impacts=rows))
+
+    channels = Counter(
+        channel for impact in impacts if impact.event for channel in (impact.event.channels or [])
+    )
+    rules = Counter(impact.rule_id for impact in impacts if impact.rule_id)
+    series = series_for(session, [asset.symbol], window, now).get(
+        asset.symbol, Series(asset.symbol)
+    )
+    row = next(
+        (row for row in asset_rows(session, {asset.symbol: asset}, settings)),
+        AssetRow(asset=asset, calls=0, stories=0, last_called=None, hits=0, misses=0, no_move=0),
+    )
+    return AssetDetail(
+        asset=asset,
+        row=row,
+        stories=stories,
+        channels=channels.most_common(),
+        rules=rules.most_common(),
+        series=series,
+        latest_close=series.closes[-1] if series.closes else None,
+    )

@@ -418,9 +418,7 @@ def story_track_line(
 ) -> str | None:
     """SPEC 10: one line per story, only for a rule whose record means something yet."""
     rules = {impact.rule_id for impact in story.impacts if impact.rule_id}
-    qualifying = [
-        row for row in rows if row.key in rules and row.shows_rate(minimum, min_stories)
-    ]
+    qualifying = [row for row in rows if row.key in rules and row.shows_rate(minimum, min_stories)]
     if not qualifying:
         return None
     best = max(qualifying, key=lambda row: row.judged)
