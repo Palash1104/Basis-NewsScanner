@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}BASIS · runs{% endblock %}
+
+{% block content %}
+  <div class="screen-head">
+    <div>
+      <h1>Runs</h1>
+      <p class="sub">Whether the schedule is being kept, what it cost, and what broke</p>
+    </div>
+    <div class="seg" role="group" aria-label="Window">
+      {% for key, label in windows %}
+        <label class="seg-opt">
+          <input type="radio" name="days" value="{{ key }}"
+            {% if key == view.days %}checked{% endif %}
+            hx-get="/runs" hx-target="#runs" hx-swap="outerHTML" hx-push-url="true" />{{ label }}
+        </label>
+      {% endfor %}
+    </div>
+  </div>
+
+  {% include "_runs.html" %}
+{% endblock %}

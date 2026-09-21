@@ -9,15 +9,26 @@ import re
 from collections import Counter
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, time, timedelta
 
 from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session, selectinload
 
+from app import health
 from app.config import AssetConfig, Settings
 from app.db import SEARCH_TABLE
 from app.delivery.format import SourceLink, pick_sources
-from app.models import Article, Event, Impact, ImpactScore, PriceBar, RuleDisagreementRow, Story
+from app.health import SlotDay
+from app.models import (
+    Article,
+    Event,
+    Impact,
+    ImpactScore,
+    PriceBar,
+    RuleDisagreementRow,
+    Run,
+    Story,
+)
 from app.pipeline.prices import DAILY, INTRADAY, format_move, move_labels
 from app.pipeline.scoring import TrackRow, story_track_line, track_record
 from app.presentation import AssetCall, StoryCalls, call_rank, story_age, story_calls
@@ -669,4 +680,120 @@ def asset_detail(
         rules=rules.most_common(),
         series=series,
         latest_close=series.closes[-1] if series.closes else None,
+    )
+
+
+# ---------------------------------------------------------------- runs
+
+
+@dataclass(frozen=True)
+class RunRow:
+    """One run, as the page shows it."""
+
+    run: Run
+    minutes: float | None
+
+    @property
+    def errors(self) -> list[dict[str, object]]:
+        return list(self.run.errors or [])
+
+
+@dataclass(frozen=True)
+class UsageRow:
+    """One quota day's requests per model, against the budget and the hard cap."""
+
+    day: str
+    used: dict[str, int]
+    budget: dict[str, int | None]
+    cap: dict[str, int | None]
+
+    def over_budget(self, model: str) -> bool:
+        budget = self.budget.get(model)
+        return budget is not None and self.used.get(model, 0) > budget
+
+
+@dataclass(frozen=True)
+class RunsView:
+    """What `/runs` shows: whether the schedule is being kept, what it cost, what broke."""
+
+    days: int
+    runs: list[RunRow]
+    slots: list[SlotDay]
+    slots_ran: int
+    slots_missed: int
+    usage: list[UsageRow]
+    models: list[str]
+    rerank_fallbacks: int
+    pipeline_runs: int
+    layer_b_calls: int
+    layer_b_declines: int
+    input_tokens: int
+    output_tokens: int
+
+    @property
+    def decline_rate(self) -> float | None:
+        return self.layer_b_declines / self.layer_b_calls if self.layer_b_calls else None
+
+
+def runs_view(session: Session, settings: Settings, now: datetime, days: int) -> RunsView:
+    """The health picture, assembled from the same functions `newsdesk health` prints, so the
+    page and the command can never disagree."""
+    tz = settings.tz
+    first = datetime.combine(
+        now.astimezone(tz).date() - timedelta(days=days - 1), time(0, 0), tzinfo=tz
+    )
+    runs = sorted(
+        (
+            run
+            for kind in ("pipeline", "digest", "score")
+            for run in health.runs_since(session, kind, first)
+        ),
+        key=lambda run: run.started_at,
+        reverse=True,
+    )
+    rows = [
+        RunRow(
+            run=run,
+            minutes=(
+                (run.finished_at - run.started_at).total_seconds() / 60 if run.finished_at else None
+            ),
+        )
+        for run in runs
+    ]
+    slots = health.slot_days(session, settings, now, days)
+    pipeline = [run for run in runs if run.kind == "pipeline"]
+    calls, declines = health.layer_b_totals(pipeline)
+
+    models = [settings.llm.summary_model, settings.llm.reasoning_model]
+    quota_days = health.quota_days(settings, now, days)
+    counts = health.requests_per_day(session, models, quota_days)
+    limits = settings.llm.rate_limits
+    usage = [
+        UsageRow(
+            day=day,
+            used={model: counts.get((day, model), 0) for model in models},
+            budget={
+                model: limits[model].daily_budget if model in limits else None for model in models
+            },
+            cap={
+                model: limits[model].requests_per_day if model in limits else None
+                for model in models
+            },
+        )
+        for day in quota_days
+    ]
+    return RunsView(
+        days=days,
+        runs=rows,
+        slots=slots,
+        slots_ran=sum(len(day.ran) for day in slots),
+        slots_missed=sum(len(day.missed) for day in slots),
+        usage=usage,
+        models=models,
+        rerank_fallbacks=health.rerank_fallbacks(pipeline),
+        pipeline_runs=len(pipeline),
+        layer_b_calls=calls,
+        layer_b_declines=declines,
+        input_tokens=sum(run.input_tokens for run in runs),
+        output_tokens=sum(run.output_tokens for run in runs),
     )

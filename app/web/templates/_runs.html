@@ -1,0 +1,174 @@
+{# Everything below the head, swapped on its own when the window changes. #}
+<div id="runs">
+  <div class="track-summary">
+    <div class="track-figure">
+      <span class="kicker">Slots kept</span>
+      <b {% if view.slots_missed %}class="muted"{% endif %}>
+        {{- view.slots_ran }}/{{ view.slots_ran + view.slots_missed }}</b>
+      <span class="cell-note">
+        {% if view.slots_missed %}{{ view.slots_missed }} missed{% else %}all of them{% endif %}
+      </span>
+    </div>
+    <div class="track-figure">
+      <span class="kicker">Runs</span>
+      <b>{{ view.runs | length }}</b>
+      <span class="cell-note">pipeline, digest and scoring</span>
+    </div>
+    <div class="track-figure">
+      <span class="kicker">Tokens</span>
+      <b>{{ "{:,}".format(view.input_tokens) }}</b>
+      <span class="cell-note">in · {{ "{:,}".format(view.output_tokens) }} out</span>
+    </div>
+    <div class="track-figure">
+      <span class="kicker">Rerank fallbacks</span>
+      <b {% if not view.rerank_fallbacks %}class="muted"{% endif %}>
+        {{- view.rerank_fallbacks }}</b>
+      <span class="cell-note">of {{ view.pipeline_runs }} runs kept the computed order</span>
+    </div>
+    <div class="track-figure">
+      <span class="kicker">Layer B declines</span>
+      {% if view.layer_b_calls %}
+        <b>{{ "%.0f" | format(view.decline_rate * 100) }}%</b>
+        <span class="cell-note">
+          {{ view.layer_b_declines }} of {{ view.layer_b_calls }} calls saw no clear impact
+        </span>
+      {% else %}
+        <b class="muted">—</b>
+        <span class="cell-note">no calls recorded in this window</span>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="section-label">
+    <span class="kicker">Slots</span><span class="line"></span>
+  </div>
+  <p class="sub">
+    The pipeline is scheduled at {{ slot_hours }}. A slot counts as kept if any run started
+    inside it, so a manual <code>newsdesk run</code> counts. Nothing is caught up after
+    downtime: the next run re-fetches the whole lookback window instead.
+  </p>
+  <table class="table slots-table">
+    <thead>
+      <tr><th>Day</th><th>Kept</th><th>Missed</th></tr>
+    </thead>
+    <tbody>
+      {% for day in view.slots %}
+        <tr>
+          <td>{{ day.day.strftime("%a %d %b") }}</td>
+          <td>{{ day.ran | length }}/{{ day.expected }}</td>
+          <td>
+            {% if day.missed %}
+              <span class="muted">
+                {% for hour in day.missed %}{{ "%02d:00" | format(hour) }}{{ ", " if not loop.last }}{% endfor %}
+              </span>
+            {% else %}
+              —
+            {% endif %}
+            {% if day.pending %}<span class="cell-note">due now</span>{% endif %}
+          </td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <div class="section-label">
+    <span class="kicker">LLM requests per quota day</span><span class="line"></span>
+  </div>
+  <p class="sub">
+    Counted per Pacific day, because that is when Google's quota resets — 12:30 or 13:30 IST,
+    never midnight here. The budget stops new work; retries may use the rest of the cap.
+  </p>
+  <table class="table">
+    <thead>
+      <tr>
+        <th>Quota day</th>
+        {% for model in view.models %}<th>{{ model }}</th>{% endfor %}
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in view.usage %}
+        <tr>
+          <td>{{ row.day }}</td>
+          {% for model in view.models %}
+            <td>
+              <b>{{ row.used[model] }}</b>
+              {% if row.budget[model] %}
+                / {{ row.budget[model] }}
+                <div class="cell-note">
+                  cap {{ row.cap[model] }}{% if row.over_budget(model) %} · past the budget, on retries{% endif %}
+                </div>
+              {% else %}
+                <div class="cell-note">no limits configured</div>
+              {% endif %}
+            </td>
+          {% endfor %}
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <div class="section-label">
+    <span class="kicker">Runs</span><span class="line"></span>
+  </div>
+  {% if view.runs %}
+    <table class="table runs-table">
+      <thead>
+        <tr>
+          <th>Started</th>
+          <th>Kind</th>
+          <th>Took</th>
+          <th>Articles</th>
+          <th>Stories</th>
+          <th>Tokens</th>
+          <th>Errors</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in view.runs %}
+          <tr>
+            <td>{{ row.run.started_at | ist }}</td>
+            <td>{{ row.run.kind }}</td>
+            <td>
+              {% if row.minutes is not none %}
+                {{ "%.1f" | format(row.minutes) }} min
+              {% else %}
+                <span class="muted">did not finish</span>
+              {% endif %}
+            </td>
+            <td>{{ row.run.articles_fetched or "—" }}</td>
+            <td>{{ row.run.stories_processed or "—" }}</td>
+            <td>
+              {% if row.run.input_tokens %}
+                {{ "{:,}".format(row.run.input_tokens) }}
+                <div class="cell-note">{{ "{:,}".format(row.run.output_tokens) }} out</div>
+              {% else %}
+                —
+              {% endif %}
+            </td>
+            <td>
+              {% if row.errors %}
+                <span class="down"><b>{{ row.errors | length }}</b></span>
+              {% else %}
+                —
+              {% endif %}
+            </td>
+          </tr>
+          {% for error in row.errors %}
+            <tr class="run-error">
+              <td></td>
+              <td colspan="6">
+                <span class="tag tag-outline">{{ error.get("stage", "run") }}</span>
+                {% if error.get("story_id") %}
+                  <a href="/story/{{ error['story_id'] }}">story {{ error["story_id"] }}</a>
+                {% endif %}
+                {{ error.get("error", error) }}
+              </td>
+            </tr>
+          {% endfor %}
+        {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <p class="feed-note">No runs in the last {{ view.days }} days.</p>
+  {% endif %}
+</div>

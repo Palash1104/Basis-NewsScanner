@@ -1,6 +1,7 @@
 import re
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import pytest
 from fastapi.testclient import TestClient
@@ -15,7 +16,17 @@ from app.db import (
     make_read_only_session_factory,
     make_session_factory,
 )
-from app.models import Article, Event, Impact, ImpactScore, RuleDisagreementRow, Run, Story
+from app.models import (
+    Article,
+    Event,
+    Impact,
+    ImpactScore,
+    LLMDailyUsage,
+    RuleDisagreementRow,
+    Run,
+    Story,
+)
+from app.pipeline.rank import RERANK_FALLBACK_NOTE
 from app.web import palette, queries
 from app.web.main import create_app, ticker_items
 
@@ -965,3 +976,127 @@ def test_the_asset_page_carries_its_own_track_record(database: Path, settings: S
     body = _client(database, settings).get("/asset/BZ=F").text
     assert "Track record" in body
     assert "3 hit" in body and "1 miss" in body
+
+
+# ---------------------------------------------------------------- runs
+
+
+def _add_runs(database: Path) -> None:
+    engine = make_engine(database)
+    with make_session_factory(engine)() as session:
+        session.add_all(
+            [
+                Run(
+                    kind="pipeline",
+                    started_at=NOW - timedelta(hours=5),
+                    finished_at=NOW - timedelta(hours=4, minutes=57),
+                    articles_fetched=1612,
+                    stories_processed=10,
+                    input_tokens=29812,
+                    output_tokens=3394,
+                    llm_impact_calls=5,
+                    llm_impact_declines=3,
+                    errors=[
+                        {"stage": "rank", "error": f"{RERANK_FALLBACK_NOTE}: HTTP 503"},
+                        {"stage": "summarize", "story_id": 1, "error": "output was cut off"},
+                    ],
+                ),
+                Run(
+                    kind="digest",
+                    started_at=NOW - timedelta(hours=2),
+                    finished_at=NOW - timedelta(hours=2),
+                    stories_processed=15,
+                ),
+                Run(  # a run that never finished
+                    kind="score",
+                    started_at=NOW - timedelta(hours=1),
+                ),
+            ]
+        )
+        session.add(
+            LLMDailyUsage(
+                day=NOW.astimezone(ZoneInfo("America/Los_Angeles")).date().isoformat(),
+                provider="gemini",
+                model="gemini-3.6-flash",
+                requests=18,  # past its budget of 15, inside the cap of 20
+            )
+        )
+        session.commit()
+    engine.dispose()
+
+
+def test_the_runs_page_shows_each_run_with_its_cost(database: Path, settings: Settings) -> None:
+    _add_runs(database)
+    body = _client(database, settings).get("/runs").text
+
+    assert "Runs" in body
+    assert "1612" in body and "29,812" in body and "3,394" in body
+    assert "pipeline" in body and "digest" in body and "score" in body
+
+
+def test_a_run_that_never_finished_says_so(database: Path, settings: Settings) -> None:
+    _add_runs(database)
+    assert "did not finish" in _client(database, settings).get("/runs").text
+
+
+def test_errors_are_shown_with_their_stage_and_text(database: Path, settings: Settings) -> None:
+    _add_runs(database)
+    body = _client(database, settings).get("/runs").text
+    assert RERANK_FALLBACK_NOTE in body
+    assert "output was cut off" in body
+    assert "summarize" in body
+
+
+def test_an_error_about_a_story_links_to_it(database: Path, settings: Settings) -> None:
+    _add_runs(database)
+    assert 'href="/story/1"' in _client(database, settings).get("/runs").text
+
+
+def test_missed_slots_are_named(database: Path, settings: Settings) -> None:
+    """The scheduled tasks catch nothing up, so which hours were missed is the whole point."""
+    _add_runs(database)
+    body = _client(database, settings).get("/runs").text
+    assert "Slots kept" in body
+    assert "A slot counts as kept if any run started" in body  # the template wraps it
+    assert "01:00" in body  # the hours the pipeline is scheduled at
+
+
+def test_usage_is_shown_per_quota_day_against_the_budget(
+    database: Path, settings: Settings
+) -> None:
+    _add_runs(database)
+    body = _client(database, settings).get("/runs").text
+    assert "LLM requests per quota day" in body
+    assert "Pacific" in body
+    assert "18" in body and "past the budget, on retries" in body
+
+
+def test_layer_b_decline_rate_is_reported(database: Path, settings: Settings) -> None:
+    _add_runs(database)
+    body = _client(database, settings).get("/runs").text
+    assert "Layer B declines" in body
+    assert "3 of 5 calls saw no clear impact" in body
+
+
+def test_rerank_fallbacks_are_counted(database: Path, settings: Settings) -> None:
+    _add_runs(database)
+    assert "kept the computed order" in _client(database, settings).get("/runs").text
+
+
+def test_the_window_control_changes_the_window(database: Path, settings: Settings) -> None:
+    _add_runs(database)
+    client = _client(database, settings)
+    for days in (3, 7, 14):
+        assert client.get("/runs", params={"days": days}).status_code == 200
+    assert client.get("/runs", params={"days": 99}).status_code == 200  # falls back
+
+
+def test_htmx_gets_the_body_alone(database: Path, settings: Settings) -> None:
+    _add_runs(database)
+    fragment = _client(database, settings).get("/runs", headers={"HX-Request": "true"}).text
+    assert '<div id="runs"' in fragment
+    assert "<html" not in fragment
+
+
+def test_runs_are_in_the_nav(client: TestClient) -> None:
+    assert 'href="/runs"' in client.get("/").text

@@ -924,3 +924,21 @@
   color: var(--color-muted);
   max-width: 62ch;
 }
+
+/* ---------------------------------------------------------------- runs */
+
+.runs-table td,
+.slots-table td {
+  vertical-align: top;
+}
+
+.run-error td {
+  padding-top: 0;
+  border-bottom: 1px solid var(--rule-light);
+  font-size: 12px;
+  color: var(--color-muted);
+}
+
+.run-error .tag {
+  margin-right: var(--space-2);
+}

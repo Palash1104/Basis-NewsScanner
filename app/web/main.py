@@ -23,12 +23,14 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from app import health
 from app.config import AssetConfig, Settings, load_assets, load_settings
 from app.db import make_read_only_engine, make_read_only_session_factory
 from app.models import Impact, Run, utcnow
 from app.pipeline.prices import format_move
 from app.pipeline.scoring import track_record
 from app.presentation import ORDER_WORDS, ORIGIN_LABEL, story_age
+from app.schedule import pipeline_hours
 from app.web import palette, queries
 
 log = logging.getLogger(__name__)
@@ -54,7 +56,7 @@ NAV = (
     {"name": "today", "label": "Today", "href": "/", "note": ""},
     {"name": "track", "label": "Track record", "href": "/track-record", "note": ""},
     {"name": "assets", "label": "Assets", "href": "/assets", "note": ""},
-    {"name": "runs", "label": "Runs", "href": None, "note": "step 5"},
+    {"name": "runs", "label": "Runs", "href": "/runs", "note": ""},
 )
 # The style guide stays reachable at /design, but it is not in the design's nav, so it is not
 # in ours either (user, 2026-09-21).
@@ -69,6 +71,7 @@ STORY_WINDOW = "1m"  # the story page shows the longest window the cache can fil
 CARD_SPARK_WIDTH, CARD_SPARK_HEIGHT, CARD_SPARK_PAD = 300, 72, 7
 ASSET_WINDOW = "1m"
 ASSET_WINDOW_LABEL = "last month of daily bars"
+RUN_WINDOWS = (3, 7, 14)
 
 
 @dataclass(frozen=True)
@@ -376,6 +379,28 @@ def create_app(
             "origin_label": ORIGIN_LABEL,
         } | _rate_gates(settings)
         return templates.TemplateResponse(request, "asset.html", context)
+
+    @web.get("/runs", response_class=HTMLResponse)
+    def runs(
+        request: Request, session: ReadSession, days: int = health.DEFAULT_DAYS
+    ) -> HTMLResponse:
+        """Recent runs, errors and token usage (SPEC 11), from the same functions
+        `newsdesk health` prints."""
+        window = days if days in RUN_WINDOWS else health.DEFAULT_DAYS
+        view = queries.runs_view(session, settings, utcnow(), window)
+        context = base_context(request, session, active="runs")
+        context |= {
+            "view": view,
+            "windows": [(value, f"{value}d") for value in RUN_WINDOWS],
+            "slot_hours": ", ".join(
+                f"{hour:02d}:00"
+                for hour in pipeline_hours(
+                    settings.schedule.pipeline_every_hours, settings.delivery.digest_times
+                )
+            ),
+        }
+        name = "_runs.html" if request.headers.get("hx-request") else "runs.html"
+        return templates.TemplateResponse(request, name, context)
 
     @web.exception_handler(StarletteHTTPException)
     def not_found(request: Request, exc: StarletteHTTPException) -> HTMLResponse:
