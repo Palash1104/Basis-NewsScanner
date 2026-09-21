@@ -146,9 +146,7 @@ def _text(value: str) -> str:
 
 def format_story(item: DigestItem) -> str:
     lines = [f"<b>{_text(item.headline)}</b>"]
-    meta = " · ".join(
-        part for part in (item.category, ", ".join(item.regions), item.age) if part
-    )
+    meta = " · ".join(part for part in (item.category, ", ".join(item.regions), item.age) if part)
     if meta:
         lines.append(f"<i>{_text(meta)}</i>")
     lines.append(_text(item.summary))

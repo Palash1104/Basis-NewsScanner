@@ -18,7 +18,7 @@ from app.db import SEARCH_TABLE
 from app.delivery.format import SourceLink, pick_sources
 from app.models import Article, Event, Impact, ImpactScore, PriceBar, RuleDisagreementRow, Story
 from app.pipeline.prices import DAILY, INTRADAY, format_move, move_labels
-from app.pipeline.scoring import TrackRow, story_track_line
+from app.pipeline.scoring import TrackRow, story_track_line, track_record
 from app.presentation import AssetCall, StoryCalls, call_rank, story_age, story_calls
 
 # How far back the feed looks by default, and how many stories a page holds. Two days rather
@@ -173,12 +173,13 @@ def feed_stories(
     labels = move_labels(session, impacts, assets, settings, now)
     names = {asset.symbol: asset.display_name for asset in assets.values()}
     minimum = settings.scoring.min_samples_to_show_rate
+    min_stories = settings.scoring.min_stories_to_show_rate
     return [
         FeedStory(
             story=story,
             calls=story_calls(story.impacts, assets, MAX_CALLS_PER_STORY, labels),
             sources=pick_sources(story.articles),
-            track_record=story_track_line(story, rules, minimum, names),
+            track_record=story_track_line(story, rules, minimum, names, min_stories),
             age=story_age(story, now),
         )
         for story in stories
@@ -405,6 +406,97 @@ def story_detail(
         event=story.latest_event,
         disagreements=disagreements,
         track_record=story_track_line(
-            story, rules, settings.scoring.min_samples_to_show_rate, names
+            story,
+            rules,
+            settings.scoring.min_samples_to_show_rate,
+            names,
+            settings.scoring.min_stories_to_show_rate,
         ),
     )
+
+
+# ---------------------------------------------------------------- the track record
+
+
+# The groups SPEC 11 asks for, in the order they answer questions: which rule, on what kind
+# of event, from which layer, how sure it was, and over how long.
+TRACK_GROUPS: tuple[tuple[str, str], ...] = (
+    ("rule_id", "By rule"),
+    ("event_type", "By event type"),
+    ("origin", "By origin"),
+    ("confidence", "By stated confidence"),
+    ("horizon_days", "By horizon"),
+)
+# Settings that are fixed today. A table per value is noise until one of them changes, so
+# they appear only once more than one value has been judged.
+TRACK_GROUPS_IF_VARIED: tuple[tuple[str, str], ...] = (
+    ("prompt_version", "By extraction prompt"),
+    ("temperature", "By temperature"),
+    ("seed", "By seed"),
+)
+
+
+@dataclass(frozen=True)
+class TrackTable:
+    """One grouping of the track record, ready to render."""
+
+    group: str
+    title: str
+    rows: list[TrackRow]
+
+
+@dataclass(frozen=True)
+class TrackSummary:
+    """The whole record at a glance: what has been judged, and what is still open."""
+
+    judged: int
+    hits: int
+    misses: int
+    no_move: int
+    unscorable: int
+    stories: int
+    minimum: int
+    min_stories: int
+    early_below_stories: int
+
+    @property
+    def rate(self) -> float | None:
+        return self.hits / self.judged if self.judged else None
+
+    @property
+    def shows_rate(self) -> bool:
+        return self.judged >= self.minimum and self.stories >= self.min_stories
+
+    @property
+    def early(self) -> bool:
+        """Shown, but on too few stories to be a measurement yet."""
+        return self.stories < self.early_below_stories
+
+
+def track_tables(
+    session: Session, settings: Settings, horizon: int | None = None
+) -> tuple[TrackSummary, list[TrackTable]]:
+    """Every table SPEC 11 asks for, at one horizon or across all of them."""
+    tables = [
+        TrackTable(group, title, track_record(session, group, horizon))
+        for group, title in TRACK_GROUPS
+    ]
+    for group, title in TRACK_GROUPS_IF_VARIED:
+        rows = track_record(session, group, horizon)
+        if len({row.key for row in rows}) > 1:
+            tables.append(TrackTable(group, title, rows))
+
+    # Summing any one grouping counts every judged call exactly once.
+    counted = next((table.rows for table in tables if table.group == "rule_id"), [])
+    summary = TrackSummary(
+        judged=sum(row.judged for row in counted),
+        hits=sum(row.hits for row in counted),
+        misses=sum(row.misses for row in counted),
+        no_move=sum(row.no_move for row in counted),
+        unscorable=sum(row.unscorable for row in counted),
+        stories=len({story for row in counted for story in row.stories}),
+        minimum=settings.scoring.min_samples_to_show_rate,
+        min_stories=settings.scoring.min_stories_to_show_rate,
+        early_below_stories=settings.scoring.early_rate_below_stories,
+    )
+    return summary, [table for table in tables if table.rows]

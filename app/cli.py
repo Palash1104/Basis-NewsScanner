@@ -663,7 +663,13 @@ def run_digest(
                 assets,
                 settings.delivery.max_impacts_in_digest,
                 labels,
-                story_track_line(story, rules, settings.scoring.min_samples_to_show_rate, names),
+                story_track_line(
+                    story,
+                    rules,
+                    settings.scoring.min_samples_to_show_rate,
+                    names,
+                    settings.scoring.min_stories_to_show_rate,
+                ),
                 now=now,
             )
             for story in stories
@@ -985,6 +991,7 @@ def track_record_lines(session: Session, settings: Settings) -> list[str]:
     """The track-record tables. Counts are always shown; rates only once there are enough
     judged calls to mean anything."""
     minimum = settings.scoring.min_samples_to_show_rate
+    min_stories = settings.scoring.min_stories_to_show_rate
     lines = []
     groups = ["rule_id", "event_type", "origin", "confidence", "horizon_days"]
     # Sampling settings are fixed, so a table per value is noise until one of them changes.
@@ -1001,7 +1008,7 @@ def track_record_lines(session: Session, settings: Settings) -> list[str]:
         for row in rows:
             rate = (
                 f"{row.rate:.0%}"
-                if row.rate is not None and row.shows_rate(minimum)
+                if row.rate is not None and row.shows_rate(minimum, min_stories)
                 else f"n={row.judged} too small"
             )
             lines.append(

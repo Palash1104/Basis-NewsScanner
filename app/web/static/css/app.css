@@ -740,3 +740,53 @@
   margin-top: var(--space-6);
   font-size: 11px;
 }
+
+/* ---------------------------------------------------------------- track record */
+
+.track-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-8);
+  padding: var(--space-6) 0 var(--space-4);
+  border-bottom: 1px solid var(--rule-light);
+}
+
+.track-figure {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 150px;
+}
+
+.track-figure b {
+  font-family: var(--font-heading);
+  font-weight: 800;
+  font-size: 32px;
+  line-height: 1.1;
+}
+
+.track-figure b.muted {
+  color: var(--color-muted);
+  font-size: 25px;
+}
+
+.track-table td:first-child {
+  max-width: 28ch;
+}
+
+.track-note {
+  margin-top: var(--space-6);
+  max-width: 72ch;
+}
+
+.tag-early {
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.track-chance {
+  margin: var(--space-3) 0 0;
+  font-size: 12px;
+  color: var(--color-muted);
+}

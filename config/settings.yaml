@@ -152,6 +152,8 @@ scoring:
   # Hit rates are hidden below this many judged calls. Note n counts asset-calls, not
   # independent events: one story can produce a dozen correlated impacts.
   min_samples_to_show_rate: 5
+  min_stories_to_show_rate: 3
+  early_rate_below_stories: 10
   reference_grace_days: 7   # no reference price this long after the story: unscorable
   score_grace_days: 7       # extra days to wait for a horizon's data before giving up
 

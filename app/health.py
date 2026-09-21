@@ -119,7 +119,8 @@ def layer_b_totals(runs: Sequence[Run]) -> tuple[int, int]:
 def proven_rules(session: Session, settings: Settings) -> list[TrackRow]:
     """Rules with enough judged calls for their hit rate to be shown (SPEC 7.9)."""
     minimum = settings.scoring.min_samples_to_show_rate
-    return [row for row in track_record(session, "rule_id") if row.shows_rate(minimum)]
+    stories = settings.scoring.min_stories_to_show_rate
+    return [row for row in track_record(session, "rule_id") if row.shows_rate(minimum, stories)]
 
 
 def _hours(hours: Sequence[int]) -> str:

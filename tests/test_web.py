@@ -654,3 +654,227 @@ def test_a_fresh_story_carries_no_age(client: TestClient) -> None:
     body = client.get("/").text
     assert "Houthi attacks close the Red Sea to tankers" in body
     assert "first reported" not in body
+
+
+# ---------------------------------------------------------------- the track record
+
+
+def _judge(database: Path, outcomes: list[str], horizon: int = 1) -> None:
+    """Score the Brent call `len(outcomes)` times over, each on its own story, so the rule
+    accumulates a record the way it does in life."""
+    engine = make_engine(database)
+    with make_session_factory(engine)() as session:
+        for index, outcome in enumerate(outcomes):
+            story = Story(
+                first_seen_at=NOW - timedelta(days=index + 1),
+                updated_at=NOW - timedelta(days=index + 1),
+                headline=f"Oil story {index}",
+                summary="Oil.",
+                status="analyzed",
+                importance_score=5.0,
+            )
+            event = Event(
+                story=story,
+                event_type="geopolitical_conflict",
+                countries=[],
+                regions=[],
+                entities=[],
+                companies=[],
+                channels=["oil_supply"],
+                severity="escalation",
+                policy_stance="not_applicable",
+                is_new_development=True,
+                model="gemini-3.5-flash-lite",
+                prompt_version="event-v3",
+                temperature=0.0,
+                seed=20260921,
+                created_at=NOW,
+            )
+            impact = Impact(
+                story=story,
+                event=event,
+                symbol="BZ=F",
+                direction="up",
+                mechanism="supply risk",
+                order="first",
+                confidence="high",
+                origin="playbook",
+                rule_id="oil_supply_shock",
+                created_at=NOW,
+            )
+            session.add_all([story, event, impact])
+            session.flush()
+            session.add(
+                ImpactScore(
+                    impact_id=impact.id,
+                    horizon_days=horizon,
+                    asset_return=0.03,
+                    excess_return=0.02,
+                    threshold=0.01,
+                    outcome=outcome,
+                    scored_at=NOW,
+                )
+            )
+        session.commit()
+    engine.dispose()
+
+
+def _client(database: Path, settings: Settings) -> TestClient:
+    engine = make_read_only_engine(database)
+    return TestClient(create_app(settings, make_read_only_session_factory(engine)))
+
+
+def test_the_track_record_counts_every_outcome(database: Path, settings: Settings) -> None:
+    _judge(database, ["hit", "hit", "miss", "no_move", "unscorable"])
+    body = _client(database, settings).get("/track-record").text
+
+    assert "Track record" in body
+    assert "oil_supply_shock" in body
+    assert "geopolitical_conflict" in body  # by event type
+    assert "playbook" in body  # by origin
+    assert "1d close" in body
+
+
+def test_a_rate_appears_only_once_there_are_enough_judged_calls(
+    database: Path, settings: Settings
+) -> None:
+    """SPEC 7.9: below min_samples_to_show_rate the counts are shown but the rate is not."""
+    minimum = settings.scoring.min_samples_to_show_rate
+    _judge(database, ["hit", "miss"])
+    body = _client(database, settings).get("/track-record").text
+    assert "too few" in body
+
+    _judge(database, ["hit"] * minimum)
+    body = _client(database, settings).get("/track-record").text
+    assert f"n={minimum + 2}" not in body  # it is shown as a rate now, not a count
+
+
+def test_the_story_count_sits_beside_the_call_count(database: Path, settings: Settings) -> None:
+    """n counts asset-calls, not independent events, so the page says how many stories."""
+    _judge(database, ["hit", "miss", "hit"])
+    body = _client(database, settings).get("/track-record").text
+    assert "Stories behind them" in body
+    assert "one story makes many correlated calls" in body
+
+
+def test_the_horizon_filter_narrows_the_tables(database: Path, settings: Settings) -> None:
+    _judge(database, ["hit", "hit", "miss"], horizon=1)
+    _judge(database, ["miss"], horizon=5)
+    client = _client(database, settings)
+
+    assert "5d close" not in client.get("/track-record", params={"horizon": "1"}).text
+    assert "1d close" not in client.get("/track-record", params={"horizon": "5"}).text
+    both = client.get("/track-record").text
+    assert "1d close" in both and "5d close" in both
+
+
+def test_an_unknown_horizon_falls_back_to_all(database: Path, settings: Settings) -> None:
+    _judge(database, ["hit"])
+    assert (
+        _client(database, settings).get("/track-record", params={"horizon": "99"}).status_code
+        == 200
+    )
+
+
+def test_htmx_gets_the_tables_alone(database: Path, settings: Settings) -> None:
+    _judge(database, ["hit"])
+    fragment = _client(database, settings).get("/track-record", headers={"HX-Request": "true"}).text
+    assert '<div id="track"' in fragment
+    assert "<html" not in fragment
+
+
+def test_nothing_judged_yet_says_so(client: TestClient) -> None:
+    body = client.get("/track-record").text
+    assert "Nothing judged yet" in body
+    assert "newsdesk score" in body
+
+
+def test_a_fixed_setting_gets_no_table_of_its_own(database: Path, settings: Settings) -> None:
+    """Temperature and seed are the same on every call today; a table per value is noise."""
+    _judge(database, ["hit", "miss"])
+    body = _client(database, settings).get("/track-record").text
+    assert "By temperature" not in body
+    assert "By seed" not in body
+
+
+def test_a_changed_setting_splits_the_record(database: Path, settings: Settings) -> None:
+    """The reason temperature and seed are stored: calls made under different settings are
+    not one record."""
+    _judge(database, ["hit", "miss"])
+    engine = make_engine(database)
+    with make_session_factory(engine)() as session:
+        event = session.scalars(select(Event).order_by(Event.id.desc())).first()
+        event.temperature = 1.0
+        session.commit()
+    engine.dispose()
+
+    body = _client(database, settings).get("/track-record").text
+    assert "By temperature" in body
+    assert "0.0" in body and "1.0" in body
+
+
+def test_the_track_record_is_in_the_nav(client: TestClient) -> None:
+    assert 'href="/track-record"' in client.get("/").text
+
+
+def test_a_rate_needs_stories_behind_it_as_well_as_calls(
+    database: Path, settings: Settings
+) -> None:
+    """Five calls from one story is one observation wearing a crowd's clothes."""
+    _judge(database, ["hit"] * 6)  # six calls, six stories: shown
+    shown = _client(database, settings).get("/track-record").text
+    assert "too few" not in shown
+
+    fresh = database.parent / "one_story.db"
+    engine = make_engine(fresh)
+    init_db(engine)
+    with make_session_factory(engine)() as session:
+        story = Story(
+            first_seen_at=NOW, updated_at=NOW, headline="One story", status="analyzed"
+        )
+        session.add(story)
+        session.flush()
+        for index in range(6):  # six calls, all from that one story
+            impact = Impact(
+                story_id=story.id,
+                symbol=f"SYM{index}",
+                direction="up",
+                mechanism="m",
+                order="first",
+                confidence="high",
+                origin="playbook",
+                rule_id="oil_supply_shock",
+                created_at=NOW,
+            )
+            session.add(impact)
+            session.flush()
+            session.add(
+                ImpactScore(
+                    impact_id=impact.id, horizon_days=1, outcome="hit", scored_at=NOW
+                )
+            )
+        session.commit()
+    engine.dispose()
+
+    body = _client(fresh, settings).get("/track-record").text
+    assert "n=6, 1 story, too few" in body
+
+
+def test_a_rate_on_few_stories_is_marked_early(database: Path, settings: Settings) -> None:
+    _judge(database, ["hit", "hit", "miss", "hit"])  # 4 stories: under the early threshold
+    body = _client(database, settings).get("/track-record").text
+    assert "early" in body
+
+
+def test_a_rate_on_enough_stories_is_not(database: Path, settings: Settings) -> None:
+    _judge(database, ["hit"] * settings.scoring.early_rate_below_stories)
+    body = _client(database, settings).get("/track-record").text
+    rule_row = body[body.index("oil_supply_shock") : body.index("oil_supply_shock") + 900]
+    assert "early" not in rule_row
+
+
+def test_the_page_says_what_chance_would_score(database: Path, settings: Settings) -> None:
+    _judge(database, ["hit", "miss", "hit"])
+    body = _client(database, settings).get("/track-record").text
+    assert "right by chance" in body and "50%" in body
+    assert "No-move calls are excluded from the rate." in body

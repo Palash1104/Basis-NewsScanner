@@ -356,8 +356,14 @@ class TrackRow:
         total = self.judged + self.no_move
         return self.no_move / total if total else None
 
-    def shows_rate(self, minimum: int) -> bool:
-        return self.judged >= minimum
+    def shows_rate(self, minimum: int, min_stories: int = 1) -> bool:
+        """Whether this row's hit rate means anything yet.
+
+        Both gates matter: `minimum` judged calls, and enough distinct stories behind them.
+        One story can call ten assets at once and they rise and fall together, so ten calls
+        from one story is one observation wearing a crowd's clothes.
+        """
+        return self.judged >= minimum and len(self.stories) >= min_stories
 
 
 def _sampling_key(value: float | int | None) -> str:
@@ -404,11 +410,17 @@ def track_record(session: DbSession, group: str, horizon: int | None = None) -> 
 
 
 def story_track_line(
-    story: Story, rows: Sequence[TrackRow], minimum: int, display: dict[str, str] | None = None
+    story: Story,
+    rows: Sequence[TrackRow],
+    minimum: int,
+    display: dict[str, str] | None = None,
+    min_stories: int = 1,
 ) -> str | None:
-    """SPEC 10: one line per story, only for a rule with enough judged calls to mean anything."""
+    """SPEC 10: one line per story, only for a rule whose record means something yet."""
     rules = {impact.rule_id for impact in story.impacts if impact.rule_id}
-    qualifying = [row for row in rows if row.key in rules and row.shows_rate(minimum)]
+    qualifying = [
+        row for row in rows if row.key in rules and row.shows_rate(minimum, min_stories)
+    ]
     if not qualifying:
         return None
     best = max(qualifying, key=lambda row: row.judged)

@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}BASIS · track record{% endblock %}
+
+{% block content %}
+  <div class="screen-head">
+    <div>
+      <h1>Track record</h1>
+      <p class="sub">Every call that has been judged, and how it turned out</p>
+    </div>
+    <div class="seg" role="group" aria-label="Horizon">
+      {% for key, label in horizons %}
+        <label class="seg-opt">
+          <input type="radio" name="horizon" value="{{ key }}"
+            {% if key == horizon %}checked{% endif %}
+            hx-get="/track-record" hx-target="#track" hx-swap="outerHTML"
+            hx-push-url="true" />{{ label }}
+        </label>
+      {% endfor %}
+    </div>
+  </div>
+
+  {% include "_track_tables.html" %}
+{% endblock %}

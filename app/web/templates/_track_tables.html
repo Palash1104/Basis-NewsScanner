@@ -1,0 +1,112 @@
+{# The tables, swapped on their own when the horizon changes. #}
+<div id="track">
+  {% if summary.judged or summary.no_move or summary.unscorable %}
+    <div class="track-summary">
+      <div class="track-figure">
+        <span class="kicker">Judged calls</span>
+        <b>{{ summary.judged }}</b>
+        <span class="cell-note">{{ summary.hits }} hit · {{ summary.misses }} miss</span>
+      </div>
+      <div class="track-figure">
+        <span class="kicker">Hit rate</span>
+        {% if summary.shows_rate %}
+          <b {% if summary.early %}class="muted"{% endif %}>
+            {{- "%.0f" | format(summary.rate * 100) }}%</b>
+          {% if summary.early %}<span class="tag tag-neutral tag-early">early</span>{% endif %}
+        {% else %}
+          <b class="muted">n={{ summary.judged }}</b>
+        {% endif %}
+        <span class="cell-note">
+          shown from {{ summary.minimum }} calls across {{ summary.min_stories }} stories
+        </span>
+      </div>
+      <div class="track-figure">
+        <span class="kicker">No move</span>
+        <b>{{ summary.no_move }}</b>
+        <span class="cell-note">below the threshold either way</span>
+      </div>
+      <div class="track-figure">
+        <span class="kicker">Unscorable</span>
+        <b>{{ summary.unscorable }}</b>
+        <span class="cell-note">no price, or too little history</span>
+      </div>
+      <div class="track-figure">
+        <span class="kicker">Stories behind them</span>
+        <b>{{ summary.stories }}</b>
+        <span class="cell-note">one story makes many correlated calls</span>
+      </div>
+    </div>
+
+    <p class="track-chance">
+      A direction call right by chance &asymp; 50%. No-move calls are excluded from the rate.
+    </p>
+
+    {% for table in tables %}
+      <div class="section-label">
+        <span class="kicker">{{ table.title }}</span><span class="line"></span>
+      </div>
+      <table class="table track-table">
+        <thead>
+          <tr>
+            <th>{{ table.group | replace("_", " ") }}</th>
+            <th>Horizon</th>
+            <th>Hit</th>
+            <th>Miss</th>
+            <th>No move</th>
+            <th>Unscorable</th>
+            <th>Stories</th>
+            <th>Rate</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in table.rows %}
+            <tr>
+              <td><b>{{ row.key }}</b></td>
+              <td>{{ row.horizon_days }}d close</td>
+              <td>{{ row.hits }}</td>
+              <td>{{ row.misses }}</td>
+              <td>
+                {{ row.no_move }}
+                {% if row.no_move_share is not none %}
+                  <span class="cell-note">{{ "%.0f" | format(row.no_move_share * 100) }}%</span>
+                {% endif %}
+              </td>
+              <td>{{ row.unscorable }}</td>
+              <td>{{ row.stories | length }}</td>
+              <td>
+                {% if row.shows_rate(summary.minimum, summary.min_stories) %}
+                  {% if row.stories | length < summary.early_below_stories %}
+                    <span class="muted">{{ "%.0f" | format(row.rate * 100) }}%</span>
+                    <span class="tag tag-neutral tag-early">early</span>
+                  {% else %}
+                    <b>{{ "%.0f" | format(row.rate * 100) }}%</b>
+                  {% endif %}
+                {% else %}
+                  <span class="muted">
+                    n={{ row.judged }}, {{ row.stories | length }}
+                    {{- " story" if row.stories | length == 1 else " stories" }}, too few
+                  </span>
+                {% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% endfor %}
+
+    <p class="sub track-note">
+      n counts asset-calls, not independent events: one story can call ten assets at once, and
+      those calls rise and fall together, which is why the story count sits beside them. A rate
+      needs {{ summary.minimum }} judged calls across {{ summary.min_stories }} stories before
+      it is shown at all, and is marked <b>early</b> until {{ summary.early_below_stories }}
+      stories stand behind it. A call
+      is a hit when the asset beat its benchmark by more than half its own recent volatility
+      over the horizon, a miss when it moved that far the other way, and no move in between.
+    </p>
+  {% else %}
+    <p class="feed-note">
+      Nothing judged yet. Calls are scored a trading day after the story, by
+      <code>newsdesk score</code>, which runs at 03:30.
+    </p>
+  {% endif %}
+</div>

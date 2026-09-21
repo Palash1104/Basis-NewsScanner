@@ -482,6 +482,14 @@ powershell -ExecutionPolicy Bypass -File scripts/install_tasks.ps1 [-Remove]   #
     `min_samples_to_show_rate` (5) judged calls.
   - n counts asset-calls, not independent events, so the distinct story count is reported
     next to it. The digest shows at most one track-record line per story.
+  - A rate is shown only at `min_samples_to_show_rate` (5) judged calls **and**
+    `min_stories_to_show_rate` (3) distinct stories (user, 2026-09-22): five calls from one
+    story is one observation, not five. Below either gate the page prints
+    "n=18, 2 stories, too few". The same gate applies everywhere a rate is printed - the
+    digest's track line, `newsdesk score`, `newsdesk health` and the web - because a rate
+    that is wrong to show on the page is wrong to send to Telegram.
+  - Between that gate and `early_rate_below_stories` (10) the rate is shown muted with an
+    "early" tag: a direction, not a measurement.
 - LLM impact layer (SPEC 7.7 B) and rerank:
   - Layer B runs on `summary_model`, not `reasoning_model`: this project's `gemini-3.6-flash`
     allows only 20 requests a day, and `gemini-3.8-flash` is listed by the API but has no

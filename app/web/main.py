@@ -52,7 +52,7 @@ SEMANTIC_SWATCHES = (
 
 NAV = (
     {"name": "today", "label": "Today", "href": "/", "note": ""},
-    {"name": "track", "label": "Track record", "href": None, "note": "step 3"},
+    {"name": "track", "label": "Track record", "href": "/track-record", "note": ""},
     {"name": "assets", "label": "Assets", "href": None, "note": "step 4"},
     {"name": "runs", "label": "Runs", "href": None, "note": "step 5"},
 )
@@ -310,6 +310,27 @@ def create_app(
             "age": story_age(found, now),
         }
         return templates.TemplateResponse(request, "story.html", context)
+
+    @web.get("/track-record", response_class=HTMLResponse)
+    def track(request: Request, session: ReadSession, horizon: str = "") -> HTMLResponse:
+        """How the calls have actually turned out (SPEC 7.9), by rule, event type, origin,
+        confidence and horizon."""
+        chosen = (
+            horizon
+            if horizon in {str(days) for days in settings.scoring.horizons_trading_days}
+            else ""
+        )
+        summary, tables = queries.track_tables(session, settings, int(chosen) if chosen else None)
+        context = base_context(request, session, active="track")
+        context |= {
+            "summary": summary,
+            "tables": tables,
+            "horizon": chosen,
+            "horizons": [("", "All")]
+            + [(str(days), f"{days}d") for days in settings.scoring.horizons_trading_days],
+        }
+        name = "_track_tables.html" if request.headers.get("hx-request") else "track_record.html"
+        return templates.TemplateResponse(request, name, context)
 
     @web.exception_handler(StarletteHTTPException)
     def not_found(request: Request, exc: StarletteHTTPException) -> HTMLResponse:

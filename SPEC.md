@@ -480,7 +480,7 @@ For each impact and each horizon N in `horizons_trading_days`, once N trading da
   - `unscorable`: missing data
 - Hit rate = hits ÷ (hits + misses). Also report the no_move share.
 
-Aggregate track records by: rule_id, event_type, origin (playbook / llm / both), confidence, horizon, prompt_version, **temperature** and **seed** (the last three are the extraction's, from `impacts.event_id`: they decided which rules fired). Only show a rate when n ≥ `min_samples_to_show_rate`.
+Aggregate track records by: rule_id, event_type, origin (playbook / llm / both), confidence, horizon, prompt_version, **temperature** and **seed** (the last three are the extraction's, from `impacts.event_id`: they decided which rules fired). Only show a rate when n ≥ `min_samples_to_show_rate` **and** the calls come from ≥ `min_stories_to_show_rate` distinct stories: one story calls many assets at once and they move together, so five calls from one story is one observation. Between that gate and `early_rate_below_stories` the rate is marked *early*. The same gate applies wherever a rate is printed: the digest line, `newsdesk score`, `newsdesk health` and `/track-record`.
 
 Add a short note in the README that overlapping news on the same asset makes attribution noisy; this is a sanity check, not a rigorous backtest.
 

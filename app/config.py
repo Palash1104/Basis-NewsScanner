@@ -210,6 +210,12 @@ class ScoringSettings(_Strict):
     # impacts.moved_vol_multiple, which asks whether the news is already in the price.
     hit_threshold_vol_multiple: float
     min_samples_to_show_rate: int
+    # A rate also needs this many distinct stories behind it. n counts asset-calls, and one
+    # story calls ten assets at once, so five calls from one story is one observation.
+    min_stories_to_show_rate: int = Field(default=3, gt=0)
+    # Below this many stories a rate is shown, but marked early: it is a direction, not a
+    # measurement.
+    early_rate_below_stories: int = Field(default=10, gt=0)
     # An impact that still has no reference price this long after its story is unscorable.
     reference_grace_days: int = Field(default=7, gt=0)
     # Extra days beyond a horizon's expected completion before giving up on its data.
