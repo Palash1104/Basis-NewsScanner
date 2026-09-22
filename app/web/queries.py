@@ -186,12 +186,15 @@ def feed_stories(
     names = {asset.symbol: asset.display_name for asset in assets.values()}
     minimum = settings.scoring.min_samples_to_show_rate
     min_stories = settings.scoring.min_stories_to_show_rate
+    early_below = settings.scoring.early_rate_below_stories
     return [
         FeedStory(
             story=story,
             calls=story_calls(story.impacts, assets, MAX_CALLS_PER_STORY, labels),
             sources=pick_sources(story.articles),
-            track_record=story_track_line(story, rules, minimum, names, min_stories),
+            track_record=story_track_line(
+                story, rules, minimum, names, min_stories, early_below
+            ),
             age=story_age(story, now),
         )
         for story in stories
@@ -423,6 +426,7 @@ def story_detail(
             settings.scoring.min_samples_to_show_rate,
             names,
             settings.scoring.min_stories_to_show_rate,
+            settings.scoring.early_rate_below_stories,
         ),
     )
 

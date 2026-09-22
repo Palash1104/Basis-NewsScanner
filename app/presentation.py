@@ -40,12 +40,16 @@ class AssetCall:
     order: str  # first | second
     confidence: str  # high | medium | low
     origins: tuple[str, ...]  # playbook, llm, both
-    rule_count: int  # rules that agreed on this exact call
+    rule_ids: tuple[str, ...]  # the rules that agreed on this exact call
     conflict: bool = False
     move: str | None = None  # "+2.4%", "+0.10 pts"; None when not priced yet
     move_up: bool | None = None  # sign of the actual move, not of the call
     label: str | None = None  # "already moved" / "moving against this call"
     impact_ids: tuple[int, ...] = ()
+
+    @property
+    def rule_count(self) -> int:
+        return len(self.rule_ids)
 
     @property
     def priced(self) -> bool:
@@ -148,7 +152,7 @@ def story_calls(
                 order=best.order,
                 confidence=best.confidence,
                 origins=tuple(sorted({impact.origin for impact in same})),
-                rule_count=len({impact.rule_id for impact in same if impact.rule_id}),
+                rule_ids=tuple(sorted({i.rule_id for i in same if i.rule_id})),
                 conflict=True,
                 move=move,
                 move_up=move_up,
@@ -175,7 +179,7 @@ def story_calls(
                 order=best.order,
                 confidence=best.confidence,
                 origins=tuple(sorted({impact.origin for impact in same})),
-                rule_count=len({impact.rule_id for impact in same if impact.rule_id}),
+                rule_ids=tuple(sorted({i.rule_id for i in same if i.rule_id})),
                 move=move,
                 move_up=move_up,
                 label=label,
@@ -187,3 +191,113 @@ def story_calls(
     # Conflicts are shown first and are never cut: "mixed signals" is the strongest thing a
     # story can say about an asset.
     return StoryCalls(shown=calls + agreed[:limit], extra=agreed[limit:])
+
+
+# ---------------------------------------------------------------- the signal block
+
+# What a price label is worth saying in two words. The long forms come from SPEC 7.8.
+MOVE_MARKS = {
+    "already moved": "\u2713 already moved",
+    "moving against this call": "\u2715 against call",
+}
+UP_ARROW, DOWN_ARROW, MIXED_ARROW = "\u25b2", "\u25bc", "\u2195"
+
+
+@dataclass(frozen=True)
+class SignalLine:
+    """One asset, as short as it can be said."""
+
+    arrow: str
+    name: str
+    move: str | None
+    label: str | None  # "✓ already moved" / "✕ against call"
+    traits: tuple[str, ...]  # only what this call does *not* share with the others
+    note: str | None  # "mixed signals", "2 rules"
+
+    def __str__(self) -> str:
+        parts = [f"{self.arrow} {self.name}"]
+        if self.move:
+            parts.append(self.move)
+        if self.label:
+            parts.append(self.label)
+        line = " ".join(parts)
+        extra = [part for part in (self.note, *self.traits) if part]
+        return line + (" · " + " · ".join(extra) if extra else "")
+
+
+@dataclass(frozen=True)
+class SignalBlock:
+    """Everything a story says about the market, arranged for a reader who sees three lines
+    before "show more": what every call shares, then the assets, then why, then the record."""
+
+    shared: tuple[str, ...]  # true of every call, so it is said once
+    lines: tuple[SignalLine, ...]  # most important first
+    reasons: tuple[tuple[str | None, str], ...]  # (rule, mechanism), one per rule
+    extra: tuple[str, ...]  # assets cut for length
+    shows_moves: bool  # whether any line carries a move, so the window is worth naming
+    track_record: str | None = None
+
+
+def _traits(call: AssetCall) -> dict[str, str]:
+    return {
+        "origin": call.origin_label,
+        "order": ORDER_WORDS[call.order],
+        "confidence": f"{call.confidence} confidence",
+    }
+
+
+def signal_block(calls: StoryCalls, track_record: str | None = None) -> SignalBlock | None:
+    """Group a story's calls so nothing is repeated that every call agrees on.
+
+    A digest that prints the origin, the order and the confidence on every line makes the
+    reader compare twelve near-identical strings to find the one that differs. Saying the
+    common part once leaves only what actually varies on each line.
+    """
+    if not calls.shown and not calls.extra:
+        return None
+
+    traits = [_traits(call) for call in calls.shown]
+    shared = {
+        key: values[0]
+        for key in ("origin", "order", "confidence")
+        for values in [[trait[key] for trait in traits]]
+        if values and len(set(values)) == 1
+    }
+
+    lines = []
+    for call, trait in zip(calls.shown, traits, strict=True):
+        if call.conflict:
+            arrow, note = MIXED_ARROW, "mixed signals"
+        else:
+            arrow = UP_ARROW if call.direction == "up" else DOWN_ARROW
+            note = f"{call.rule_count} rules" if call.rule_count > 1 else None
+        lines.append(
+            SignalLine(
+                arrow=arrow,
+                name=call.name,
+                move=call.move,
+                label=MOVE_MARKS.get(call.label or "", call.label),
+                traits=tuple(value for key, value in trait.items() if shared.get(key) != value),
+                note=note,
+            )
+        )
+
+    reasons: list[tuple[str | None, str]] = []
+    for call in calls.shown:
+        rule = " + ".join(call.rule_ids) or None
+        if (rule, call.mechanism) not in reasons:
+            reasons.append((rule, call.mechanism))
+    # A rule that states a different mechanism per asset gets a line each, but naming it on
+    # every one of them would repeat the same id down the block. The name only earns its place
+    # when the reasons come from more than one rule.
+    if len({rule for rule, _ in reasons}) == 1:
+        reasons = [(None, mechanism) for _, mechanism in reasons]
+
+    return SignalBlock(
+        shared=tuple(shared[key] for key in ("origin", "order", "confidence") if key in shared),
+        lines=tuple(lines),
+        reasons=tuple(reasons),
+        extra=tuple(call.name for call in calls.extra),
+        shows_moves=any(line.move for line in lines),
+        track_record=track_record,
+    )

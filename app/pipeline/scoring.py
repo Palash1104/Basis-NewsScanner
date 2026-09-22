@@ -415,8 +415,12 @@ def story_track_line(
     minimum: int,
     display: dict[str, str] | None = None,
     min_stories: int = 1,
+    early_below_stories: int | None = None,
 ) -> str | None:
-    """SPEC 10: one line per story, only for a rule whose record means something yet."""
+    """SPEC 10: one line per story, only for a rule whose record means something yet.
+
+    `early_below_stories` marks a rate that passes the gate but rests on few stories, the
+    same word the web uses: a direction, not a measurement."""
     rules = {impact.rule_id for impact in story.impacts if impact.rule_id}
     qualifying = [row for row in rows if row.key in rules and row.shows_rate(minimum, min_stories)]
     if not qualifying:
@@ -424,7 +428,12 @@ def story_track_line(
     best = max(qualifying, key=lambda row: row.judged)
     name = (display or {}).get(best.key, best.key)
     # "close" marks the window: this is the close N trading days on, not the move since news.
+    early = (
+        " · early"
+        if early_below_stories is not None and len(best.stories) < early_below_stories
+        else ""
+    )
     return (
         f"Track record: {name} right {best.hits} of {best.judged} "
-        f"({best.horizon_days}d close, {len(best.stories)} stories)"
+        f"({best.horizon_days}d close, {len(best.stories)} stories){early}"
     )

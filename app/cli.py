@@ -669,6 +669,7 @@ def run_digest(
                     settings.scoring.min_samples_to_show_rate,
                     names,
                     settings.scoring.min_stories_to_show_rate,
+                    settings.scoring.early_rate_below_stories,
                 ),
                 now=now,
             )

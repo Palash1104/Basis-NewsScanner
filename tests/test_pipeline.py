@@ -176,8 +176,12 @@ def test_digest_dry_run_then_send(db: sessionmaker[Session], settings: Settings)
     text = "\n".join(dry.messages)
     assert "Gaza" in text and "Research notes, not financial advice." in text
     # Playbook impacts appear with their mechanism (SPEC §13, Phase 2).
-    assert "▼ Nifty 50 · 2nd · low · playbook — US tariffs threaten Indian exports" in text
-    assert "▲ USD/INR (rupee weaker) · 2nd · low · playbook" in text
+    # The market block: what every call shares once, then one line per asset, then why.
+    assert "<blockquote expandable><b>MARKET SIGNALS</b> · playbook · second order · low" in text
+    assert "▼ Nifty 50\n▲ USD/INR (rupee weaker)\n<i>Why:</i>" in text
+    # One rule fired both calls, so its id is not repeated in front of either mechanism.
+    assert "<i>Why:</i> US tariffs threaten Indian exports" in text
+    assert "us_tariffs_on_india —" not in text
     with db() as session:
         assert session.scalars(select(Run).where(Run.kind == "digest")).all() == []
 
@@ -320,8 +324,8 @@ def test_digest_keeps_empty_region_stories_and_drops_stale_ones(
     text = "\n".join(report.messages)
     assert report.stories == 1
     assert (
-        "<b>Fiji declares national HIV crisis</b>\n<i>Other</i>" in text
-    )  # no region, still shown
+        "<b>01 · Fiji declares national HIV crisis</b>\n<i>Other</i>" in text
+    )  # no region, still shown: the meta line is the category alone
     assert "Regrouped story" not in text
 
 
@@ -393,7 +397,8 @@ def test_prices_reach_the_digest_as_moves_and_labels(
 
     dry = run_digest(db, settings, send=False, now=NOW + timedelta(minutes=5))
     text = "\n".join(dry.messages)
-    assert "▼ Nifty 50 -0.3% (already moved) · since news · 2nd · low · playbook" in text
+    assert "▼ Nifty 50 -0.3% ✓ already moved" in text
+    assert "<i>Moves since news</i>" in text
     assert "▲ USD/INR (rupee weaker) +0.0%" in text  # priced, but nothing worth flagging
 
 
