@@ -349,6 +349,15 @@ powershell -ExecutionPolicy Bypass -File scripts/install_tasks.ps1 [-Remove]   #
   - Verified 2026-09-21: `Start-ScheduledTask Newsdesk-score` gave `LastTaskResult 0`
     and scored 66 calls through the wrapper.
   - `newsdesk scheduler` still exists for other platforms and for a foreground run.
+  - `-WithWeb` adds a fourth task, `Newsdesk-web`: `newsdesk serve` at logon, one minute in
+    (user, 2026-09-22 - they wanted BASIS up as soon as the laptop is on). It runs until
+    logoff, so it has no `ExecutionTimeLimit`, restarts up to 3 times, and is
+    `MultipleInstances IgnoreNew`. No `WakeToRun` and no `StartWhenAvailable`: nobody is
+    reading a page while the lid is shut. `run_task.ps1` streams its output straight to
+    `data/logs/tasks/serve.log` (truncated per logon) instead of the batch jobs' collect-at-
+    exit, which would show nothing until the server stopped.
+  - A long-running task reports `LastTaskResult 267009` ("currently running"), which is
+    success, not an error.
 - Job locks (`app/locks.py`): `run`, `digest --send` and `score` each hold an OS file
   lock in `data/locks/`, in both the CLI and the scheduler jobs. A job that can't take
   its lock logs and exits 0, so a slow run and the next scheduled one never overlap.

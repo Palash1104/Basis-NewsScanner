@@ -9,6 +9,7 @@
       Newsdesk-pipeline   newsdesk run           at every pipeline hour
       Newsdesk-digest     newsdesk digest --send at each digest time
       Newsdesk-score      newsdesk score         daily
+      Newsdesk-web        newsdesk serve         at logon, with -WithWeb
 
     The times come from `newsdesk schedule-times`, which reads settings.yaml, so they cannot
     drift from the app's own schedule. Re-run this script after changing those settings.
@@ -21,11 +22,16 @@
     powershell -ExecutionPolicy Bypass -File scripts\install_tasks.ps1
 
 .EXAMPLE
+    powershell -ExecutionPolicy Bypass -File scripts\install_tasks.ps1 -WithWeb
+
+.EXAMPLE
     powershell -ExecutionPolicy Bypass -File scripts\install_tasks.ps1 -Remove
 #>
 [CmdletBinding()]
 param(
-    [switch]$Remove
+    [switch]$Remove,
+    # Also start the web UI at logon, so http://127.0.0.1:8787 is there without a terminal.
+    [switch]$WithWeb
 )
 
 $ErrorActionPreference = "Stop"
@@ -93,6 +99,29 @@ Register-NewsdeskTask -Name "Newsdesk-digest" -Job "digest" -Triggers $digestTri
     -Description "Send the Telegram digest of stories summarized since the last one."
 Register-NewsdeskTask -Name "Newsdesk-score" -Job "score" -Triggers $scoreTrigger `
     -Description "Judge every impact whose horizon is complete and update the track record."
+
+if ($WithWeb) {
+    # The server runs until logoff: no time limit, restart it if it dies, and only ever one.
+    # It is not a WakeToRun job - waking a sleeping laptop to serve a page nobody asked for
+    # would be silly - and it does not need to catch up a missed start.
+    $webSettings = New-ScheduledTaskSettingsSet `
+        -AllowStartIfOnBatteries `
+        -DontStopIfGoingOnBatteries `
+        -MultipleInstances IgnoreNew `
+        -ExecutionTimeLimit ([TimeSpan]::Zero) `
+        -RestartCount 3 `
+        -RestartInterval (New-TimeSpan -Minutes 1)
+    $webTrigger = New-ScheduledTaskTrigger -AtLogOn -User "$env:USERDOMAIN\$env:USERNAME"
+    # A minute's grace so the server starts after the machine has settled.
+    $webTrigger.Delay = "PT1M"
+    $argument = "-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass " +
+                "-File `"$runner`" -Job serve"
+    $action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument $argument -WorkingDirectory $root
+    Register-ScheduledTask -TaskPath $taskPath -TaskName "Newsdesk-web" -Action $action `
+        -Trigger $webTrigger -Settings $webSettings -Principal $principal `
+        -Description "Serve the BASIS web UI on http://127.0.0.1:8787 for as long as you are logged in." -Force | Out-Null
+    Write-Output "  Newsdesk-web (at logon)"
+}
 
 Write-Output ""
 Get-ScheduledTask -TaskPath $taskPath |

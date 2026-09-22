@@ -78,7 +78,7 @@ window silently stops the digest. Install the Windows tasks instead:
 powershell -ExecutionPolicy Bypass -File scripts\install_tasks.ps1
 ```
 
-That creates three tasks under `\Newsdesk\`, with the times read from `settings.yaml` (via
+That creates the tasks under `\Newsdesk\`, with the times read from `settings.yaml` (via
 `newsdesk schedule-times`), so re-run it after changing the schedule:
 
 | Task | Command | When |
@@ -86,6 +86,19 @@ That creates three tasks under `\Newsdesk\`, with the times read from `settings.
 | `Newsdesk-pipeline` | `newsdesk run` | 01:00, 04:00, 07:00 … 22:00 |
 | `Newsdesk-digest` | `newsdesk digest --send` | 07:30 and 19:30 |
 | `Newsdesk-score` | `newsdesk score` | 03:30 |
+| `Newsdesk-web` | `newsdesk serve` | at logon, with `-WithWeb` |
+
+Add `-WithWeb` to also start the web UI a minute after you log in, so
+http://127.0.0.1:8787 is simply there whenever the laptop is on:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\install_tasks.ps1 -WithWeb
+```
+
+That task has no time limit (it runs until you log off), restarts itself if it dies, and only
+ever runs one copy. It does not wake the machine, and it does not catch up a missed start:
+a page nobody is looking at is not worth waking a laptop for. Its output goes to
+`data\logs\tasks\serve.log`, fresh each logon.
 
 They run as the logged-on user with the project's own virtualenv, need no administrator
 rights, start again after a reboot and login with no terminal open, run as soon as possible

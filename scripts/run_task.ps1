@@ -13,7 +13,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
-    [ValidateSet("run", "digest", "score")]
+    [ValidateSet("run", "digest", "score", "serve")]
     [string]$Job
 )
 
@@ -36,15 +36,25 @@ $arguments = switch ($Job) {
     "run" { @("run") }
     "digest" { @("digest", "--send") }
     "score" { @("score") }
+    "serve" { @("serve") }
 }
-
-$stamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss zzz"
-Add-Content -Path $log -Encoding utf8 -Value "=== $stamp  newsdesk $($arguments -join ' ') ==="
 
 if (-not (Test-Path $exe)) {
     Add-Content -Path $log -Encoding utf8 -Value "newsdesk not found at $exe - run 'uv sync'"
     exit 1
 }
+
+# The web server runs until logoff, so its output has to stream into the log as it happens
+# rather than being collected at exit like the batch jobs below. Start-Process redirection
+# truncates, which is what we want here: one file per logon, not one per request forever.
+if ($Job -eq "serve") {
+    $process = Start-Process -FilePath $exe -ArgumentList $arguments -WorkingDirectory $root `
+        -NoNewWindow -Wait -PassThru -RedirectStandardOutput $log -RedirectStandardError "$log.err"
+    exit $process.ExitCode
+}
+
+$stamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss zzz"
+Add-Content -Path $log -Encoding utf8 -Value "=== $stamp  newsdesk $($arguments -join ' ') ==="
 
 # Start-Process with separate redirect files: piping a native command's output inside
 # PowerShell 5.1 wraps stderr lines in error records and can fail the whole task.
