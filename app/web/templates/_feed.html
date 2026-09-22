@@ -20,7 +20,8 @@
       <div class="story-meta">
         {% if story.category %}<span class="kicker kicker-accent">{{ story.category }}</span>{% endif %}
         <span class="meta-line">
-          {{ story.first_seen_at | ist }}{% if item.age %} · {{ item.age }}{% endif %}
+          <span class="meta-when">{{ story.first_seen_at | ist }}</span>{% if item.age %}
+          <span class="meta-age">· {{ item.age }}</span>{% endif %}
         </span>
         {% if story.regions %}
           <span class="meta-line">{{ story.regions | join(" · ") }}</span>
@@ -46,8 +47,17 @@
         </div>
 
         {% if item.shown %}
-          <div class="chips">
-            {% for call in item.shown %}{% include "_chip.html" %}{% endfor %}
+          {# The strip scrolls sideways with its scrollbar hidden, so it carries its own
+             buttons. They start hidden and `chips.js` shows them only when there is
+             something off-screen: with no JavaScript there are no dead controls. #}
+          <div class="chip-strip">
+            <button type="button" class="chip-scroll" data-scroll="-1"
+              aria-label="Show earlier assets" hidden>&lsaquo;</button>
+            <div class="chips" tabindex="0" role="group" aria-label="Assets affected">
+              {% for call in item.shown %}{% include "_chip.html" %}{% endfor %}
+            </div>
+            <button type="button" class="chip-scroll" data-scroll="1"
+              aria-label="Show more assets" hidden>&rsaquo;</button>
           </div>
           {% if item.calls.extra %}
             <p class="story-more">

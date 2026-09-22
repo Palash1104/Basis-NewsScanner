@@ -17,6 +17,7 @@ from app.pipeline.prices import (
     price_impacts,
     reference_point,
     refresh_symbol,
+    refresh_universe,
     typical_move,
     usable_daily,
 )
@@ -179,6 +180,40 @@ def test_cache_fetches_only_the_tail_and_replaces_the_latest_bar(session: Sessio
     refresh_symbol(session, provider, "BZ=F", INTRADAY, later - timedelta(days=2), later)
     bars = cached_bars(session, "BZ=F", INTRADAY)
     assert len(bars) == len(CRUDE_BARS) and bars[-1].close == 104.9
+
+
+# ---------------------------------------------------------------- the universe refresh
+
+
+def test_the_whole_universe_is_fetched_in_one_request(session: Session) -> None:
+    """The web UI ranks 24-hour movers across every asset, not only the ones a story called,
+    so each run tops up the lot - in one batched request, and with no LLM call anywhere."""
+    now = CRUDE_BARS[-1].ts + timedelta(minutes=30)
+    gold = _bars([bar.ts for bar in CRUDE_BARS], [2400.0] * len(CRUDE_BARS))
+    provider = FakePrices({"BZ=F": {INTRADAY: CRUDE_BARS}, "GC=F": {INTRADAY: gold}})
+
+    report = refresh_universe(session, provider, ["BZ=F", "GC=F", "CL=F"], now)
+
+    assert provider.batches == [(("BZ=F", "GC=F", "CL=F"), INTRADAY)]
+    assert provider.calls == []  # one request for all three, not one each
+    assert report.symbols == 2  # CL=F returned nothing; it is simply absent
+    assert report.bars_stored == len(CRUDE_BARS) + len(gold)
+    assert len(cached_bars(session, "GC=F", INTRADAY)) == len(gold)
+
+
+def test_a_failed_universe_refresh_is_reported_not_raised(session: Session) -> None:
+    """Yahoo being down must not cost the run its impacts, its events or its digest."""
+    provider = FakePrices({"BZ=F": {INTRADAY: CRUDE_BARS}})
+    provider.fail_batch = True
+
+    report = refresh_universe(session, provider, ["BZ=F"], CRUDE_BARS[-1].ts)
+
+    assert report.error and "503" in report.error
+    assert report.symbols == 0 and cached_bars(session, "BZ=F", INTRADAY) == []
+
+
+def test_without_a_provider_nothing_is_fetched(session: Session) -> None:
+    assert refresh_universe(session, None, ["BZ=F"], STORY_AT).symbols == 0
 
 
 # ---------------------------------------------------------------- the pipeline step

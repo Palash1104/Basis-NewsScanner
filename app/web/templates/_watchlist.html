@@ -1,0 +1,29 @@
+{# The rail's watchlist rows, swapped on their own when the list is edited. `data-symbols` is
+   what is on screen now, so the script can tell whether the browser's saved list differs.
+
+   The rail is narrow, so the mockup's one-line row is folded into two: the name and its move,
+   then the last price and the line it traced. #}
+<div id="watchlist-rows" data-symbols="{{ watchlist_symbols | join(',') }}">
+  {% for row in watchlist %}
+    <div class="watch">
+      <div class="watch-head">
+        <a class="watch-name" href="/asset/{{ row.symbol }}">{{ row.name }}</a>
+        {% if row.change %}
+          <span class="watch-change {{ 'up' if row.up else 'down' }}">{{ row.change }}</span>
+        {% endif %}
+      </div>
+      <div class="watch-foot">
+        <span class="watch-price">{{ row.price or "no price yet" }}</span>
+        {% if row.series.points %}
+          <svg class="spark" viewBox="0 0 {{ rail_spark[0] }} {{ rail_spark[1] }}"
+            width="{{ rail_spark[0] }}" height="{{ rail_spark[1] }}" aria-hidden="true">
+            <polyline points="{{ rail_points(row.series) }}" fill="none" stroke-width="1.6"
+              stroke-linejoin="round" class="{{ 'up' if row.series.rose else 'down' }}" />
+          </svg>
+        {% endif %}
+      </div>
+    </div>
+  {% else %}
+    <p class="rail-empty">Nothing on the watchlist. Add an asset below.</p>
+  {% endfor %}
+</div>

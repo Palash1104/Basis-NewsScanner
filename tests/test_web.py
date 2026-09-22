@@ -22,9 +22,11 @@ from app.models import (
     Impact,
     ImpactScore,
     LLMDailyUsage,
+    PriceBar,
     RuleDisagreementRow,
     Run,
     Story,
+    utcnow,
 )
 from app.pipeline.rank import RERANK_FALLBACK_NOTE
 from app.web import palette, queries
@@ -221,6 +223,17 @@ def test_the_design_page_renders_with_the_footer_and_both_themes(client: TestCli
     assert "data-theme-toggle" in body
 
 
+def test_nothing_may_be_served_from_the_cache_without_asking(client: TestClient) -> None:
+    """A stylesheet held by heuristic freshness showed one browser the new page and another
+    the old one (user, 2026-09-22), and a page is a view of a database that changes every
+    three hours. Both must revalidate."""
+    page = client.get("/")
+    css = client.get("/static/css/app.css")
+    assert page.headers["cache-control"] == "no-cache"
+    assert css.headers["cache-control"] == "no-cache"
+    assert css.headers.get("etag") or css.headers.get("last-modified")  # so a 304 is possible
+
+
 def test_static_files_are_served_locally(client: TestClient) -> None:
     for path, expected in [
         ("/static/css/design-system.css", "--color-accent: #ec3013"),
@@ -317,6 +330,215 @@ def test_muted_text_is_darker_than_the_systems_own_default() -> None:
     assert palette.contrast(muted, palette.LIGHT["bg"]) >= palette.AA_TEXT
 
 
+def test_the_mark_is_drawn_in_css_and_fetches_nothing(client: TestClient) -> None:
+    """A newspaper extruded four hard steps down the accent ramp, all of it CSS: no image,
+    no icon font, no request. The ramp is named in theme.css so dark mode can move it up."""
+    assert '<span class="masthead-mark" aria-hidden="true"></span>BASIS' in client.get("/").text
+
+    app_css = (CSS_DIR / "app.css").read_text(encoding="utf-8")
+    mark = app_css.split(".masthead-mark {")[1].split("}")[0]
+    assert "box-shadow" in mark and "url(" not in mark
+    assert [f"var(--logo-{step})" in mark for step in range(1, 5)] == [True] * 4
+
+    # The wordmark itself stays as the mockup sets it: flat Archivo 800 in ink.
+    brand = app_css.split(".masthead-brand {")[1].split("}")[0]
+    assert "text-shadow" not in brand
+
+    theme = (CSS_DIR / "theme.css").read_text(encoding="utf-8")
+    # Once for paper, once for each way dark mode is reached (the media query and the toggle).
+    assert theme.count("--logo-1:") == 3
+
+
+def test_the_favicon_is_the_same_mark_and_is_not_a_file(client: TestClient) -> None:
+    head = client.get("/").text.split("</head>")[0]
+    icon = head.split('rel="icon" href="')[1].split('"')[0]
+    assert icon.startswith("data:image/svg+xml,")  # drawn inline, never fetched
+    assert "%23ae1800" in icon  # the same accent ramp the masthead extrudes with
+
+
+def test_a_headline_is_ink_and_underlines_only_when_hovered() -> None:
+    """The design never tints a headline; the whole row is the link, so ours underlines on
+    hover instead of colouring the words."""
+    app_css = (CSS_DIR / "app.css").read_text(encoding="utf-8")
+    headline = app_css.split(".story-headline a,")[1].split("}")[0]
+    assert "color: var(--color-text)" in headline and "text-decoration: none" in headline
+    hover = app_css.split(".story-headline a:hover,")[1].split("}")[0]
+    assert "text-decoration: underline" in hover
+    # Everything else takes the mockup's link colour, not the system's brighter accent.
+    links = app_css.split("\na {")[1].split("}")[0]
+    assert "var(--color-link)" in links
+
+
+def test_the_assets_a_story_calls_are_one_scrolling_row(client: TestClient) -> None:
+    """Six calls used to stack into a column once the rail took its width."""
+    body = client.get("/").text
+    assert '<div class="chips" tabindex="0"' in body  # scrollable from the keyboard too
+
+    app_css = (CSS_DIR / "app.css").read_text(encoding="utf-8")
+    chips = app_css.split(".chips {")[1].split("}")[0]
+    assert "flex-wrap: nowrap" in chips and "overflow-x: auto" in chips
+    assert "scrollbar-width: none" in chips
+    chip = app_css.split("\n.chip {")[1].split("}")[0]
+    assert "flex: none" in chip  # never squeezed to fit; the row scrolls instead
+
+
+def test_the_watchlist_shows_the_settings_default(database: Path, settings: Settings) -> None:
+    """The page renders the configured list server-side, so it reads correctly before any
+    JavaScript runs and for a browser that has never edited it."""
+    now = utcnow()
+    _cache_hourly(database, "BZ=F", [70.0] * 24 + [70.0, 71.4], now)
+    _cache_hourly(database, "GC=F", [3800.0] * 24 + [3800.0, 3762.0], now)
+    engine = make_read_only_engine(database)
+    client = TestClient(create_app(settings, make_read_only_session_factory(engine)))
+
+    body = client.get("/").text
+    rail = body.split('<aside class="rail">')[1].split("</aside>")[0]
+
+    assert "Your watchlist" in rail
+    # Every configured symbol has a row, in the order settings.yaml gives them.
+    assert [name for name in ("Brent crude", "Gold", "Copper", "USD/INR") if name in rail] == [
+        "Brent crude",
+        "Gold",
+        "Copper",
+        "USD/INR",
+    ]
+    assert "$71.40" in rail and "+2.0%" in rail  # last price, then the 24-hour move
+    assert "-1.0%" in rail
+    # Copper and the rupee have no cached bars here, and are shown as such, never invented.
+    assert rail.count("no price yet") == 2
+    assert "Edit watchlist" in rail
+
+
+def test_a_watchlist_row_links_to_its_asset_page(client: TestClient) -> None:
+    assert '<a class="watch-name" href="/asset/BZ=F">Brent crude</a>' in client.get("/").text
+
+
+def test_the_fragment_takes_a_browsers_own_list(client: TestClient) -> None:
+    """The editor saves to localStorage and asks for these rows; the server still decides
+    what each symbol means."""
+    body = client.get("/watchlist", params={"symbols": "GC=F,^NSEI"}).text
+    assert "<html" not in body  # a fragment, not a page
+    assert 'data-symbols="GC=F,^NSEI"' in body
+    assert "Gold" in body and "Nifty 50" in body
+    assert "Brent crude" not in body  # the default is gone, as asked
+
+
+def test_a_symbol_the_universe_does_not_have_is_dropped(client: TestClient) -> None:
+    """Whatever a browser has stored - stale, hand-edited, from an older universe - can only
+    ever put a real asset on the page."""
+    body = client.get("/watchlist", params={"symbols": "GC=F,NOT_A_TICKER,GC=F"}).text
+    assert 'data-symbols="GC=F"' in body  # unknown dropped, duplicate collapsed
+    assert "NOT_A_TICKER" not in body
+
+
+def test_an_empty_list_falls_back_to_the_default(client: TestClient) -> None:
+    body = client.get("/watchlist").text
+    assert "Brent crude" in body and "Gold" in body
+
+
+def test_the_watchlist_is_capped(client: TestClient, settings: Settings) -> None:
+    """A list from a browser is not trusted to be a sensible length."""
+    every = ",".join(asset.symbol for asset in load_assets())
+    body = client.get("/watchlist", params={"symbols": every}).text
+    shown = body.split('data-symbols="')[1].split('"')[0].split(",")
+    assert len(shown) == settings.web.watchlist_max
+
+
+def test_the_editor_offers_the_universe_and_saves_in_the_browser(client: TestClient) -> None:
+    """The web app opens the database read-only, so the choice cannot live there."""
+    body = client.get("/").text
+    assert 'id="watchlist-editor"' in body and "data-max=" in body
+    assert body.count('input type="checkbox" name="symbol"') == len(load_assets())
+    assert "not in the database" in body
+
+    script = (Path("app/web/static/js") / "watchlist.js").read_text(encoding="utf-8")
+    assert "localStorage" in script and "newsdesk-watchlist" in script
+
+
+def test_a_watchlist_price_is_readable_not_a_caption() -> None:
+    """The mockup's 70% ink was the lightest text on the page; a price is a figure people
+    come to the rail to read (user, 2026-09-22)."""
+    app_css = (CSS_DIR / "app.css").read_text(encoding="utf-8")
+    price = app_css.split(".watch-price {")[1].split("}")[0]
+    assert "var(--color-body-dim)" in price and "tabular-nums" in price
+
+    for theme in (palette.LIGHT, palette.DARK):
+        dim = palette.blend(theme["text"], theme["bg"], palette.DIM_ALPHA)
+        muted = palette.blend(theme["text"], theme["bg"], palette.MUTED_ALPHA)
+        assert palette.contrast(dim, theme["bg"]) > palette.contrast(muted, theme["bg"])
+        assert palette.contrast(dim, theme["bg"]) >= palette.AA_TEXT
+
+
+def test_a_price_is_written_the_way_the_design_writes_one() -> None:
+    assets = {asset.symbol: asset for asset in load_assets()}
+    assert queries.format_price(assets["BZ=F"], 71.4) == "$71.40"
+    assert queries.format_price(assets["RELIANCE.NS"], 1402.5) == "₹1,402"  # paise dropped
+    assert queries.format_price(assets["ZW=F"], 412.25) == "412.25¢"  # grains quote in cents
+
+
+def test_the_feed_fills_the_window_but_the_reading_pages_do_not() -> None:
+    """The masthead and the ticker are full-bleed; capping the page under them at the
+    mockup's 1280 left the rail stranded mid-screen (user, 2026-09-22)."""
+    app_css = (CSS_DIR / "app.css").read_text(encoding="utf-8")
+    screen = app_css.split("\n.screen {")[1].split("}")[0]
+    feed = app_css.split(".screen-feed {")[1].split("}")[0]
+    assert "max-width: var(--canvas-width)" in screen  # /runs, /assets, a story
+    assert "max-width: none" in feed
+
+
+def test_a_row_carries_a_button_at_each_end(client: TestClient) -> None:
+    """The scrollbar is hidden, so something has to say there is more. The buttons ship
+    hidden and `chips.js` reveals them for a row that overflows: no JavaScript, no dead
+    control."""
+    body = client.get("/").text
+    assert body.count('class="chip-scroll" data-scroll="-1"') == body.count('<div class="chips"')
+    assert 'aria-label="Show more assets" hidden' in body
+    assert "js/chips.js" in body
+
+    script = (Path("app/web/static/js") / "chips.js").read_text(encoding="utf-8")
+    # Clicks are caught on the document: HTMX replaces the feed on every keystroke, and
+    # listeners bound to a row would go with it.
+    assert 'document.addEventListener("click"' in script
+    assert "htmx:afterSwap" in script
+
+
+def test_the_strip_scrolls_without_showing_a_scrollbar() -> None:
+    app_css = (CSS_DIR / "app.css").read_text(encoding="utf-8")
+    ticker = app_css.split(".ticker {")[1].split("}")[0]
+    assert "overflow-x: auto" in ticker and "scrollbar-width: none" in ticker
+    assert ".ticker::-webkit-scrollbar {\n  display: none;\n}" in app_css
+
+
+def test_the_age_keeps_to_one_line(database: Path, settings: Settings) -> None:
+    """104px of meta column will wrap "21 Sep 08:20 · 3d ago" somewhere; it must not be
+    inside the age."""
+    engine = make_engine(database)
+    with make_session_factory(engine)() as session:
+        session.add(
+            Story(
+                first_seen_at=NOW - timedelta(days=3),
+                updated_at=NOW - timedelta(minutes=10),
+                headline="India-New Zealand FTA ratified",
+                summary="It comes into force next month.",
+                status="summarized",
+                category="Economy & Markets",
+                regions=["India"],
+                importance_score=3.3,
+            )
+        )
+        session.commit()
+    engine.dispose()
+
+    engine = make_read_only_engine(database)
+    client = TestClient(create_app(settings, make_read_only_session_factory(engine)))
+    body = client.get("/", params={"region": "India"}).text
+
+    assert '<span class="meta-age">' in body and "d ago</span>" in body
+    app_css = (CSS_DIR / "app.css").read_text(encoding="utf-8")
+    nowrap = app_css.split(".story-meta .meta-age {")[1].split("}")[0]
+    assert "white-space: nowrap" in nowrap
+
+
 # ---------------------------------------------------------------- the feed
 
 
@@ -352,6 +574,137 @@ def test_the_feed_links_its_sources_and_carries_the_disclaimer(client: TestClien
     body = client.get("/").text
     assert "Sources:" in body
     assert "Research notes, not financial advice." in body
+
+
+def test_the_feed_is_newest_first_not_most_important(database: Path, settings: Settings) -> None:
+    """The feed is read several times a day; the digest is the ranked view (user, 2026-09-22).
+    A quiet story filed an hour ago comes above the big one from this morning."""
+    engine = make_engine(database)
+    with make_session_factory(engine)() as session:
+        session.add(
+            Story(
+                first_seen_at=NOW - timedelta(minutes=30),
+                updated_at=NOW - timedelta(minutes=30),
+                headline="Municipal bond auction clears at par",
+                summary="Nothing much happened.",
+                status="summarized",
+                category="Economy & Markets",
+                regions=["Global"],
+                importance_score=0.4,  # far below the Houthi story's 8.0
+            )
+        )
+        session.commit()
+    engine.dispose()
+
+    engine = make_read_only_engine(database)
+    client = TestClient(create_app(settings, make_read_only_session_factory(engine)))
+    body = client.get("/").text
+    assert body.index("Municipal bond auction") < body.index("Houthi attacks")
+
+
+# ---------------------------------------------------------------- the right rail
+
+
+def _cache_hourly(database: Path, symbol: str, closes: list[float], now: datetime) -> None:
+    """One 60-minute bar an hour back from `now`, newest last, as the pipeline stores them."""
+    engine = make_engine(database)
+    with make_session_factory(engine)() as session:
+        for index, close in enumerate(reversed(closes)):
+            session.add(
+                PriceBar(
+                    symbol=symbol,
+                    interval="60m",
+                    ts=now - timedelta(hours=index),
+                    open=close,
+                    high=close,
+                    low=close,
+                    close=close,
+                    volume=1000.0,
+                )
+            )
+        session.commit()
+    engine.dispose()
+
+
+def _movers(database: Path, settings: Settings) -> list[queries.Mover]:
+    engine = make_read_only_engine(database)
+    with make_read_only_session_factory(engine)() as session:
+        assets = {asset.symbol: asset for asset in load_assets()}
+        return queries.movers(session, assets, NOW)
+
+
+def test_the_rail_ranks_the_biggest_movers_of_the_last_day(
+    database: Path, settings: Settings
+) -> None:
+    """Every asset the pipeline caches is a candidate, not only the ones a story called."""
+    # 26 hourly bars, so each series has one before the 24-hour window opens.
+    _cache_hourly(database, "BZ=F", [100.0] * 24 + [100.0, 101.0], NOW)  # +1.0%
+    _cache_hourly(database, "GC=F", [2000.0] * 24 + [2000.0, 1940.0], NOW)  # -3.0%
+    _cache_hourly(database, "^TNX", [4.0] * 24 + [4.0, 4.1], NOW)  # +0.10 points
+
+    movers = _movers(database, settings)
+
+    assert [mover.symbol for mover in movers] == ["GC=F", "^TNX", "BZ=F"]
+    assert [mover.change for mover in movers] == ["-3.0%", "+0.10 pts", "+1.0%"]
+    assert [mover.up for mover in movers] == [False, True, True]
+
+
+def test_an_asset_whose_market_was_shut_all_day_is_left_out(
+    database: Path, settings: Settings
+) -> None:
+    """A stale last price is not a 24-hour move, and a made-up one is worse than none."""
+    _cache_hourly(database, "BZ=F", [100.0, 102.0], NOW)  # two bars, an hour apart
+    _cache_hourly(database, "RELIANCE.NS", [1400.0, 1500.0], NOW - timedelta(days=3))
+
+    assert [mover.symbol for mover in _movers(database, settings)] == []
+
+    _cache_hourly(database, "BZ=F", [100.0] * 26, NOW - timedelta(hours=24))
+    assert [mover.symbol for mover in _movers(database, settings)] == ["BZ=F"]
+
+
+def test_the_movers_are_stamped_with_the_last_price_fetch(
+    database: Path, settings: Settings
+) -> None:
+    """Every number on the strip and in the rail says when it was taken, so neither reads as
+    a live quote."""
+    # The page asks for the moves up to the moment it is opened, so the bars are real-time.
+    _cache_hourly(database, "BZ=F", [100.0] * 24 + [100.0, 104.0], utcnow())
+    engine = make_read_only_engine(database)
+    client = TestClient(create_app(settings, make_read_only_session_factory(engine)))
+
+    body = client.get("/").text
+
+    assert "Biggest movers" in body and "24h" in body
+    assert "Brent crude" in body and "+4.0%" in body
+    # The fixture's last pipeline run finished two hours before NOW.
+    stamp = (NOW - timedelta(hours=2)).astimezone(ZoneInfo(settings.timezone))
+    assert f"as of {stamp:%d %b %H:%M} IST" in body or f"as of {stamp:%H:%M} IST" in body
+
+
+def test_a_mover_carries_the_week_behind_it(database: Path, settings: Settings) -> None:
+    """Both rail lists draw the same window, so their sparklines can be read against each
+    other: a week, beside a 24-hour number that the rail labels."""
+    now = utcnow()
+    _cache_hourly(database, "BZ=F", [70.0] * 24 + [70.0, 73.5], now)
+    engine = make_read_only_engine(database)
+    with make_read_only_session_factory(engine)() as session:
+        assets = {asset.symbol: asset for asset in load_assets()}
+        rows = queries.movers(session, assets, now)
+
+    assert [mover.symbol for mover in rows] == ["BZ=F"]
+    assert rows[0].series is not None and rows[0].series.points
+    assert queries.RAIL_WINDOW == "1w"
+
+    client = TestClient(create_app(settings, make_read_only_session_factory(engine)))
+    rail = client.get("/").text.split('<aside class="rail">')[1].split("</aside>")[0]
+    movers = rail.split("Biggest movers")[1]
+    assert "<polyline" in movers  # the line is in the movers list, not only the watchlist
+    assert "one-week line" in movers and "24h move" in movers
+
+
+def test_the_rail_says_when_it_has_no_prices(client: TestClient) -> None:
+    body = client.get("/").text
+    assert "No prices covering the last 24 hours yet." in body
 
 
 # ---------------------------------------------------------------- filters and search
@@ -480,6 +833,16 @@ def test_the_story_page_shows_what_the_story_says(client: TestClient) -> None:
     assert "Houthi attacks close the Red Sea to tankers" in body
     assert "Shipping is rerouting around the Cape." in body
     assert "Geopolitics" in body and "Global" in body
+
+
+def test_a_line_beside_a_call_is_always_the_same_week(client: TestClient) -> None:
+    """The feed's chips, the story page's rows and both rail lists draw one window, so a
+    shape on one page means the same as a shape on another (user, 2026-09-22)."""
+    from app.web import main
+
+    assert main.STORY_WINDOW == queries.RAIL_WINDOW == "1w"
+    assert queries.DEFAULT_WINDOW == "1w"  # what the feed's 1D/1W/1M control starts on
+    assert "7 days" in client.get("/story/1").text  # the window is on the page, as in the mockup
 
 
 def test_the_story_page_lists_every_call_not_just_the_top_ones(client: TestClient) -> None:

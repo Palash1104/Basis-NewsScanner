@@ -24,12 +24,27 @@
   --rule-light: color-mix(in srgb, var(--color-text) 20%, transparent);
   --rule-faint: color-mix(in srgb, var(--color-text) 15%, transparent);
 
+  /* The mark's extrusion, front to back. On paper the ramp darkens as it recedes, which is
+     what makes the newspaper read as a block rather than a coloured shadow. The favicon
+     draws the same four steps. */
+  --logo-1: var(--color-accent-500);
+  --logo-2: var(--color-accent-600);
+  --logo-3: var(--color-accent-700);
+  --logo-4: var(--color-accent-800);
+
   /* Mockup geometry that the system has no token for (design/NOTES.md 5, "Mockup layout"). */
   --canvas-width: 1280px;
   --page-padding: 40px;
-  --rail-width: 320px;
+  /* 350px (user, 2026-09-22, the last of several passes: 320, 260, 210 and 250 came first).
+     It holds what the mockup's rail holds - a name, a price, a sparkline and a move - now
+     that both lists draw their week. Every name in the universe fits; the ellipsis stays as
+     the catch for a longer one, so neither list can go ragged. */
+  --rail-width: 350px;
   --meta-column-width: 104px;
   --chip-min-width: 196px;
+  /* The feed's chip is the mockup's with two rows added (the call, and why), and it lives in
+     a strip that scrolls; 280px keeps about three of them in view beside the rail. */
+  --chip-width: 280px;
 }
 
 /* The same warm family, inverted: ink becomes the page, paper becomes the text. The neutral
@@ -55,6 +70,12 @@
     --color-link: var(--color-accent-400);
     --color-link-hover: var(--color-accent-300);
     --color-down: var(--color-accent-400);
+
+    /* The same move for the mark: the deepest steps would disappear into the page. */
+    --logo-1: var(--color-accent-400);
+    --logo-2: var(--color-accent-500);
+    --logo-3: var(--color-accent-600);
+    --logo-4: var(--color-accent-700);
   }
 }
 
@@ -76,6 +97,11 @@
   --color-link: var(--color-accent-400);
   --color-link-hover: var(--color-accent-300);
   --color-down: var(--color-accent-400);
+
+  --logo-1: var(--color-accent-400);
+  --logo-2: var(--color-accent-500);
+  --logo-3: var(--color-accent-600);
+  --logo-4: var(--color-accent-700);
 }
 
 /* The system's tags read their colour from the accent ramp, which inverts badly on ink. */

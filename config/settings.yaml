@@ -181,6 +181,14 @@ delivery:
   breaking_alerts: false
   breaking_importance_threshold: 5.0
 
+web:
+  # The rail's watchlist: assets kept on the page whether or not a story called them. Symbols
+  # must be in config/assets.yaml; anything else is dropped with a warning. This is only the
+  # default the page loads with - "Edit watchlist" keeps a per-browser choice in the browser
+  # itself, since the web app never writes to the database.
+  watchlist: ["BZ=F", "GC=F", "HG=F", "INR=X"]
+  watchlist_max: 12
+
 paths:
   database: data/newsdesk.db
   log_dir: data/logs

@@ -269,6 +269,14 @@ class PathSettings(_Strict):
     lock_dir: str = "data/locks"
 
 
+class WebSettings(_Strict):
+    """The web UI's own tunables. The watchlist is a starting point, not a store: the page's
+    "Edit watchlist" keeps a per-browser choice, because the web app never writes."""
+
+    watchlist: list[str] = Field(default_factory=list)
+    watchlist_max: int = Field(default=12, gt=0)
+
+
 class Settings(_Strict):
     timezone: str
     llm: LLMSettings
@@ -281,6 +289,7 @@ class Settings(_Strict):
     scoring: ScoringSettings
     delivery: DeliverySettings
     schedule: ScheduleSettings
+    web: WebSettings = Field(default_factory=WebSettings)
     paths: PathSettings = Field(default_factory=PathSettings)
 
     @field_validator("timezone")

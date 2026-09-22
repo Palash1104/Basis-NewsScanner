@@ -13,6 +13,9 @@
         }
       } catch (e) {}
     </script>
+    {# The masthead's mark again, drawn as one inline SVG: the same sheet, the same four steps
+       of the accent ramp, no file to fetch and no font to miss. #}
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><style>.p{fill:%23f3f2f2}.i{fill:%23201e1d}.s{stroke:%23201e1d}@media (prefers-color-scheme:dark){.p{fill:%231a1918}.i{fill:%23edeae8}.s{stroke:%23edeae8}}</style><rect x='8' y='8' width='20' height='22' fill='%237c1405'/><rect x='7' y='7' width='20' height='22' fill='%23ae1800'/><rect x='6' y='6' width='20' height='22' fill='%23dd2b0f'/><rect x='5' y='5' width='20' height='22' fill='%23ff563c'/><rect class='p s' x='4' y='4' width='20' height='22' stroke-width='2'/><rect class='i' x='8' y='8' width='12' height='4'/><rect class='i' x='8' y='15' width='12' height='2'/><rect class='i' x='8' y='19' width='12' height='2'/><rect class='i' x='8' y='23' width='8' height='2'/></svg>" />
     <link rel="preload" href="{{ url_for('static', path='fonts/archivo-latin.woff2') }}"
       as="font" type="font/woff2" crossorigin />
     <link rel="stylesheet" href="{{ url_for('static', path='css/design-system.css') }}" />
@@ -20,10 +23,12 @@
     <link rel="stylesheet" href="{{ url_for('static', path='css/app.css') }}" />
     <script src="{{ url_for('static', path='js/htmx.min.js') }}" defer></script>
     <script src="{{ url_for('static', path='js/theme.js') }}" defer></script>
+    <script src="{{ url_for('static', path='js/chips.js') }}" defer></script>
+    <script src="{{ url_for('static', path='js/watchlist.js') }}" defer></script>
   </head>
   <body>
     <header class="masthead">
-      <a class="masthead-brand" href="/">BASIS</a>
+      <a class="masthead-brand" href="/"><span class="masthead-mark" aria-hidden="true"></span>BASIS</a>
       <span class="masthead-divider"></span>
       <nav class="masthead-nav">
         {% for item in nav %}
@@ -58,7 +63,7 @@
       </div>
     {% endblock %}
 
-    <main class="screen">{% block content %}{% endblock %}</main>
+    <main class="screen {% block screen_class %}{% endblock %}">{% block content %}{% endblock %}</main>
 
     <footer class="colophon">
       <span class="disclaimer">Research notes, not financial advice.</span>

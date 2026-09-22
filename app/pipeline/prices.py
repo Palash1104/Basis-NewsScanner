@@ -48,6 +48,10 @@ DAILY_LEAD = timedelta(days=60)
 # The newest bar of an open session keeps changing, so always re-fetch this much of the tail.
 INTRADAY_OVERLAP = timedelta(days=2)
 DAILY_OVERLAP = timedelta(days=5)
+# How much intraday history the universe-wide refresh keeps. The same as INTRADAY_LEAD, so a
+# symbol the batch covers never ends up with less history than the per-impact fetch would give
+# it, and long enough that a 24-hour window still has a bar before it across a long weekend.
+UNIVERSE_LEAD = INTRADAY_LEAD
 
 
 class PriceUnavailable(Exception):
@@ -65,7 +69,12 @@ class Bar:
 
 
 class PriceProvider(Protocol):
-    """Daily or intraday bars for one symbol. A broker API can replace yfinance here."""
+    """Daily or intraday bars for one symbol. A broker API can replace yfinance here.
+
+    An implementation may also offer `many_bars(symbols, interval, start, end)`, returning one
+    list per symbol. `refresh_universe` uses it when it is there and does nothing when it is
+    not, so a provider that only knows one symbol at a time still works.
+    """
 
     def bars(self, symbol: str, interval: str, start: datetime, end: datetime) -> list[Bar]: ...
 
@@ -128,6 +137,64 @@ class YahooPrices:
             for stamp, row in frame.iterrows()
             if row.Close == row.Close  # skip NaN closes
         ]
+
+    def many_bars(
+        self, symbols: Sequence[str], interval: str, start: datetime, end: datetime
+    ) -> dict[str, list[Bar]]:
+        """Every symbol in one request. `yf.download` fetches them together, so the whole
+        universe costs about as long as a handful of separate calls."""
+        import yfinance as yf
+
+        if len(symbols) < 2:  # one ticker comes back without the per-symbol column level
+            return {symbol: self.bars(symbol, interval, start, end) for symbol in symbols}
+        yf.config.debug.hide_exceptions = False
+        logging.getLogger("yfinance").setLevel(logging.CRITICAL)
+        for attempt in range(1, self.attempts + 1):
+            self.requests += 1
+            try:
+                frame = yf.download(
+                    tickers=list(symbols),
+                    start=start.astimezone(UTC),
+                    end=end.astimezone(UTC),
+                    interval=interval,
+                    auto_adjust=False,
+                    group_by="ticker",
+                    threads=True,
+                    progress=False,
+                    timeout=self.timeout,
+                )
+                break
+            except Exception as exc:
+                if attempt == self.attempts:
+                    raise PriceUnavailable(f"{type(exc).__name__}: {exc}") from exc
+                delay = backoff_seconds(attempt, self.backoff_base)
+                log.warning(
+                    "prices %d symbols %s: %s (attempt %d/%d), retrying in %.1fs",
+                    len(symbols),
+                    interval,
+                    type(exc).__name__,
+                    attempt,
+                    self.attempts,
+                    delay,
+                )
+                self.sleep(delay)
+        series: dict[str, list[Bar]] = {}
+        for symbol in symbols:
+            if symbol not in frame.columns.get_level_values(0):
+                continue  # a symbol Yahoo returned nothing for; the next run tries again
+            series[symbol] = [
+                Bar(
+                    ts=stamp.to_pydatetime().astimezone(UTC),
+                    open=float(row.Open),
+                    high=float(row.High),
+                    low=float(row.Low),
+                    close=float(row.Close),
+                    volume=float(row.Volume or 0),
+                )
+                for stamp, row in frame[symbol].iterrows()
+                if row.Close == row.Close
+            ]
+        return series
 
 
 # ---------------------------------------------------------------- cache
@@ -203,6 +270,51 @@ def refresh_symbol(
     start = needed_from if newest is None else min(needed_from, newest - overlap)
     bars = provider.bars(symbol, interval, start, now + timedelta(days=1))
     return store_bars(session, symbol, interval, bars)
+
+
+@dataclass
+class UniverseRefresh:
+    """What one universe-wide intraday fetch did. `error` is set instead of raising: a Yahoo
+    failure must not cost the run its impacts or its digest."""
+
+    symbols: int = 0
+    bars_stored: int = 0
+    error: str | None = None
+
+
+def refresh_universe(
+    session: Session,
+    provider: PriceProvider | None,
+    symbols: Sequence[str],
+    now: datetime,
+    lead: timedelta = UNIVERSE_LEAD,
+) -> UniverseRefresh:
+    """60-minute bars for *every* asset in the universe, in one batched request.
+
+    The price check only fetches assets some story called, which leaves the rest of the
+    universe with no recent bars: the web UI's 24-hour movers need the whole list. One
+    `many_bars` call covers it, and costs no LLM quota.
+
+    Run this **after** `price_impacts`, not before: `refresh_symbol` skips a symbol whose
+    newest cached bar is under an hour old, so filling the cache first would stop it
+    backfilling the older history a new impact on an older story needs.
+    """
+    report = UniverseRefresh()
+    if provider is None or not symbols:
+        return report
+    fetch = getattr(provider, "many_bars", None)
+    if fetch is None:  # a provider that only knows one symbol at a time
+        return report
+    try:
+        series = fetch(list(symbols), INTRADAY, now - lead, now + timedelta(days=1))
+    except PriceUnavailable as exc:
+        report.error = str(exc)
+        return report
+    for symbol, bars in series.items():
+        report.bars_stored += store_bars(session, symbol, INTRADAY, bars)
+        report.symbols += 1
+    session.commit()
+    return report
 
 
 # ---------------------------------------------------------------- reference and moves

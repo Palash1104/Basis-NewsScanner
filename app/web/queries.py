@@ -8,7 +8,7 @@ spend its rate limit.
 import re
 from collections import Counter
 from collections.abc import Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, time, timedelta
 
 from sqlalchemy import func, select, text
@@ -29,7 +29,7 @@ from app.models import (
     Run,
     Story,
 )
-from app.pipeline.prices import DAILY, INTRADAY, format_move, move_labels
+from app.pipeline.prices import DAILY, INTRADAY, format_move, move_labels, move_pct
 from app.pipeline.scoring import TrackRow, story_track_line, track_record
 from app.presentation import AssetCall, StoryCalls, call_rank, story_age, story_calls
 
@@ -43,6 +43,17 @@ PAGE_SIZE = 12
 MAX_CALLS_PER_STORY = 6
 
 SUMMARIZED = ("summarized", "analyzed")
+
+# The right rail's "Biggest movers - 24h". The window is the last 24 hours, so an asset whose
+# market has been shut for all of them simply isn't in it; nothing is stretched to fill the
+# list. Five days of lead is how far back the bar that opens the window may sit: enough for a
+# long weekend, short enough that a delisted symbol drops out.
+MOVER_HOURS = 24
+MOVER_LIMIT = 6
+MOVER_REFERENCE_LEAD = timedelta(days=5)
+# Both rail lists draw the same window, so the two sets of sparklines can be read against each
+# other: a week (user, 2026-09-22). The moves beside them stay 24-hour, and the rail says so.
+RAIL_WINDOW = "1w"
 
 
 @dataclass(frozen=True)
@@ -128,7 +139,12 @@ def feed_page(
     offset: int = 0,
     limit: int = PAGE_SIZE,
 ) -> tuple[list[Story], bool]:
-    """Summarized stories, most important first (SPEC 7.4), with one page of results.
+    """Summarized stories, newest first, with one page of results.
+
+    Newest first, not most important first (user, 2026-09-22): the page is read like a feed,
+    several times a day, and the same important story sitting at the top of it for two days
+    hides what has happened since. The digest is still ordered by importance - it is sent
+    twice a day, and there the ranking is the whole point.
 
     Returns the page and whether older stories remain. A search looks through everything
     stored, not just the window: someone searching has a story in mind.
@@ -152,7 +168,7 @@ def feed_page(
     if category:
         statement = statement.where(Story.category == category)
 
-    statement = statement.order_by(Story.importance_score.desc(), Story.first_seen_at.desc())
+    statement = statement.order_by(Story.first_seen_at.desc(), Story.id.desc())
     # Regions are a JSON list, and one window holds few enough stories to filter in Python.
     stories = list(session.scalars(statement))
     if region:
@@ -192,9 +208,7 @@ def feed_stories(
             story=story,
             calls=story_calls(story.impacts, assets, MAX_CALLS_PER_STORY, labels),
             sources=pick_sources(story.articles),
-            track_record=story_track_line(
-                story, rules, minimum, names, min_stories, early_below
-            ),
+            track_record=story_track_line(story, rules, minimum, names, min_stories, early_below),
             age=story_age(story, now),
         )
         for story in stories
@@ -300,6 +314,163 @@ def last_run_finish(session: Session, kind: str = "pipeline") -> datetime | None
         .order_by(Run.finished_at.desc())
         .limit(1)
     ).first()
+
+
+@dataclass(frozen=True)
+class Mover:
+    """One asset's move over the last 24 hours, for the mockup's right rail."""
+
+    symbol: str
+    name: str
+    change: str  # "+1.8%", or points for a rate
+    up: bool
+    pct: float
+    series: Series | None = None  # the week behind the move; None when nothing is cached
+
+
+def _newest_close_in(session: Session, lower: datetime, upper: datetime) -> dict[str, float]:
+    """Each symbol's newest 60-minute close in [lower, upper). One grouped query, so a page
+    never reads a window's worth of bars for every asset in the universe."""
+    newest = (
+        select(PriceBar.symbol, func.max(PriceBar.ts).label("ts"))
+        .where(PriceBar.interval == INTRADAY, PriceBar.ts >= lower, PriceBar.ts < upper)
+        .group_by(PriceBar.symbol)
+        .subquery()
+    )
+    rows = session.execute(
+        select(PriceBar.symbol, PriceBar.close)
+        .join(newest, (PriceBar.symbol == newest.c.symbol) & (PriceBar.ts == newest.c.ts))
+        .where(PriceBar.interval == INTRADAY)
+    ).all()
+    return {symbol: close for symbol, close in rows}
+
+
+def window_moves(
+    session: Session, now: datetime, hours: int = MOVER_HOURS
+) -> dict[str, tuple[float, float]]:
+    """(reference close, latest close) per symbol over the last `hours`.
+
+    A symbol needs a bar inside the window *and* one at or before it opens; a market that has
+    been shut for all of it has no move to show, and a stale last price is not one. Two
+    grouped queries, so a page never reads a window's worth of bars for the whole universe.
+    """
+    start = now - timedelta(hours=hours)
+    latest = _newest_close_in(session, start, now + timedelta(hours=1))
+    before = _newest_close_in(session, start - MOVER_REFERENCE_LEAD, start)
+    return {
+        symbol: (before[symbol], close) for symbol, close in latest.items() if before.get(symbol)
+    }
+
+
+def movers(
+    session: Session,
+    assets: dict[str, AssetConfig],
+    now: datetime,
+    limit: int = MOVER_LIMIT,
+    hours: int = MOVER_HOURS,
+    window: str = RAIL_WINDOW,
+) -> list[Mover]:
+    """The biggest 24-hour moves across the whole universe, largest first, each with the week
+    behind it.
+
+    The pipeline caches 60-minute bars for every asset, not only the ones a story called, so
+    this can rank the universe. The lines are fetched after the ranking, so a page reads bars
+    for the handful shown and not for all 82.
+    """
+    rows = []
+    for symbol, (reference, close) in window_moves(session, now, hours).items():
+        asset = assets.get(symbol)
+        if asset is None:
+            continue
+        pct = move_pct(reference, close)
+        rows.append(
+            Mover(
+                symbol=symbol,
+                name=asset.display_name,
+                change=format_move(asset, reference, pct),
+                up=pct >= 0,
+                pct=pct,
+            )
+        )
+    rows.sort(key=lambda mover: abs(mover.pct), reverse=True)
+    shown = rows[:limit]
+    series = series_for(session, [mover.symbol for mover in shown], window, now)
+    return [replace(mover, series=series.get(mover.symbol)) for mover in shown]
+
+
+# The currency symbols the universe actually uses (see config/assets.yaml). Grains quote in
+# US cents, which is written after the number, the way a price page writes it.
+CURRENCY_MARKS = {"USD": "$", "INR": "₹"}
+
+
+def format_price(asset: AssetConfig, close: float) -> str:
+    """A last price as the design writes one: "$71.40", "₹9,610", "412¢". Big numbers drop
+    the paise; a currency we have no mark for keeps its code, rather than a guessed symbol."""
+    figure = f"{close:,.0f}" if abs(close) >= 1000 else f"{close:,.2f}"
+    if asset.currency == "USX":
+        return f"{figure}¢"
+    mark = CURRENCY_MARKS.get(asset.currency or "")
+    return f"{mark}{figure}" if mark else f"{figure} {asset.currency}".strip()
+
+
+@dataclass(frozen=True)
+class WatchRow:
+    """One asset on the rail's watchlist: what it costs, where it has been, how far it moved."""
+
+    symbol: str
+    name: str
+    price: str | None  # the last cached close; None when nothing is cached
+    change: str | None  # over the same window as the movers
+    up: bool
+    series: Series
+
+
+def watchlist_symbols(
+    wanted: Sequence[str], assets: dict[str, AssetConfig], limit: int
+) -> list[str]:
+    """The symbols to show, in the order asked for: known, deduplicated and capped.
+
+    Anything not in the universe is dropped rather than shown as an empty row - the list can
+    arrive from settings.yaml or from a browser, and neither is checked anywhere else.
+    """
+    seen: list[str] = []
+    for symbol in wanted:
+        cleaned = symbol.strip()
+        if cleaned in assets and cleaned not in seen:
+            seen.append(cleaned)
+    return seen[:limit]
+
+
+def watchlist_rows(
+    session: Session,
+    symbols: Sequence[str],
+    assets: dict[str, AssetConfig],
+    now: datetime,
+    window: str = RAIL_WINDOW,
+    hours: int = MOVER_HOURS,
+) -> list[WatchRow]:
+    """The watchlist, in the order the symbols were given - it is a list someone chose, so it
+    is not re-sorted by size the way the movers are."""
+    if not symbols:
+        return []
+    moves = window_moves(session, now, hours)
+    series = series_for(session, symbols, window, now)
+    rows = []
+    for symbol in symbols:
+        asset = assets[symbol]
+        move = moves.get(symbol)
+        pct = move_pct(*move) if move else None
+        rows.append(
+            WatchRow(
+                symbol=symbol,
+                name=asset.display_name,
+                price=format_price(asset, move[1]) if move else None,
+                change=format_move(asset, move[0], pct) if move and pct is not None else None,
+                up=pct is None or pct >= 0,
+                series=series.get(symbol, Series(symbol)),
+            )
+        )
+    return rows
 
 
 def story_count(session: Session, now: datetime, hours: int = FEED_HOURS) -> int:

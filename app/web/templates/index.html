@@ -9,7 +9,11 @@
     hx-include="[name='region'],[name='category'],[name='range']" />
 {% endblock %}
 
+{% block screen_class %}screen-feed{% endblock %}
+
 {% block content %}
+<div class="screen-split">
+  <div class="screen-main">
   <div class="screen-head">
     <div>
       <h1>What moved, and why</h1>
@@ -52,4 +56,72 @@
   </div>
 
   {% include "_feed.html" %}
+  </div>
+
+  {# The design's right rail: its watchlist card and, under it, the movers. The mockup's "in
+     plain english" panel stays out - that was its own copy, about commodities in general. #}
+  <aside class="rail">
+    <p class="rail-stamp">Prices as of {{ prices_as_of }} &middot; not a live feed</p>
+
+    <h6 class="rail-head">Your watchlist</h6>
+    <p class="rail-note">last price &middot; {{ mover_hours }}h move &middot; one-week line</p>
+    {% include "_watchlist.html" %}
+    <button type="button" class="btn btn-ghost watch-edit" data-watchlist-edit>
+      Edit watchlist
+    </button>
+
+    <hr class="hr rail-rule" />
+
+    <h6 class="rail-head">Biggest movers &middot; {{ mover_hours }}h</h6>
+    <p class="rail-note">{{ mover_hours }}h move &middot; one-week line</p>
+    {% if movers %}
+      {% for mover in movers %}
+        <div class="mover">
+          <span class="mover-name" title="{{ mover.name }}">{{ mover.name }}</span>
+          {% if mover.series and mover.series.points %}
+            <svg class="spark" viewBox="0 0 {{ rail_spark[0] }} {{ rail_spark[1] }}"
+              width="{{ rail_spark[0] }}" height="{{ rail_spark[1] }}" aria-hidden="true">
+              <polyline points="{{ rail_points(mover.series) }}" fill="none" stroke-width="1.6"
+                stroke-linejoin="round" class="{{ 'up' if mover.series.rose else 'down' }}" />
+            </svg>
+          {% endif %}
+          <span class="mover-change {{ 'up' if mover.up else 'down' }}">{{ mover.change }}</span>
+        </div>
+      {% endfor %}
+    {% else %}
+      <p class="rail-empty">
+        No prices covering the last {{ mover_hours }} hours yet. They arrive with the next
+        pipeline run.
+      </p>
+    {% endif %}
+  </aside>
+</div>
+
+{# The editor. A native <dialog>, so the browser handles modality, Escape and focus. The
+   choice is kept in the browser and not in the database: the web app never writes, and a
+   watchlist is one person's on one machine. #}
+<dialog class="sheet" id="watchlist-editor" aria-label="Edit watchlist"
+  data-max="{{ watchlist_max }}">
+  <form method="dialog" class="sheet-form">
+    <h2 class="sheet-title">Edit watchlist</h2>
+    <p class="sheet-note">
+      Any {{ watchlist_max }} of the {{ universe | length }} assets BASIS follows. Kept in this
+      browser, not in the database.
+    </p>
+    <div class="sheet-list">
+      {% for asset in universe %}
+        <label class="sheet-option">
+          <input type="checkbox" name="symbol" value="{{ asset.symbol }}" />
+          <span class="sheet-name">{{ asset.display_name }}</span>
+          <span class="sheet-symbol">{{ asset.symbol }}</span>
+        </label>
+      {% endfor %}
+    </div>
+    <div class="sheet-actions">
+      <button type="button" class="btn btn-ghost" data-watchlist-reset>Back to the default</button>
+      <button type="submit" value="cancel" class="btn btn-secondary">Cancel</button>
+      <button type="submit" value="save" class="btn btn-primary">Save</button>
+    </div>
+  </form>
+</dialog>
 {% endblock %}

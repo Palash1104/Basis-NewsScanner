@@ -394,6 +394,12 @@ def test_prices_reach_the_digest_as_moves_and_labels(
     assert report.impacts_created == 6 and report.impacts_priced == 6
     assert report.price_symbols == 2 and report.price_unusable == {}
     assert ("^NSEI", "60m") in prices.calls and ("^NSEI", "1d") in prices.calls
+    # The rest of the universe follows in one batched request, for the web UI's 24-hour
+    # movers. It comes after the impacts, so their older history is fetched first.
+    assert len(prices.batches) == 1
+    symbols, interval = prices.batches[0]
+    assert interval == "60m" and len(symbols) > 50 and "^NSEI" in symbols
+    assert report.universe_symbols == 2  # the two the fake has bars for
 
     dry = run_digest(db, settings, send=False, now=NOW + timedelta(minutes=5))
     text = "\n".join(dry.messages)

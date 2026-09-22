@@ -278,8 +278,93 @@ powershell -ExecutionPolicy Bypass -File scripts/install_tasks.ps1 [-Remove]   #
   operators can't break a query. A database it can't index logs a warning and carries on.
 - Sparklines come from `price_cache` only, sampled to ~24 points: 60-minute bars for 1D and
   1W, daily for 1M. An asset with no bars gets no line, never a made-up one.
+- **A line beside a call is always one week** (`queries.RAIL_WINDOW`, and `STORY_WINDOW` which
+  points at it): the feed's chips, the story page's rows and both rail lists, so a shape on
+  one page means the same as a shape on another (user, 2026-09-22). The story page was on a
+  month before that. The 1D/1W/1M control still moves the feed's chips, and it starts on 1W;
+  `/asset/{symbol}` keeps its month, since that page is about the asset and not a call. The
+  moves printed beside these lines are their own thing - "since news" on a call, 24h in the
+  rail - and each is labelled where it appears.
 - `/design` is the style guide and stays reachable, but it is not in the nav, because it is
   not in the design.
+- The feed page ignores the mockup's 1280px canvas and fills the window (user, 2026-09-22):
+  the masthead and the ticker are full-bleed, so capping the page under them left the rail
+  stranded mid-screen with dead space to its right. The extra width goes to the stories - and
+  their text can't sprawl, since headlines, summaries and notes are all capped in `ch`, so
+  what grows is the room the chip strip scrolls in. `/track-record`, `/assets`, `/runs` and a
+  story page keep the canvas: text and tables, where a 2000px line is not a better line.
+- The feed is ordered **newest first** (`first_seen_at desc`), not by importance (user,
+  2026-09-22): it is read several times a day, and a big story held the top of it for two
+  days. The digest keeps the importance order - it is sent twice a day, and ranking is its
+  job. Every filter and the search share the one order.
+- The logo is the mockup's flat Archivo 800 wordmark **plus** a mark beside it (user,
+  2026-09-22; the extruded wordmark that came first was reverted): a newspaper - a masthead
+  bar over three columns of type - extruded four hard `box-shadow` steps, 1px apart, down the
+  accent ramp (`--logo-1..4` in `theme.css`, moved up the ramp for dark mode). All CSS: the
+  sheet is a border and a background, the type is three gradients, and a shadow costs no
+  layout, so the masthead's height is unchanged. No image, no icon font, no request. The
+  favicon is the same mark as an inline `data:image/svg+xml`, which needs no font at all.
+- Headlines are ink, bold and unlined, as in the design, where the whole row is the link and
+  the words are never tinted; the underline is the hover state, which the design doesn't
+  define. Every other link takes the mockup's own colour (`--color-link`, accent-700 on
+  paper, accent-400 on ink), not the system's brighter `--color-accent`.
+- The feed's "assets affected" chips are **one horizontally scrolling row** (user,
+  2026-09-22), not a wrapping grid: once the rail took its 320px, two 420px chips no longer
+  fit side by side, so a story with six calls became a column a screenful tall. The chips are
+  a fixed `--chip-width` (280px, about three in view), never shrink (`flex: none`), and the
+  strip hides its scrollbar like the ticker; it carries `tabindex="0"` so it can be scrolled
+  from the keyboard, and a button at each end (`static/js/chips.js`) says there is more. The
+  buttons ship `hidden` in the template and the script reveals them only for a row that
+  overflows, so a page without JavaScript shows no dead control; clicks are caught on the
+  document, because HTMX replaces the whole feed on every filter and search keystroke and
+  listeners bound to a row would go with it. The story page is unaffected: it lists every
+  call in full-width rows.
+- The rail's watchlist (the design's watchlist card, `web.watchlist` in settings.yaml):
+  - Four assets to start (Brent, gold, copper, USD/INR), above the movers. Each row is the
+    mockup's, on two lines: name and 24-hour move, then the last cached price and the week's
+    sparkline. The price is 12px in ink at 85% (`--color-body-dim`, 9.52:1), not the mockup's
+    11px at 70% (5.79:1), which was the lightest text on the page and hard to read (user,
+    2026-09-22); its digits are tabular so the column lines up. Prices are written as the design writes them - `$71.40`,
+    `₹1,402`, `412¢` - with the code kept for a currency we have no mark for, never a guessed
+    symbol.
+  - **"Edit watchlist" saves in the browser, not the database** (`static/js/watchlist.js`,
+    `newsdesk-watchlist` in localStorage): the web app opens the database read-only, and a
+    watchlist is one person's on one machine, not a fact about the news. settings.yaml holds
+    the default, which is what the page renders server-side - so it reads correctly with no
+    JavaScript at all and for a browser that has never edited it.
+  - The editor is a native `<dialog>` over the whole universe, capped at
+    `web.watchlist_max` (12): at the cap the unchecked boxes go disabled, so the limit is
+    visible before it bites.
+  - `GET /watchlist?symbols=...` renders the rows alone, for the browser's own list. It
+    re-validates every symbol against assets.yaml and drops what it doesn't know, so nothing
+    a browser has stored - stale, hand-edited, from an older universe - can put a made-up
+    asset on the page. An empty or wholly unknown list falls back to the default.
+- Biggest movers - 24h (`queries.movers`, the design's right rail):
+  - The window is the last 24 hours from the moment the page is opened. An asset needs a bar
+    inside it *and* one at or before it starts; a market shut all day is left out rather than
+    shown against a stale price. For a US stock opened on a weekday morning IST, that is the
+    previous session's close-to-close move.
+  - Rates are in points, like everywhere else, and down is red. Each row draws a sparkline
+    too, fetched after the ranking so a page reads bars for the six shown, not all 82.
+  - It is stamped "as of HH:MM IST" with the last pipeline finish, for the same reason the
+    ticker is: nothing here is live.
+  - The rail is 350px (user, 2026-09-22, settled after 320, 260, 210 and 250): it now holds
+    what the mockup's rail holds - a name, a price, a sparkline and a move. Every name in the
+    universe fits; a longer one would be cut with an ellipsis and keep its full text in a
+    `title`, so neither list can go ragged.
+  - **Both lists draw the same window, a week** (`queries.RAIL_WINDOW`), so their sparklines
+    can be read against each other, while the numbers beside them stay 24-hour. The rail
+    labels both ("24h move - one-week line") and carries one "Prices as of HH:MM IST" stamp
+    for the pair, since they read the same cache filled by the same run.
+- The pipeline caches 60-minute bars for the **whole** universe each run
+  (`prices.refresh_universe`), because the price check only fetches what a story called and
+  the rail ranks all 82. One batched `yf.download`: measured live on 2026-09-22 at **2.6s**
+  for 82 symbols and 3,723 bars written (1.6s of it the fetch), against a run of several
+  minutes. No LLM call, and no new dependency.
+  - It runs **after** `price_impacts`, never before: `refresh_symbol` skips a symbol whose
+    newest cached bar is under an hour old, so filling the cache first would stop it
+    backfilling the older history a new impact on an older story needs.
+  - A Yahoo failure is recorded in `runs.errors` and the run carries on.
 
 ## Decisions worth knowing
 

@@ -6,6 +6,7 @@ import json
 import logging
 import socket
 import sys
+import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
@@ -86,6 +87,7 @@ from app.pipeline.prices import (
     impacts_to_price,
     move_labels,
     price_impacts,
+    refresh_universe,
 )
 from app.pipeline.rank import (
     pending_stories,
@@ -166,6 +168,10 @@ class PipelineReport:
     impacts_waiting: int = 0  # market hasn't opened since the story; priced after the open
     price_symbols: int = 0
     price_bars_stored: int = 0
+    # The universe-wide intraday refresh that feeds the web UI's 24-hour movers.
+    universe_symbols: int = 0
+    universe_bars_stored: int = 0
+    universe_seconds: float = 0.0
     price_unusable: dict[str, int] = field(default_factory=dict)  # reason -> symbols
     impact_rules: dict[str, int] = field(default_factory=dict)  # rule id -> impacts written
     # Unmapped country names and other fixes to extracted events, shown in the run output.
@@ -495,10 +501,11 @@ def run_pipeline(
                 since = last_digest_sent_at(session) or now - timedelta(
                     hours=settings.pipeline.lookback_hours
                 )
+                assets = _assets(report.errors)
                 priced = price_impacts(
                     session,
                     impacts_to_price(session, since) if prices else [],
-                    _assets(report.errors),
+                    assets,
                     prices,
                     settings,
                     now,
@@ -511,6 +518,18 @@ def run_pipeline(
                 report.price_unusable = priced.reasons
                 for symbol, reason in priced.unusable:
                     report.errors.append({"stage": "prices", "symbol": symbol, "error": reason})
+                session.commit()
+
+                # Then the rest of the universe, in one batched request, so the web UI can
+                # show the day's biggest movers and not only the assets a story called.
+                # After the impacts on purpose: see `refresh_universe`.
+                started = time.perf_counter()
+                universe = refresh_universe(session, prices, sorted(assets), now)
+                report.universe_seconds = time.perf_counter() - started
+                report.universe_symbols = universe.symbols
+                report.universe_bars_stored = universe.bars_stored
+                if universe.error:
+                    report.errors.append({"stage": "prices", "error": universe.error})
                 session.commit()
         except Exception as exc:
             session.rollback()
@@ -825,6 +844,8 @@ def run_once(settings: Settings, session_factory: sessionmaker[Session]) -> list
             if report.price_unusable
             else ""
         ),
+        f"universe prices: {report.universe_symbols} symbols, "
+        f"{report.universe_bars_stored} 60m bars in {report.universe_seconds:.1f}s",
         f"impacts: {report.impacts_created} from {report.stories_analyzed} analyzed "
         f"({report.llm_impact_calls} LLM calls, {report.llm_impact_declines} declined, "
         f"{report.llm_impacts_added} added by the model, "

@@ -9,14 +9,14 @@ yfinance, so a page can't race the pipeline's price step or spend its rate limit
 """
 
 import logging
-from collections.abc import Iterator
+from collections.abc import Awaitable, Callable, Iterator, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Annotated
 
 from fastapi import Depends, FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import select
@@ -66,9 +66,14 @@ RANGE_OPTIONS = (("1d", "1D"), ("1w", "1W"), ("1m", "1M"))
 SPARK_WIDTH, SPARK_HEIGHT, SPARK_PAD = 68, 22, 2
 # The mockup's story detail draws a bigger line, at 300x64 with a 2px stroke.
 STORY_SPARK_WIDTH, STORY_SPARK_HEIGHT, STORY_SPARK_PAD = 300, 64, 6
-STORY_WINDOW = "1m"  # the story page shows the longest window the cache can fill
+# One week everywhere a line sits beside a call: the feed's chips (the 1D/1W/1M control still
+# moves those), the story page's rows, and both rail lists (user, 2026-09-22). It is also what
+# the mockup's story rail says over its own charts, "Commodities affected - 7 days".
+STORY_WINDOW = queries.RAIL_WINDOW
 # The mockup's watchlist card draws 300x72; the asset page is that card.
 CARD_SPARK_WIDTH, CARD_SPARK_HEIGHT, CARD_SPARK_PAD = 300, 72, 7
+# The rail is narrow, so its watchlist draws a smaller line than the mockup's 68x22.
+RAIL_SPARK_WIDTH, RAIL_SPARK_HEIGHT, RAIL_SPARK_PAD = 68, 20, 2
 ASSET_WINDOW = "1m"
 ASSET_WINDOW_LABEL = "last month of daily bars"
 RUN_WINDOWS = (3, 7, 14)
@@ -199,6 +204,41 @@ def _in_zone(value: datetime | None, settings: Settings) -> str:
     return local.strftime("%H:%M" if local.date() == today else "%d %b %H:%M")
 
 
+def _stamp(value: datetime | None, settings: Settings) -> str:
+    """A clock time with its zone written out, for anything a reader might mistake for live
+    data: "13:19 IST" today, "21 Sep 13:19 IST" if the last run was longer ago than that."""
+    if value is None:
+        return "never"
+    local = value.astimezone(settings.tz)
+    today = datetime.now(settings.tz).date()
+    return local.strftime("%H:%M %Z" if local.date() == today else "%d %b %H:%M %Z")
+
+
+def _watchlist_context(
+    session: Session,
+    assets: dict[str, AssetConfig],
+    settings: Settings,
+    now: datetime,
+    wanted: Sequence[str],
+) -> dict[str, object]:
+    """The rail's watchlist, rendered the same way from the page and from the fragment."""
+    symbols = queries.watchlist_symbols(wanted, assets, settings.web.watchlist_max)
+    if not symbols and wanted != settings.web.watchlist:
+        symbols = queries.watchlist_symbols(
+            settings.web.watchlist, assets, settings.web.watchlist_max
+        )
+    return {
+        "watchlist": queries.watchlist_rows(session, symbols, assets, now),
+        "watchlist_symbols": symbols,
+        "rail_points": lambda item: queries.sparkline_points(
+            item, RAIL_SPARK_WIDTH, RAIL_SPARK_HEIGHT, RAIL_SPARK_PAD
+        ),
+        "rail_spark": (RAIL_SPARK_WIDTH, RAIL_SPARK_HEIGHT),
+        "mover_hours": queries.MOVER_HOURS,
+        "watchlist_max": settings.web.watchlist_max,
+    }
+
+
 def _rate_gates(settings: Settings) -> dict[str, int]:
     """The thresholds a rate must clear before it is shown, and before it stops being early."""
     return {
@@ -242,6 +282,23 @@ def create_app(
     web.mount("/static", StaticFiles(directory=WEB_DIR / "static"), name="static")
     templates = Jinja2Templates(directory=WEB_DIR / "templates")
     templates.env.filters["ist"] = lambda value: _in_zone(value, settings)
+
+    @web.middleware("http")
+    async def always_revalidate(
+        request: Request, call_next: Callable[[Request], Awaitable[Response]]
+    ) -> Response:
+        """Nothing here may be served from the browser's cache without asking first.
+
+        Starlette's static files carry no `Cache-Control`, so a browser applies heuristic
+        freshness and can hold a stylesheet for hours - edits showed up in one browser and
+        not another (user, 2026-09-22). A page is a view of a database the pipeline rewrites
+        every three hours, so a stale one is wrong for the same reason. `no-cache` still lets
+        the browser keep the file; it just has to revalidate, and an unchanged file comes
+        back as a 304.
+        """
+        response: Response = await call_next(request)
+        response.headers.setdefault("cache-control", "no-cache")
+        return response
 
     @web.get("/", response_class=HTMLResponse)
     def today(
@@ -296,10 +353,31 @@ def create_app(
             "order_words": ORDER_WORDS,
             "updated": context["ticker_as_of"],
             "next_digest": _next_digest(settings, now),
+            "movers": queries.movers(session, assets, now),
+            "mover_hours": queries.MOVER_HOURS,
+            "prices_as_of": _stamp(last_pipeline_finish(session), settings),
+            "universe": sorted(assets.values(), key=lambda asset: asset.display_name),
         }
+        context |= _watchlist_context(session, assets, settings, now, settings.web.watchlist)
         # HTMX asks for the list alone; a plain visit gets the whole page.
         name = "_feed.html" if request.headers.get("hx-request") else "index.html"
         return templates.TemplateResponse(request, name, context)
+
+    @web.get("/watchlist", response_class=HTMLResponse)
+    def watchlist(request: Request, session: ReadSession, symbols: str = "") -> HTMLResponse:
+        """The watchlist rows alone, for a browser that keeps its own list.
+
+        The page ships with the settings.yaml default already rendered; this is what the
+        editor asks for afterwards. Unknown symbols are dropped here, so whatever a browser
+        has stored - stale, hand-edited, from an older universe - can only ever show assets
+        that exist.
+        """
+        assets: dict[str, AssetConfig] = request.app.state.assets
+        context = {"request": request}
+        context |= _watchlist_context(
+            session, assets, settings, utcnow(), symbols.split(",") if symbols else []
+        )
+        return templates.TemplateResponse(request, "_watchlist.html", context)
 
     @web.get("/story/{story_id}", response_class=HTMLResponse)
     def story(request: Request, session: ReadSession, story_id: int) -> HTMLResponse:

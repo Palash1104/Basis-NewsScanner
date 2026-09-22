@@ -35,6 +35,32 @@
     U+2113, U+2C60-2C7F, U+A720-A7FF;
 }
 
+/* ---------------------------------------------------------------- links */
+
+/* The mockup overrides the system's link colour with its own (`a{color:#ae1800}`, hover
+ * `#dd2b0f`): one step darker than --color-accent, so a link on paper reads as text and not
+ * as a button. --color-link carries both, and moves up the ramp in dark mode. */
+a {
+  color: var(--color-link);
+}
+
+a:hover {
+  color: var(--color-link-hover);
+}
+
+/* A headline is ink, as in the design, where the whole row is clickable and the words are
+ * never tinted. The design has no hover state for one, so the underline is the hover. */
+.story-headline a,
+.asset-story-headline {
+  color: var(--color-text);
+  text-decoration: none;
+}
+
+.story-headline a:hover,
+.asset-story-headline:hover {
+  text-decoration: underline;
+}
+
 /* ---------------------------------------------------------------- header */
 
 .masthead {
@@ -49,7 +75,12 @@
   z-index: 5;
 }
 
+/* The wordmark is the mockup's: flat Archivo 800 in ink. The mark beside it is ours (user,
+ * 2026-09-22). */
 .masthead-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3);
   font-family: var(--font-heading);
   font-weight: var(--font-heading-weight);
   font-size: 22px;
@@ -57,6 +88,30 @@
   margin-right: var(--space-2);
   color: var(--color-text);
   text-decoration: none;
+}
+
+/* A newspaper - a masthead bar over three columns of type - cut from the page and extruded
+ * four hard steps down the accent ramp, so it stands off the paper as a solid block. Drawn
+ * entirely in CSS: the sheet is the border and the background, the type is three background
+ * gradients, the depth is `box-shadow` with no blur. No image, no icon font, no request, and
+ * because a shadow costs no layout the masthead's height is unchanged. The favicon draws the
+ * same mark in an inline SVG. */
+.masthead-mark {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  border: 1.5px solid var(--color-text);
+  background:
+    linear-gradient(var(--color-text) 0 0) no-repeat 2px 2px / 13px 4px,
+    linear-gradient(var(--color-muted) 0 0) no-repeat 2px 9px / 13px 1.5px,
+    linear-gradient(var(--color-muted) 0 0) no-repeat 2px 12.5px / 13px 1.5px,
+    linear-gradient(var(--color-muted) 0 0) no-repeat 2px 16px / 8px 1.5px,
+    var(--color-bg);
+  box-shadow:
+    1px 1px 0 var(--logo-1),
+    2px 2px 0 var(--logo-2),
+    3px 3px 0 var(--logo-3),
+    4px 4px 0 var(--logo-4);
 }
 
 .masthead-divider {
@@ -111,6 +166,14 @@
   border-bottom: 2px solid var(--color-divider);
   background: var(--color-surface);
   overflow-x: auto;
+  /* Scrollable, but without the bar: a 2px strip with a scrollbar under it reads as a broken
+   * edge, and the design has no scrollbar in it. Wheel, trackpad and touch still work. */
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.ticker::-webkit-scrollbar {
+  display: none;
 }
 
 .ticker-label,
@@ -178,6 +241,255 @@
 .screen {
   padding: var(--page-padding) var(--page-padding) 64px;
   max-width: var(--canvas-width);
+}
+
+/* The feed is the one screen with the design's right rail, so it takes its own padding
+ * inside the columns: the rule between them runs the full height, as it does in the mockup.
+ *
+ * It is also the one screen that ignores the 1280px canvas (user, 2026-09-22). The mockup is
+ * a 1280-wide laptop window, so the cap was faithful - but the masthead and the ticker are
+ * full-bleed, and on a wider screen the cap left the rail stranded mid-page with nothing to
+ * its right. Uncapped, the rail sits against the window's edge where the design puts it, and
+ * the extra width goes to the stories. The text can't sprawl: headlines, summaries and notes
+ * are all capped in `ch`, so what grows is the room the chip strip scrolls in. The reading
+ * pages (/track-record, /assets, /runs, a story) keep the canvas: they are text and tables,
+ * and a 2000px line is not a better line. */
+.screen-feed {
+  padding: 0;
+  max-width: none;
+}
+
+.screen-split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) var(--rail-width);
+  align-items: start;
+}
+
+.screen-main {
+  min-width: 0;
+  padding: var(--page-padding) var(--page-padding) 64px;
+}
+
+.rail {
+  /* The mockup's 28px inside the rule, tightened a little with the rail. The right gutter
+     stays the page's, so the list lines up with the masthead above it. */
+  padding: var(--page-padding) var(--page-padding) 64px 24px;
+  border-left: 2px solid var(--color-divider);
+  min-height: 900px;
+}
+
+.rail-head {
+  font-size: 11px;
+  margin: 0 0 var(--space-1);
+}
+
+.rail-note,
+.rail-empty,
+.rail-stamp {
+  font-size: 11px;
+  color: var(--color-muted);
+  margin: 0 0 var(--space-3);
+}
+
+/* One stamp for the rail: both lists read the same cache, filled by the same run. */
+.rail-stamp {
+  padding-bottom: var(--space-3);
+  border-bottom: 1px solid var(--rule-light);
+}
+
+.rail-empty {
+  line-height: 1.5;
+}
+
+/* The mockup's watchlist row, folded into two lines for a narrow rail: the name and its
+ * move, then the last price and the line it traced. */
+.watch {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--rule-light);
+}
+
+.watch-head,
+.watch-foot {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.watch-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 800;
+  color: var(--color-text);
+  text-decoration: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.watch-name:hover {
+  text-decoration: underline;
+}
+
+.watch-change {
+  font-size: 13px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+/* The mockup sets a watchlist price at 11px in ink at 70%, which is the lightest text on
+ * the page and was hard to read (user, 2026-09-22): it is a figure, not a caption. A step up
+ * in size and to ink at 85% takes it from 5.79:1 to 9.52:1 on paper, and the digits are
+ * tabular so the column lines up. */
+.watch-price {
+  flex: 1;
+  font-size: 12px;
+  color: var(--color-body-dim);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.watch-foot .spark {
+  flex: none;
+  overflow: visible;
+}
+
+.watch-foot .spark .up {
+  stroke: var(--color-up);
+}
+
+.watch-foot .spark .down {
+  stroke: var(--color-down);
+}
+
+.watch-edit {
+  margin-top: var(--space-3);
+}
+
+.rail-rule {
+  margin: var(--space-6) 0;
+}
+
+/* The watchlist editor: a native <dialog>, styled with the system's own tokens because the
+ * export's .dialog is built for a div and its own backdrop. */
+.sheet {
+  width: min(420px, 92vw);
+  max-height: 80vh;
+  padding: 0;
+  border: 2px solid var(--color-divider);
+  background: var(--color-bg);
+  color: var(--color-text);
+}
+
+.sheet::backdrop {
+  background: color-mix(in srgb, #201e1d 55%, transparent);
+}
+
+.sheet-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  max-height: 80vh;
+  padding: var(--space-6);
+}
+
+.sheet-title {
+  font-size: 25px;
+  margin: 0;
+}
+
+.sheet-note {
+  margin: 0;
+  font-size: 12px;
+  color: var(--color-muted);
+}
+
+.sheet-list {
+  flex: 1;
+  overflow-y: auto;
+  border-top: 1px solid var(--rule-light);
+  border-bottom: 1px solid var(--rule-light);
+}
+
+.sheet-option {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 6px var(--space-1);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.sheet-option:hover {
+  background: var(--color-surface);
+}
+
+.sheet-option input:disabled + .sheet-name {
+  color: var(--color-muted);
+}
+
+.sheet-name {
+  flex: 1;
+  min-width: 0;
+}
+
+.sheet-symbol {
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-muted);
+}
+
+.sheet-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.sheet-actions .btn-ghost {
+  margin-right: auto;
+}
+
+/* The mockup's mover row: the name takes the space, then the week it traced, then the move
+ * set hard against the edge. */
+.mover {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: var(--space-2) 0;
+}
+
+.mover .spark {
+  flex: none;
+  overflow: visible;
+}
+
+.mover .spark .up {
+  stroke: var(--color-up);
+}
+
+.mover .spark .down {
+  stroke: var(--color-down);
+}
+
+.mover-name {
+  font-size: 13px;
+  flex: 1;
+  min-width: 0;
+  /* One line each: the full name is on the element's title, so nothing is lost. */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mover-change {
+  font-size: 13px;
+  font-weight: 800;
+  white-space: nowrap;
 }
 
 .screen-head {
@@ -349,6 +661,14 @@
   color: var(--color-muted);
 }
 
+/* The meta column is 104px wide, so "21 Sep 08:20 · 3d ago" has to wrap somewhere. It wraps
+ * between the two, never inside the age: "3d" on one line and "ago" on the next reads as a
+ * typo. */
+.story-meta .meta-when,
+.story-meta .meta-age {
+  white-space: nowrap;
+}
+
 .story-headline {
   font-size: 27px;
   margin: 0 0 10px;
@@ -379,10 +699,51 @@
 }
 
 /* The mockup's commodity chip, with a second row for what the digest says. */
+/* One scrolling row, not a column (user, 2026-09-22). With the rail taking its width, two
+ * 420px chips no longer fit side by side, so wrapping stacked them and a story with six
+ * calls became a page of its own. The strip scrolls sideways instead, with the scrollbar
+ * hidden as it is on the ticker; it takes focus so it can be scrolled from the keyboard, and
+ * a button at each end says there is more (`chips.js`, which is what un-hides them). */
+.chip-strip {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.chip-scroll {
+  flex: none;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid var(--rule-strong);
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-family: var(--font-body);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.chip-scroll:hover:not(:disabled) {
+  background: var(--color-surface);
+}
+
+.chip-scroll:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
 .chips {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 10px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.chips::-webkit-scrollbar {
+  display: none;
 }
 
 .chip {
@@ -391,8 +752,9 @@
   gap: 6px;
   padding: var(--space-2) var(--space-3);
   background: var(--color-surface);
-  min-width: var(--chip-min-width);
-  max-width: 420px;
+  /* Never squeezed and all the same size: the row scrolls, the cards don't shrink. */
+  flex: none;
+  width: var(--chip-width);
 }
 
 .chip-conflict {

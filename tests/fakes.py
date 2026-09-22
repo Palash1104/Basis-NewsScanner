@@ -3,7 +3,7 @@ and small RSS builders."""
 
 import json
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from datetime import datetime, timedelta
 from email.utils import format_datetime
 from html import escape
@@ -195,7 +195,9 @@ class FakePrices:
     def __init__(self, series: dict[str, dict[str, list[Any]]] | None = None) -> None:
         self.series = series or {}
         self.calls: list[tuple[str, str]] = []
+        self.batches: list[tuple[tuple[str, ...], str]] = []
         self.fail: set[str] = set()
+        self.fail_batch = False
 
     def bars(self, symbol: str, interval: str, start: datetime, end: datetime) -> list[Any]:
         from app.pipeline.prices import PriceUnavailable
@@ -205,6 +207,23 @@ class FakePrices:
             raise PriceUnavailable("HTTPError: 429 too many requests")
         bars = self.series.get(symbol, {}).get(interval, [])
         return [bar for bar in bars if start <= bar.ts <= end]
+
+    def many_bars(
+        self, symbols: Sequence[str], interval: str, start: datetime, end: datetime
+    ) -> dict[str, list[Any]]:
+        """The batched fetch, recorded as one call so tests can count requests, not symbols."""
+        from app.pipeline.prices import PriceUnavailable
+
+        self.batches.append((tuple(symbols), interval))
+        if self.fail_batch:
+            raise PriceUnavailable("HTTPError: 503 service unavailable")
+        series = {}
+        for symbol in symbols:
+            bars = self.series.get(symbol, {}).get(interval, [])
+            found = [bar for bar in bars if start <= bar.ts <= end]
+            if found:
+                series[symbol] = found
+        return series
 
 
 def bar_series(

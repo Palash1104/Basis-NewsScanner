@@ -39,6 +39,8 @@ DARK: dict[str, str] = {
 # The mockup writes muted text as ink at 70%, which is what pages use. The system's own
 # `.text-muted` is 55% (3.66:1 on the page ground), left alone and used for decoration only.
 MUTED_ALPHA = 0.70
+# --color-body-dim: the step between muted and full ink, for text that is read and not skimmed.
+DIM_ALPHA = 0.85
 FAINT_ALPHA = 0.55
 
 # WCAG 2.1: 4.5:1 for normal text, 3:1 for large text and UI components. Button labels are
