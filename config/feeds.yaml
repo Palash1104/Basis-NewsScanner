@@ -151,6 +151,31 @@ feeds:
     weight: 2
     category_hint: Economy & Markets
 
+  # --- Technology ---
+  # Added 2026-09-23: none of the feeds above carries technology as its subject, so a day when
+  # Anthropic and OpenAI both released models produced no story about it - the AI articles that
+  # did arrive were UN and market angles from general outlets. All three verified live that day
+  # (200, entries under an hour old); CNBC Technology and Ars Technica both carried the release.
+  - name: CNBC Technology
+    url: https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=19854910
+    region: US
+    weight: 2
+    aliases: [CNBC Tech]
+    category_hint: Tech
+
+  - name: Ars Technica
+    url: https://feeds.arstechnica.com/arstechnica/index
+    region: US
+    weight: 2
+    category_hint: Tech
+
+  - name: The Economic Times Tech
+    url: https://economictimes.indiatimes.com/tech/rssfeeds/13357270.cms
+    region: IN
+    weight: 2
+    aliases: [ET Tech]
+    category_hint: Tech
+
   # --- Google News top stories (links are Google redirect URLs; outlet comes from the entry) ---
   - name: Google News US
     url: https://news.google.com/rss?hl=en-US&gl=US&ceid=US:en

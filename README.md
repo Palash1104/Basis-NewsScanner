@@ -105,14 +105,36 @@ rights, start again after a reboot and login with no terminal open, run as soon 
 after a missed start, and may wake the machine. Output goes to `data\logs\tasks\<job>.log`
 (and, as always, `data\logs\newsdesk.log`).
 
+**Nothing appears on screen.** Each task runs `wscript.exe scripts\run_hidden.vbs <job>`,
+which starts the PowerShell wrapper with its window hidden from the very first instant.
+Task Scheduler's own "Hidden" setting is not enough for a console program — it hides the
+task's window, not the console Windows creates for `powershell.exe` — which is why black
+windows used to flash up on every wake. Exit codes still travel back, so `LastTaskResult`
+means what it always did.
+
+**A failed job tells you.** Any non-zero exit is written to the log as `=== FAILED, exit N ===`
+and, if `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` are set, sent to you as one short message
+naming the job, the time, the exit code and the last few log lines. One message per failed
+run, not per error: a run that finishes having recorded a broken feed in `runs.errors` is a
+normal run and says nothing. To see the message format without breaking anything:
+
+```powershell
+uv run newsdesk notify-failure --job run --exit 3 --log data\logs\tasks\run.log
+```
+
 ```powershell
 # what is installed, and when each task runs next
 Get-ScheduledTask -TaskPath "\Newsdesk\" | Select-Object TaskName, State
 Get-ScheduledTaskInfo -TaskPath "\Newsdesk\" -TaskName Newsdesk-pipeline |
   Select-Object LastRunTime, LastTaskResult, NextRunTime   # LastTaskResult 0 = success
 
-# run one now, without waiting for its time
+# every task should run wscript.exe on run_hidden.vbs - that is what keeps the screen clear
+Get-ScheduledTask -TaskPath "\Newsdesk\" |
+  ForEach-Object { "{0}: {1} {2}" -f $_.TaskName, $_.Actions[0].Execute, $_.Actions[0].Arguments }
+
+# run one now, without waiting for its time: no window should appear
 Start-ScheduledTask -TaskPath "\Newsdesk\" -TaskName Newsdesk-pipeline
+Get-Process wscript, newsdesk | Select-Object Name, MainWindowHandle   # 0 = no window
 Get-Content data\logs\tasks\run.log -Tail 20
 
 # pause and resume (a holiday, or while editing config)
@@ -124,6 +146,22 @@ powershell -ExecutionPolicy Bypass -File scripts\install_tasks.ps1 -Remove
 ```
 
 `uv run newsdesk health` afterwards says whether the slots were actually kept.
+
+**Catch-ups don't pile up.** A laptop that wakes at 09:00 having missed the 01:00, 04:00 and
+07:00 slots used to get all three, one after another, each re-fetching the same 12-hour
+window and each spending the same quota. `newsdesk run` now skips itself if a pipeline run
+finished less than `schedule.min_run_gap_minutes` (90) ago — so the wake produces one run,
+the most recent missed slot, and the log says why the others stopped:
+
+```
+a pipeline run finished 12 min ago, inside the 90 min gap; skipped this catch-up (--force overrides)
+```
+
+`uv run newsdesk run --force` runs anyway, which is what you want when testing by hand. The
+digest and the scoring job have no such gap: a late digest is still worth sending, and
+scoring is idempotent and costs no quota. A failed job is no longer retried twice ten minutes
+apart either — the fault is usually still there, so it waits for the next slot and sends the
+message above instead.
 
 **Two runs never overlap.** Each job kind holds a lock file in `data/locks/` while it runs, so
 a pipeline run still going when the next one starts makes the new one log "another pipeline
@@ -160,6 +198,13 @@ while the machine was off (`anacron` does).
 over, and the digest covers everything summarized since the last digest that was sent without
 errors. Downtime longer than the lookback window is what actually loses stories, and
 `uv run newsdesk health` lists the slots that were missed.
+
+**The digest is today's news only.** A story that broke before the news day began is left out
+however recently it was summarized, so the reserved slots and carried-over summaries can't put
+three-day-old news in a message. The day begins at `delivery.day_starts_at` (22:00) the
+evening before, so the 22:00 run's stories reach the 07:30 digest rather than falling between
+the evening digest and midnight. Set it to null to send everything summarized since the last
+digest, whenever the news broke. The web feed is unaffected: it keeps its 48-hour window.
 
 ## The web UI
 

@@ -293,6 +293,11 @@ powershell -ExecutionPolicy Bypass -File scripts/install_tasks.ps1 [-Remove]   #
   their text can't sprawl, since headlines, summaries and notes are all capped in `ch`, so
   what grows is the room the chip strip scrolls in. `/track-record`, `/assets`, `/runs` and a
   story page keep the canvas: text and tables, where a 2000px line is not a better line.
+- The feed's **first page holds the whole day** (`queries.FIRST_PAGE_MAX`, `day_start`): every
+  story first seen since local midnight, floored at `PAGE_SIZE` (12) so a quiet morning still
+  shows yesterday's evening and capped at 60. "Earlier stories" then skips past what was
+  actually rendered, not a fixed twelve (user, 2026-09-23: the home screen should be one
+  scroll through today).
 - The feed is ordered **newest first** (`first_seen_at desc`), not by importance (user,
   2026-09-22): it is read several times a day, and a big story held the top of it for two
   days. The digest keeps the importance order - it is sent twice a day, and ranking is its
@@ -369,6 +374,12 @@ powershell -ExecutionPolicy Bypass -File scripts/install_tasks.ps1 [-Remove]   #
 ## Decisions worth knowing
 
 - Several `feeds.yaml` entries may share `name`: they are one outlet (counted once).
+- Technology feeds (CNBC Technology, Ars Technica, The Economic Times Tech) were added on
+  2026-09-23: none of the other 26 feeds carries technology as its subject, so the day
+  Anthropic and OpenAI both released models produced no story about it, while the AI articles
+  that did arrive were UN and market angles from general outlets. All three verified live that
+  day; two of them were carrying the release. The `Tech` category existed in the summary
+  prompt and in the feed's filter long before anything reliably fed it.
 - Google News entries: outlet from the entry's `source`; if it matches a configured outlet name or
   alias (including disabled feeds) it takes that outlet's region/weight, else the edition's region
   and weight 1. Title suffix " - Outlet" is stripped; snippet left empty (the description is a
@@ -426,6 +437,12 @@ powershell -ExecutionPolicy Bypass -File scripts/install_tasks.ps1 [-Remove]   #
   - Three tasks in the `\Newsdesk\` task folder: pipeline (`newsdesk run`), digest
     (`--send`), score. `scripts/install_tasks.ps1` registers them and is idempotent;
     `-Remove` deletes them.
+  - **Every task runs `wscript.exe scripts/run_hidden.vbs <job>`**, not `powershell.exe`
+    (user, 2026-09-23: two or three console windows flashed up on every wake). Task
+    Scheduler's `Hidden` setting only hides the task's own window; a console program still
+    gets a console. `WScript.Shell.Run(cmd, 0, True)` creates it hidden and hands back the
+    exit code, so `LastTaskResult` still means what it did. Verified live: `MainWindowHandle`
+    is 0 for the wscript and newsdesk processes of a running job.
   - Times come from `newsdesk schedule-times` (JSON from settings.yaml), so the tasks
     can't drift from the app's schedule. Re-run the installer after changing it.
   - `StartWhenAvailable` (run after a missed start) and `WakeToRun` are on; battery
@@ -443,6 +460,22 @@ powershell -ExecutionPolicy Bypass -File scripts/install_tasks.ps1 [-Remove]   #
     exit, which would show nothing until the server stopped.
   - A long-running task reports `LastTaskResult 267009` ("currently running"), which is
     success, not an error.
+  - A non-zero exit is logged as `=== FAILED, exit N ===` and reported in one Telegram
+    message by `newsdesk notify-failure` (job, time, exit code, the log's last 6 lines), which
+    `run_task.ps1` calls. The app sends it, so the bot token never reaches a PowerShell string
+    or a log line. One message per failed **run**, not per error: a run that finishes with
+    broken feeds in `runs.errors` is a normal run. The notifier never raises - the job has
+    already failed and the wrapper keeps the job's exit code - and says in the log when there
+    are no credentials.
+  - The tasks no longer carry `RestartCount` (user, 2026-09-23): a failed job was retried
+    twice, ten minutes apart, which on the pipeline meant three helpings of the same quota for
+    a fault that is usually still there. It waits for the next slot and sends the message.
+  - Catch-up thinning (`schedule.min_run_gap_minutes`, 90): a wake after three missed slots
+    gets three runs from Windows, and each would re-fetch the same lookback window for the
+    same quota. `newsdesk run` skips itself when a pipeline run finished inside the gap and
+    says so in the log; `--force` overrides, and 0 disables. The gap is under the 3-hour
+    spacing, so a scheduled run is never mistaken for a catch-up. Only the pipeline has one: a
+    late digest is still worth sending, and scoring is idempotent and costs no quota.
 - Job locks (`app/locks.py`): `run`, `digest --send` and `score` each hold an OS file
   lock in `data/locks/`, in both the CLI and the scheduler jobs. A job that can't take
   its lock logs and exits 0, so a slow run and the next scheduled one never overlap.
@@ -469,6 +502,14 @@ powershell -ExecutionPolicy Bypass -File scripts/install_tasks.ps1 [-Remove]   #
   refused, truncated or still-invalid output marks it `failed` and records the processed
   article count, so it is retried only after it gains 2+ articles or a new region.
 - Ranking: `mean(source_weight)` is over the story's articles, as written in SPEC 7.4.
+- **A place in a run goes only to a story that owes a summary** (`rank_stories(keep=...)`,
+  and the same test on `reserved_pool`). Every story in the window is still scored - the feed
+  and the digest read those scores - but the top-N selection skips stories a summary is not
+  owed on. Without it the big story of the day held a place on every run for as long as it
+  stayed in the 12-hour window, and the run spent that place skipping it as unchanged.
+  Measured on the live database (2026-09-23): 10 of the 20 places were held by finished
+  stories while stories at 4.2 importance had never been summarized at all. A run with
+  nothing to summarize now also makes no LLM call at all, not even the rerank.
 - Reserved slots (`pipeline.reserved_slots`, `{IN: 5}` since 2026-09-21):
   - Why: in 48h, **0 of 524 India-only stories were summarized**. They top out at 3.60
     importance against a top-20 cutoff of 4.69, because both the source count and the region
@@ -508,6 +549,16 @@ powershell -ExecutionPolicy Bypass -File scripts/install_tasks.ps1 [-Remove]   #
 - Digest window: stories summarized since the start of the last digest sent without errors
   (or the lookback window if none). `--dry-run` records nothing; a failed send is recorded with
   errors and doesn't move the window.
+- **The digest carries only today's news** (`delivery.day_starts_at`, since 2026-09-23): a
+  story that broke before the day began is left out however recently it was summarized,
+  because the reserved slots and carried-over summaries surface stories days old and an alert
+  is for today. The web feed is unaffected and keeps its 48-hour window.
+  - The day begins at **22:00 the night before**, not midnight (user, 2026-09-23). The
+    pipeline's last evening run is at 22:00 and the evening digest has already gone at 19:30,
+    so a midnight boundary dropped everything that broke in between: too old for the morning
+    digest, already past for the evening one. `start_of_news_day` takes the most recent
+    `day_starts_at` at or before the send, so both digests on a given day cover from 22:00 the
+    previous evening; null disables the floor.
 - Grouping (SPEC 7.3):
   - Local `all-MiniLM-L6-v2` embeddings of title + snippet.
   - Cosine similarity to each story's centroid (the normalized sum of its news articles'

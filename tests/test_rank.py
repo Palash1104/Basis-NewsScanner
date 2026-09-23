@@ -15,6 +15,7 @@ from app.pipeline.rank import (
     select_with_reserved,
 )
 from app.pipeline.sections import may_take_reserved_slot, only_from
+from app.pipeline.summarize import resummarize_reason
 from tests.conftest import NOW
 from tests.fakes import FakeProvider
 
@@ -97,6 +98,39 @@ def test_rank_stories_scores_recent_stories_and_returns_top_n(
     assert big.source_count == 3 and big.region_diversity == 3
     assert small.importance_score > 0
     assert old.importance_score == 0  # nothing inside the lookback window
+
+
+def test_a_place_in_a_run_goes_to_a_story_that_owes_a_summary(
+    session: Session, settings: Settings
+) -> None:
+    """A run's places are summaries. The big story of the day is still the big story on the
+    next run three hours later, and on the one after that; without this it holds a place on
+    every run and the smaller story that has never been summarized never gets one. Measured
+    on the live database on 2026-09-23: 10 of the 20 places were held by finished stories."""
+    done = Story(first_seen_at=NOW, updated_at=NOW, headline="big", status="summarized")
+    owed = Story(first_seen_at=NOW, updated_at=NOW, headline="small", status="new")
+    session.add_all(
+        [
+            _article("EU invites Canada as associate member", "BBC", "GLOBAL", 3, 2, done),
+            _article("Canada could become EU associate member", "The Hindu", "IN", 3, 1, done),
+            _article("EU offers Canada associate status", "CNBC", "US", 2, 1, done),
+            _article("Chess olympiad opens", "Livemint", "IN", 2, 3, owed),
+        ]
+    )
+    session.flush()
+    # Nothing new since it was summarized: same articles, same regions.
+    done.processed_article_count = 3
+    done.processed_source_regions = ["GLOBAL", "IN", "US"]
+    settings.pipeline.max_stories_per_run = 1
+
+    assert rank_stories(session, settings, NOW) == [done]  # the plain order: importance only
+
+    def owes(story: Story) -> bool:
+        return resummarize_reason(story, list(story.articles)) is not None
+
+    assert rank_stories(session, settings, NOW, keep=owes) == [owed]
+    # Both are still scored, because the feed and the digest read those scores.
+    assert done.importance_score > owed.importance_score > 0
 
 
 def test_non_news_articles_add_nothing_to_importance(settings: Settings) -> None:

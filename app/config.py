@@ -229,6 +229,10 @@ class DeliverySettings(_Strict):
     max_impacts_in_digest: int = Field(default=6, gt=0)
     breaking_alerts: bool = False
     breaking_importance_threshold: float
+    # When the digest's "today" begins, in settings.timezone: the most recent time of day at
+    # or before the send. Null carries whatever was summarized since the last digest, however
+    # old the news.
+    day_starts_at: str | None = "22:00"
 
     @field_validator("digest_times")
     @classmethod
@@ -236,6 +240,13 @@ class DeliverySettings(_Strict):
         for item in value:
             if not re.fullmatch(r"([01]\d|2[0-3]):[0-5]\d", item):
                 raise ValueError(f"digest time must be HH:MM, got {item!r}")
+        return value
+
+    @field_validator("day_starts_at")
+    @classmethod
+    def _check_day_start(cls, value: str | None) -> str | None:
+        if value is not None and not re.fullmatch(r"([01]\d|2[0-3]):[0-5]\d", value):
+            raise ValueError(f"day_starts_at must be HH:MM, got {value!r}")
         return value
 
 
@@ -246,6 +257,10 @@ class ScheduleSettings(_Strict):
     pipeline_every_hours: int
     # Daily scoring, after the US close (SPEC 7.9), in settings.timezone.
     score_time: str = "03:30"
+    # How long after a finished pipeline run another one is treated as a catch-up and skipped.
+    # Windows can fire several missed slots at once after the laptop wakes; the run re-fetches
+    # the whole lookback window anyway, so the extra ones only spend quota. 0 disables it.
+    min_run_gap_minutes: int = Field(default=90, ge=0)
 
     @field_validator("score_time")
     @classmethod

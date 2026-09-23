@@ -51,10 +51,23 @@ def score_articles(articles: Sequence[Article], settings: Settings, now: datetim
 
 
 def rank_stories(
-    session: Session, settings: Settings, now: datetime, limit: int | None = None
+    session: Session,
+    settings: Settings,
+    now: datetime,
+    limit: int | None = None,
+    keep: Callable[[Story], bool] | None = None,
 ) -> list[Story]:
     """Rescore every story with an article inside the lookback window, store the scores, and
-    return the top `limit` (by default `max_stories_per_run`), most important first."""
+    return the top `limit` (by default `max_stories_per_run`), most important first.
+
+    Every story in the window is scored - the page and the digest read those scores - but
+    `keep` decides which ones may take one of the run's places. The pipeline passes "does this
+    story still owe a summary", because the run's places are summaries: without it the top
+    places go to the same big stories run after run, which were summarized the first time and
+    do nothing on every run after. Measured on the live database on 2026-09-23: 10 of the 20
+    places were held by stories already summarized, while stories at 4.2 importance that had
+    never been summarized sat below the cut.
+    """
     cutoff = now - timedelta(hours=settings.pipeline.lookback_hours)
     recent_story_ids = select(Article.story_id).where(
         Article.story_id.is_not(None), Article.published_at >= cutoff
@@ -80,7 +93,8 @@ def rank_stories(
 
     ranked.sort(key=lambda item: (item[0], item[1]), reverse=True)
     top = limit if limit is not None else settings.pipeline.max_stories_per_run
-    return [story for _, _, story in ranked[:top]]
+    wanted = [story for _, _, story in ranked if keep is None or keep(story)]
+    return wanted[:top]
 
 
 def pending_stories(session: Session, settings: Settings, now: datetime) -> list[Story]:
@@ -163,12 +177,18 @@ def rerank_stories(
 
 
 def reserved_pool(
-    session: Session, settings: Settings, now: datetime, exclude: Sequence[Story] = ()
+    session: Session,
+    settings: Settings,
+    now: datetime,
+    exclude: Sequence[Story] = (),
+    keep: Callable[[Story], bool] | None = None,
 ) -> list[Story]:
     """Stories from a single region's outlets, to put in front of the rerank.
 
     They never reach the top 40 on importance alone, so without this the model never sees
-    them and the reserved slots would be filled from the computed order only.
+    them and the reserved slots would be filled from the computed order only. `keep` is the
+    same test the ranked list uses, so a candidate that owes no summary never takes a place
+    here either.
     """
     pool = settings.pipeline.reserved_candidate_pool
     if not settings.pipeline.reserved_slots or not pool:
@@ -185,7 +205,7 @@ def reserved_pool(
             stories, region, pool, now, settings.pipeline.reserved_max_age_hours
         )
         for story in candidates:
-            if story.id not in seen:
+            if story.id not in seen and (keep is None or keep(story)):
                 seen.add(story.id)
                 picked.append(story)
     return picked

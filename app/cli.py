@@ -10,6 +10,7 @@ import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
+from html import escape
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Annotated, Any
@@ -300,10 +301,18 @@ def run_pipeline(
             candidates_wanted = max(
                 settings.pipeline.rerank_candidates, settings.pipeline.max_stories_per_run
             )
-            top = rank_stories(session, settings, now, limit=candidates_wanted)
+
+            # A place in a run is a summary, so only stories that still owe one can take
+            # it (measured 2026-09-23: half the places were going to stories already done).
+            def _owes_summary(story: Story) -> bool:
+                return resummarize_reason(story, news_articles(story)) is not None
+
+            top = rank_stories(session, settings, now, limit=candidates_wanted, keep=_owes_summary)
             # Stories only one region's outlets carry never reach the top 40 on importance,
             # so they join the candidates before the model orders them (SPEC 7.4).
-            reserved_candidates = reserved_pool(session, settings, now, exclude=top)
+            reserved_candidates = reserved_pool(
+                session, settings, now, exclude=top, keep=_owes_summary
+            )
             report.reserved_candidates = len(reserved_candidates)
             top = top + reserved_candidates
             # Ranking writes every story's score, and the rerank below is a network call:
@@ -639,19 +648,47 @@ def last_digest_sent_at(session: Session) -> datetime | None:
     return next((run.started_at for run in runs if not run.errors), None)
 
 
+def start_of_news_day(settings: Settings, now: datetime) -> datetime | None:
+    """When the digest's "today" began: the most recent `delivery.day_starts_at` at or before
+    `now`, in the reader's zone. None when the setting is null and no floor applies.
+
+    It is 22:00, not midnight (user, 2026-09-23). The pipeline's last run of the evening is at
+    22:00 and the evening digest goes out at 19:30, so a midnight boundary dropped everything
+    that broke in between: too old for the morning digest, already past for the evening one.
+    Starting the day at 22:00 makes the night's news part of tomorrow's.
+    """
+    if not settings.delivery.day_starts_at:
+        return None
+    hour, minute = (int(part) for part in settings.delivery.day_starts_at.split(":"))
+    local = now.astimezone(settings.tz)
+    start = local.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    return start if start <= local else start - timedelta(days=1)
+
+
 def select_digest_stories(
     session: Session, settings: Settings, now: datetime
 ) -> tuple[list[Story], datetime]:
     """Summarized stories whose summary was written since the last sent digest (or within the
-    lookback window if none was sent yet), most important first."""
+    lookback window if none was sent yet), most important first.
+
+    The digest also drops anything that broke before the news day began (see
+    `start_of_news_day`): the reserved slots and carried-over summaries surface stories days
+    old, and an alert is for today.
+    """
     since = last_digest_sent_at(session) or now - timedelta(hours=settings.pipeline.lookback_hours)
-    stories = session.scalars(
-        select(Story)
+    statement = select(Story).where(
         # "analyzed": event extracted and playbook applied. "summarized" covers
         # stories whose extraction failed or hasn't run yet.
-        .where(Story.status.in_(DIGEST_STATUSES), Story.updated_at > since)
-        .order_by(Story.importance_score.desc())
-        .limit(settings.delivery.max_stories_per_digest)
+        Story.status.in_(DIGEST_STATUSES),
+        Story.updated_at > since,
+    )
+    day_start = start_of_news_day(settings, now)
+    if day_start is not None:
+        statement = statement.where(Story.first_seen_at >= day_start)
+    stories = session.scalars(
+        statement.order_by(Story.importance_score.desc()).limit(
+            settings.delivery.max_stories_per_digest
+        )
     ).all()
     return list(stories), since
 
@@ -897,10 +934,48 @@ def _lock_dir(settings: Settings) -> Path:
     return settings.resolve_path(settings.paths.lock_dir)
 
 
+def catch_up_reason(
+    session_factory: sessionmaker[Session], settings: Settings, now: datetime | None = None
+) -> str | None:
+    """Why this run is a catch-up worth skipping, or None to go ahead.
+
+    A laptop that wakes at 09:00 having missed the 01:00, 04:00 and 07:00 slots gets all
+    three from Windows at once. The lock stops them overlapping, but not from running
+    back to back - and they would fetch the same window three times and spend three times
+    the quota for it. Only the most recent missed slot is worth running.
+    """
+    minutes = settings.schedule.min_run_gap_minutes
+    if minutes <= 0:
+        return None
+    now = now or utcnow()
+    with session_factory() as session:
+        finished = session.scalars(
+            select(Run.finished_at)
+            .where(Run.kind == "pipeline", Run.finished_at.is_not(None))
+            .order_by(Run.finished_at.desc())
+            .limit(1)
+        ).first()
+    if finished is None or now - finished >= timedelta(minutes=minutes):
+        return None
+    ago = int((now - finished).total_seconds() // 60)
+    return (
+        f"a pipeline run finished {ago} min ago, inside the {minutes} min gap; "
+        "skipped this catch-up (--force overrides)"
+    )
+
+
 @app.command()
-def run() -> None:
+def run(
+    force: Annotated[
+        bool, typer.Option("--force", help="Run even if one finished a moment ago.")
+    ] = False,
+) -> None:
     """One full pipeline pass: fetch, dedupe, group, rank, summarize."""
     settings, session_factory = _bootstrap()
+    reason = None if force else catch_up_reason(session_factory, settings)
+    if reason:
+        typer.echo(reason)
+        return
     with job_lock(_lock_dir(settings), "pipeline") as acquired:
         if not acquired:
             typer.echo("another pipeline run is still going; skipped this one")
@@ -1146,6 +1221,68 @@ def schedule_times() -> None:
             indent=2,
         )
     )
+
+
+JOB_NAMES = {"run": "pipeline", "digest": "digest", "score": "scoring", "serve": "web server"}
+FAILURE_TAIL_LINES = 6
+FAILURE_TAIL_CHARS = 600
+
+
+def failure_message(job: str, exit_code: int, tail: str, when: datetime, settings: Settings) -> str:
+    """One short Telegram message for one failed run: which job, when, and the last thing it
+    said. The log file holds the rest; this is the nudge to go and look."""
+    local = when.astimezone(settings.tz)
+    lines = [
+        f"<b>BASIS</b> · the {escape(JOB_NAMES.get(job, job))} job failed",
+        f"{local:%a %d %b %Y, %H:%M} {local.tzname()} · exit {exit_code}",
+    ]
+    if tail.strip():
+        lines.append(f"<pre>{escape(tail.strip())}</pre>")
+    lines.append(f"<i>data/logs/tasks/{escape(job)}.log has the rest.</i>")
+    return "\n".join(lines)
+
+
+def log_tail(path: Path, lines: int = FAILURE_TAIL_LINES, chars: int = FAILURE_TAIL_CHARS) -> str:
+    """The last few lines of a log, for the failure message. Never raises: a missing or
+    unreadable log must not stop the notification saying that the job failed."""
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return ""
+    kept = [line for line in text.splitlines() if line.strip()][-lines:]
+    tail = "\n".join(kept)
+    return tail[-chars:]
+
+
+@app.command("notify-failure")
+def notify_failure(
+    job: Annotated[str, typer.Option("--job", help="run, digest, score or serve.")],
+    exit_code: Annotated[int, typer.Option("--exit", help="The job's exit code.")],
+    log_file: Annotated[
+        Path | None, typer.Option("--log", help="The job's log, for the last few lines.")
+    ] = None,
+) -> None:
+    """Say on Telegram that a scheduled job failed. `scripts/run_task.ps1` calls this.
+
+    One message per failed run, not per error: a run that finishes but records broken feeds
+    in `runs.errors` is a normal run, and is not worth a notification.
+
+    It never fails loudly. The job has already failed at this point, and the wrapper keeps
+    the job's own exit code; whatever happens here is printed, which lands in the same log.
+    """
+    settings, _ = _bootstrap()
+    token, chat_id = get_secret("TELEGRAM_BOT_TOKEN"), get_secret("TELEGRAM_CHAT_ID")
+    if not token or not chat_id:
+        typer.echo("no Telegram credentials; the failure is in the log only")
+        return
+    message = failure_message(
+        job, exit_code, log_tail(log_file) if log_file else "", utcnow(), settings
+    )
+    try:
+        asyncio.run(send_messages([message], token, chat_id, settings.http))
+        typer.echo("failure reported on Telegram")
+    except Exception as exc:  # including TelegramError: the log is still the record
+        typer.echo(f"could not report the failure: {type(exc).__name__}: {exc}")
 
 
 @app.command()

@@ -108,8 +108,10 @@ def test_run_twice_does_not_resummarize(db: sessionmaker[Session], settings: Set
     llm, fake = _llm(settings)
     second = run_pipeline(db, settings, FEEDS, llm, now=NOW, transport=server.transport)
     assert second.articles_new == 0 and second.duplicates_dropped == 4
-    assert second.summarized == 0 and second.skipped_unchanged == 3
-    assert second.events_extracted == 0 and len(fake.calls) == 1  # the rerank only
+    # Nothing owes a summary, so nothing takes a place in the run and the model is never
+    # called - not even for the rerank, which has nothing to order.
+    assert second.summarized == 0 and second.skipped_unchanged == 0
+    assert second.events_extracted == 0 and not fake.calls
 
     # Two more outlets' articles on the EU story: only that story is summarized again.
     later = NOW + timedelta(hours=1)
@@ -132,16 +134,17 @@ def test_run_twice_does_not_resummarize(db: sessionmaker[Session], settings: Set
     llm, fake = _llm(settings)
     third = run_pipeline(db, settings, FEEDS, llm, now=later, transport=server.transport)
     assert third.articles_new == 2 and third.articles_attached == 2
-    assert third.summarized == 1 and third.skipped_unchanged == 2
+    assert third.summarized == 1 and third.skipped_unchanged == 0
     assert third.events_extracted == 1  # re-extracted along with its re-summary
-    assert len(fake.calls) == 4  # rerank, summary, extraction, impacts
+    # One story owes a summary, so the rerank has nothing to order: summary, extraction, impacts.
+    assert len(fake.calls) == 3
 
     with db() as session:
         runs = session.scalars(select(Run).order_by(Run.id)).all()
         assert [r.kind for r in runs] == ["pipeline"] * 3
         assert [r.stories_processed for r in runs] == [3, 0, 1]
         assert runs[0].input_tokens == 1200 and runs[0].finished_at is not None
-        assert runs[1].input_tokens == 120  # the rerank, which runs even with no summaries
+        assert runs[1].input_tokens == 0  # a run with nothing to summarize costs nothing
         eu = session.scalars(select(Story).where(Story.processed_article_count == 4)).one()
         assert eu.status == "analyzed" and eu.updated_at == later
         # Re-extraction doesn't duplicate impacts the story already has.
@@ -500,3 +503,119 @@ def test_the_llm_layer_adds_calls_merges_them_and_records_disagreements(
             temperature,
             settings.llm.seed,
         )
+
+
+def test_the_digest_carries_only_todays_news(db: sessionmaker[Session], settings: Settings) -> None:
+    """An alert is for today (user, 2026-09-23). The reserved slots and carried-over summaries
+    both surface stories days old, and those belong on the web feed, not in a message.
+
+    Today starts at 22:00 the night before, because the pipeline's last evening run is at
+    22:00 and the evening digest has already gone out at 19:30: a midnight boundary dropped
+    everything that broke in between.
+    """
+    from app.cli import select_digest_stories, start_of_news_day
+
+    tz = ZoneInfo(settings.timezone)
+    morning = NOW.astimezone(tz).replace(hour=7, minute=30, second=0, microsecond=0)
+    last_night = morning.replace(hour=22, minute=0) - timedelta(days=1)
+    assert start_of_news_day(settings, morning) == last_night
+
+    def _story(headline: str, first_seen: object, importance: float) -> Story:
+        return Story(
+            first_seen_at=first_seen,
+            updated_at=morning - timedelta(minutes=5),  # all summarized by the last run
+            headline=headline,
+            summary="Something.",
+            status="summarized",
+            importance_score=importance,
+        )
+
+    with db() as session:
+        session.add_all(
+            [
+                _story("Broke this morning", morning - timedelta(hours=2), 2.0),
+                _story("Broke at 22:30 last night", last_night + timedelta(minutes=30), 3.0),
+                # An hour before the day began: the evening digest's business, not this one.
+                _story("Broke at 21:00 last night", last_night - timedelta(hours=1), 8.0),
+                # Summarized minutes ago by a reserved slot, but three days old.
+                _story("Broke on Sunday", last_night - timedelta(days=3), 9.0),
+            ]
+        )
+        session.commit()
+
+        stories, _ = select_digest_stories(session, settings, morning)
+        assert [story.headline for story in stories] == [
+            "Broke at 22:30 last night",
+            "Broke this morning",
+        ]
+
+        # Null carries whatever was summarized since the last digest, whenever it broke.
+        settings.delivery.day_starts_at = None
+        stories, _ = select_digest_stories(session, settings, morning)
+        assert len(stories) == 4
+
+
+# ---------------------------------------------------------------- catch-up and failures
+
+
+def test_a_run_right_after_another_is_skipped_as_a_catch_up(
+    db: sessionmaker[Session], settings: Settings
+) -> None:
+    """A laptop that wakes having missed three slots gets all three from Windows at once.
+    They would fetch the same window three times over and spend three times the quota."""
+    from app.cli import catch_up_reason
+
+    assert catch_up_reason(db, settings, NOW) is None  # nothing has run yet
+
+    with db() as session:
+        session.add(
+            Run(
+                kind="pipeline",
+                started_at=NOW - timedelta(minutes=40),
+                finished_at=NOW - timedelta(minutes=35),
+            )
+        )
+        session.commit()
+
+    reason = catch_up_reason(db, settings, NOW)
+    assert reason is not None and "skipped this catch-up" in reason and "35 min ago" in reason
+    # Far enough past the gap, the next scheduled run goes ahead.
+    assert catch_up_reason(db, settings, NOW + timedelta(hours=2)) is None
+    # A digest or a score run is not a pipeline run, and never blocks one.
+    with db() as session:
+        session.add(Run(kind="digest", started_at=NOW, finished_at=NOW))
+        session.commit()
+    assert catch_up_reason(db, settings, NOW + timedelta(hours=2)) is None
+
+
+def test_the_gap_can_be_switched_off(db: sessionmaker[Session], settings: Settings) -> None:
+    from app.cli import catch_up_reason
+
+    settings.schedule.min_run_gap_minutes = 0
+    with db() as session:
+        session.add(Run(kind="pipeline", started_at=NOW, finished_at=NOW))
+        session.commit()
+    assert catch_up_reason(db, settings, NOW) is None
+
+
+def test_a_failure_message_says_which_job_and_what_it_said(settings: Settings) -> None:
+    """One message per failed run: which job, when, and the last thing it printed."""
+    from app.cli import failure_message
+
+    tail = "Traceback (most recent call last):\nValueError: boom & <crash>"
+    message = failure_message("run", 3, tail, NOW, settings)
+
+    assert message.startswith("<b>BASIS</b> \u00b7 the pipeline job failed")
+    assert "exit 3" in message and "IST" in message
+    assert "<pre>" in message and "boom &amp; &lt;crash&gt;" in message  # Telegram HTML, escaped
+    assert "data/logs/tasks/run.log" in message
+
+
+def test_the_failure_message_keeps_only_the_last_few_lines(tmp_path: Path) -> None:
+    from app.cli import FAILURE_TAIL_LINES, log_tail
+
+    log = tmp_path / "run.log"
+    log.write_text("\n".join(f"line {n}" for n in range(40)) + "\n", encoding="utf-8")
+    tail = log_tail(log)
+    assert tail.splitlines() == [f"line {n}" for n in range(40 - FAILURE_TAIL_LINES, 40)]
+    assert log_tail(tmp_path / "gone.log") == ""  # a missing log never stops the notice

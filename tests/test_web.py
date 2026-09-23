@@ -1,5 +1,5 @@
 import re
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -32,7 +32,10 @@ from app.pipeline.rank import RERANK_FALLBACK_NOTE
 from app.web import palette, queries
 from app.web.main import create_app, ticker_items
 
-NOW = datetime(2026, 9, 21, 6, 0, tzinfo=UTC)
+# The pages ask the real clock (the feed's window, "d ago", the movers), so the fixture is
+# anchored to it. A fixed date drops out of the 48-hour window the moment the day rolls over,
+# which is exactly what happened on 2026-09-23.
+NOW = utcnow().replace(minute=0, second=0, microsecond=0) - timedelta(hours=6)
 CSS_DIR = Path("app/web/static/css")
 DESIGN_SYSTEM = CSS_DIR / "design-system.css"
 EXPORTED_STYLESHEET = Path("design/_ds/modernist-3dfd6d1f-f6ac-418e-8f3e-37cf9f987647/styles.css")
@@ -272,10 +275,14 @@ def test_the_ticker_shows_the_biggest_move_per_asset_with_its_unit(
     assert items[1].move.endswith(" pts") and not items[1].up
 
 
-def test_the_ticker_is_labelled_since_news_and_stamped(client: TestClient) -> None:
+def test_the_ticker_is_labelled_since_news_and_stamped(
+    client: TestClient, settings: Settings
+) -> None:
     body = client.get("/").text
     assert "since news" in body
-    assert "as of 21 Sep 09:30 IST" in body  # the last pipeline run, in the display zone
+    # The last pipeline run, in the display zone.
+    finished = (NOW - timedelta(hours=2)).astimezone(ZoneInfo(settings.timezone))
+    assert f"as of {finished:%d %b %H:%M} IST" in body
 
 
 def test_an_old_call_is_not_in_the_ticker(database: Path, settings: Settings) -> None:
@@ -600,6 +607,59 @@ def test_the_feed_is_newest_first_not_most_important(database: Path, settings: S
     client = TestClient(create_app(settings, make_read_only_session_factory(engine)))
     body = client.get("/").text
     assert body.index("Municipal bond auction") < body.index("Houthi attacks")
+
+
+def test_the_first_page_holds_the_whole_day(database: Path, settings: Settings) -> None:
+    """The home screen is one scroll through today; "Earlier stories" is the step back into
+    yesterday (user, 2026-09-23)."""
+    engine = make_engine(database)
+    today = utcnow().astimezone(ZoneInfo(settings.timezone)).replace(hour=1, minute=0, second=0)
+    with make_session_factory(engine)() as session:
+        for index in range(20):  # more than the old fixed page of 12
+            session.add(
+                Story(
+                    first_seen_at=today + timedelta(minutes=index),
+                    updated_at=today + timedelta(minutes=index),
+                    headline=f"Story number {index}",
+                    summary="Something happened.",
+                    status="summarized",
+                    category="Other",
+                    regions=["Global"],
+                    importance_score=1.0,
+                )
+            )
+        # One from yesterday, so there is something for "Earlier stories" to reach.
+        session.add(
+            Story(
+                first_seen_at=today - timedelta(hours=6),
+                updated_at=today - timedelta(hours=6),
+                headline="Yesterday evening",
+                summary="Older news.",
+                status="summarized",
+                category="Other",
+                regions=["Global"],
+                importance_score=1.0,
+            )
+        )
+        session.commit()
+    engine.dispose()
+
+    engine = make_read_only_engine(database)
+    client = TestClient(create_app(settings, make_read_only_session_factory(engine)))
+    body = client.get("/").text
+
+    assert all(f"Story number {index}" in body for index in range(20))
+    assert "Yesterday evening" not in body  # that is what the button is for
+    # "Earlier stories" skips past everything shown, not a fixed twelve: the 20 above plus
+    # the fixture's two, which also broke today.
+    assert '"offset": 22' in body and "Earlier stories" in body
+
+
+def test_a_quiet_morning_still_fills_the_page(client: TestClient) -> None:
+    """The floor is the old page size, so a day with nothing yet shows yesterday's evening."""
+    body = client.get("/").text
+    assert "Houthi attacks close the Red Sea to tankers" in body
+    assert "Parliament debates the water treaty" in body
 
 
 # ---------------------------------------------------------------- the right rail

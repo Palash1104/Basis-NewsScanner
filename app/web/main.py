@@ -204,6 +204,12 @@ def _in_zone(value: datetime | None, settings: Settings) -> str:
     return local.strftime("%H:%M" if local.date() == today else "%d %b %H:%M")
 
 
+def _day_start(settings: Settings, now: datetime) -> datetime:
+    """Midnight this morning in the display zone. The feed's first page reaches back to it."""
+    local = now.astimezone(settings.tz)
+    return local.replace(hour=0, minute=0, second=0, microsecond=0)
+
+
 def _stamp(value: datetime | None, settings: Settings) -> str:
     """A clock time with its zone written out, for anything a reader might mistake for live
     data: "13:19 IST" today, "21 Sep 13:19 IST" if the last run was longer ago than that."""
@@ -321,6 +327,7 @@ def create_app(
             category=category or None,
             query=q,
             offset=max(offset, 0),
+            day_start=_day_start(settings, now),
         )
         items = queries.feed_stories(
             session, stories, assets, settings, now, track_record(session, "rule_id")
@@ -333,7 +340,9 @@ def create_app(
             "stories": items,
             "more": more,
             "offset": max(offset, 0),
-            "page_size": queries.PAGE_SIZE,
+            # What "Earlier stories" skips past: the page that was actually rendered, which
+            # on the first page is however many stories today produced.
+            "page_size": len(stories) or queries.PAGE_SIZE,
             "hours": queries.FEED_HOURS,
             "query": q,
             "region": region,

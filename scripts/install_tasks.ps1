@@ -4,7 +4,7 @@
 
 .DESCRIPTION
     Three tasks under the \Newsdesk\ folder, all running scripts\run_task.ps1 from the
-    project's virtualenv:
+    project's virtualenv, through scripts\run_hidden.vbs so that no console window appears:
 
       Newsdesk-pipeline   newsdesk run           at every pipeline hour
       Newsdesk-digest     newsdesk digest --send at each digest time
@@ -14,9 +14,11 @@
     The times come from `newsdesk schedule-times`, which reads settings.yaml, so they cannot
     drift from the app's own schedule. Re-run this script after changing those settings.
 
-    The tasks start after a reboot and login without a terminal, run as soon as possible
-    after a missed start, and may wake the machine. They need no administrator rights: they
-    run as the logged-on user, which is also the only account with the project's .env.
+    The tasks start after a reboot and login without a terminal or any window at all, run as
+    soon as possible after a missed start, and may wake the machine. They need no
+    administrator rights: they run as the logged-on user, which is also the only account with
+    the project's .env. A job that fails is logged as FAILED and, if the Telegram credentials
+    are set, reported in one message.
 
 .EXAMPLE
     powershell -ExecutionPolicy Bypass -File scripts\install_tasks.ps1
@@ -37,7 +39,11 @@ param(
 $ErrorActionPreference = "Stop"
 
 $root = Split-Path -Parent $PSScriptRoot
-$runner = Join-Path $root "scripts\run_task.ps1"
+# Every task runs wscript.exe on this launcher, which starts the PowerShell wrapper with its
+# window hidden from the start. Task Scheduler's own "Hidden" setting does not do that for a
+# console program - it only hides the task's own window - which is why black windows used to
+# flash up on every wake (user, 2026-09-23).
+$launcher = Join-Path $root "scripts\run_hidden.vbs"
 $exe = Join-Path $root ".venv\Scripts\newsdesk.exe"
 $taskPath = "\Newsdesk\"
 
@@ -62,23 +68,26 @@ function New-DailyTrigger {
 # StartWhenAvailable is the "run as soon as possible after a missed start" box, WakeToRun the
 # "wake the computer" one. IgnoreNew leaves a running job alone; the app's own lock covers the
 # case of a task started by hand at the same time.
+#
+# No RestartCount any more: a failed job used to be retried twice, ten minutes apart, which on
+# the pipeline meant three helpings of the same quota for a fault that is usually still there
+# ten minutes later. A failure now sends one message and waits for the next slot (user,
+# 2026-09-23). Catch-up runs for slots missed while the laptop slept are thinned in the app
+# itself - `schedule.min_run_gap_minutes` - because Windows has no "only the most recent one".
 $settings = New-ScheduledTaskSettingsSet `
     -StartWhenAvailable `
     -WakeToRun `
     -AllowStartIfOnBatteries `
     -DontStopIfGoingOnBatteries `
     -MultipleInstances IgnoreNew `
-    -ExecutionTimeLimit (New-TimeSpan -Hours 2) `
-    -RestartCount 2 `
-    -RestartInterval (New-TimeSpan -Minutes 10)
+    -ExecutionTimeLimit (New-TimeSpan -Hours 2)
 
 $principal = New-ScheduledTaskPrincipal -UserId "$env:USERDOMAIN\$env:USERNAME" -LogonType Interactive -RunLevel Limited
 
 function Register-NewsdeskTask {
     param([string]$Name, [string]$Job, [object[]]$Triggers, [string]$Description)
-    $argument = "-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass " +
-                "-File `"$runner`" -Job $Job"
-    $action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument $argument -WorkingDirectory $root
+    $action = New-ScheduledTaskAction -Execute "wscript.exe" `
+        -Argument "//nologo `"$launcher`" $Job" -WorkingDirectory $root
     Register-ScheduledTask -TaskPath $taskPath -TaskName $Name -Action $action -Trigger $Triggers `
         -Settings $settings -Principal $principal -Description $Description -Force | Out-Null
     Write-Output "  $Name"
@@ -114,9 +123,8 @@ if ($WithWeb) {
     $webTrigger = New-ScheduledTaskTrigger -AtLogOn -User "$env:USERDOMAIN\$env:USERNAME"
     # A minute's grace so the server starts after the machine has settled.
     $webTrigger.Delay = "PT1M"
-    $argument = "-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass " +
-                "-File `"$runner`" -Job serve"
-    $action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument $argument -WorkingDirectory $root
+    $action = New-ScheduledTaskAction -Execute "wscript.exe" `
+        -Argument "//nologo `"$launcher`" serve" -WorkingDirectory $root
     Register-ScheduledTask -TaskPath $taskPath -TaskName "Newsdesk-web" -Action $action `
         -Trigger $webTrigger -Settings $webSettings -Principal $principal `
         -Description "Serve the BASIS web UI on http://127.0.0.1:8787 for as long as you are logged in." -Force | Out-Null

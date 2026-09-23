@@ -38,7 +38,12 @@ from app.presentation import AssetCall, StoryCalls, call_rank, story_age, story_
 # see `newsdesk health`) would otherwise leave the page nearly empty. The window is printed
 # on the page, so it is never guessed at.
 FEED_HOURS = 48
+# The first page holds everything that broke today, however much that is, so the home screen
+# is one scroll through the day and "Earlier stories" is the deliberate step back (user,
+# 2026-09-23). PAGE_SIZE is the floor, so an empty morning still shows yesterday's evening;
+# FIRST_PAGE_MAX is the ceiling, so a day with 80 stories doesn't render them all at once.
 PAGE_SIZE = 12
+FIRST_PAGE_MAX = 60
 # The digest shows at most this many assets per story; the feed follows it.
 MAX_CALLS_PER_STORY = 6
 
@@ -138,6 +143,7 @@ def feed_page(
     query: str = "",
     offset: int = 0,
     limit: int = PAGE_SIZE,
+    day_start: datetime | None = None,
 ) -> tuple[list[Story], bool]:
     """Summarized stories, newest first, with one page of results.
 
@@ -148,6 +154,10 @@ def feed_page(
 
     Returns the page and whether older stories remain. A search looks through everything
     stored, not just the window: someone searching has a story in mind.
+
+    With `day_start`, the first page grows to hold every story that broke since then - the
+    home screen is meant to be one scroll through today, with "Earlier stories" as the step
+    back into yesterday.
     """
     statement = (
         select(Story)
@@ -173,6 +183,9 @@ def feed_page(
     stories = list(session.scalars(statement))
     if region:
         stories = [story for story in stories if region in (story.regions or [])]
+    if offset == 0 and not query and day_start is not None:
+        today = sum(1 for story in stories if story.first_seen_at >= day_start)
+        limit = min(max(today, limit), FIRST_PAGE_MAX)
     page = stories[offset : offset + limit]
     return page, len(stories) > offset + limit
 
