@@ -148,6 +148,13 @@ class PipelineSettings(_Strict):
     reserved_max_age_hours: int | None = Field(default=48, gt=0)
     max_articles_per_story_for_llm: int = Field(gt=0)
     snippet_max_chars: int = Field(default=500, gt=0)
+    # At most this share of a run's places may re-summarize a story the reader already has.
+    # The rest go to stories never summarized at all.
+    max_resummary_share: float = Field(default=0.25, ge=0, le=1)
+    # A run after downtime does the work of the runs it missed: it reads back to the last run
+    # (not just lookback_hours) and summarizes more, up to these bounds.
+    catch_up_max_hours: int = Field(default=24, gt=0)
+    catch_up_max_stories: int = Field(default=60, gt=0)
 
     @model_validator(mode="after")
     def _reserved_fit_in_the_run(self) -> "PipelineSettings":
@@ -157,6 +164,10 @@ class PipelineSettings(_Strict):
                 f"reserved_slots total {total} exceeds max_stories_per_run "
                 f"{self.max_stories_per_run}"
             )
+        if self.catch_up_max_stories < self.max_stories_per_run:
+            raise ValueError("catch_up_max_stories must be at least max_stories_per_run")
+        if self.catch_up_max_hours < self.lookback_hours:
+            raise ValueError("catch_up_max_hours must be at least lookback_hours")
         return self
 
 

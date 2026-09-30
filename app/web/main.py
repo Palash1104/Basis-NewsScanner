@@ -30,7 +30,7 @@ from app.models import Impact, Run, utcnow
 from app.pipeline.prices import format_move
 from app.pipeline.scoring import track_record
 from app.presentation import ORDER_WORDS, ORIGIN_LABEL, story_age
-from app.schedule import pipeline_hours
+from app.schedule import pipeline_hours, start_of_news_day
 from app.web import palette, queries
 
 log = logging.getLogger(__name__)
@@ -205,9 +205,12 @@ def _in_zone(value: datetime | None, settings: Settings) -> str:
 
 
 def _day_start(settings: Settings, now: datetime) -> datetime:
-    """Midnight this morning in the display zone. The feed's first page reaches back to it."""
-    local = now.astimezone(settings.tz)
-    return local.replace(hour=0, minute=0, second=0, microsecond=0)
+    """Where the feed's first page reaches back to: the same "today" the digest uses (22:00
+    the night before, `delivery.day_starts_at`), so the page and the alert agree on what
+    today's news is. Midnight if that setting is off."""
+    return start_of_news_day(settings, now) or now.astimezone(settings.tz).replace(
+        hour=0, minute=0, second=0, microsecond=0
+    )
 
 
 def _stamp(value: datetime | None, settings: Settings) -> str:

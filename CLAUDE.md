@@ -294,7 +294,8 @@ powershell -ExecutionPolicy Bypass -File scripts/install_tasks.ps1 [-Remove]   #
   what grows is the room the chip strip scrolls in. `/track-record`, `/assets`, `/runs` and a
   story page keep the canvas: text and tables, where a 2000px line is not a better line.
 - The feed's **first page holds the whole day** (`queries.FIRST_PAGE_MAX`, `day_start`): every
-  story first seen since local midnight, floored at `PAGE_SIZE` (12) so a quiet morning still
+  story first seen since the news day began (22:00 the night before, the digest's own
+  boundary), floored at `PAGE_SIZE` (12) so a quiet morning still
   shows yesterday's evening and capped at 60. "Earlier stories" then skips past what was
   actually rendered, not a fixed twelve (user, 2026-09-23: the home screen should be one
   scroll through today).
@@ -510,6 +511,21 @@ powershell -ExecutionPolicy Bypass -File scripts/install_tasks.ps1 [-Remove]   #
   Measured on the live database (2026-09-23): 10 of the 20 places were held by finished
   stories while stories at 4.2 importance had never been summarized at all. A run with
   nothing to summarize now also makes no LLM call at all, not even the rerank.
+- **Re-summaries get at most a quarter of a run's places** (`pipeline.max_resummary_share`,
+  0.25, via `rank_stories(at_most=...)`), and reserved slots go only to stories never
+  summarized. A re-summary refreshes a story the reader already has (`story.summary is not
+  None`); a new story is one they don't. Measured 2026-09-24: the run after a night off spent
+  19 of its 20 places on stories 1-7 days old that had gained articles overnight, and
+  summarized 1 of the 251 stories that broke that day.
+- **A run after downtime does the missed runs' work** (`app/schedule.py` `catch_up`,
+  `settings_for_run`). The laptop is off most nights and Windows starts one run on wake. That
+  run now reads back to the previous run (not just `lookback_hours`, +1h overlap) and gets
+  `max_stories_per_run` places per missed 3-hour slot, reserved slots scaled alike, bounded by
+  `catch_up_max_hours` (24) and `catch_up_max_stories` (60 = ~125 LLM calls; the daily budget
+  still applies). A normal 3-hour run is unchanged and `settings_for_run` returns the original
+  settings object. The run's output leads with a `catch-up:` line when it applies.
+- The feed's first page and the digest share one "today": `start_of_news_day` (moved to
+  `app/schedule.py` so the web app can use it without the CLI), 22:00 the night before.
 - Reserved slots (`pipeline.reserved_slots`, `{IN: 5}` since 2026-09-21):
   - Why: in 48h, **0 of 524 India-only stories were summarized**. They top out at 3.60
     importance against a top-20 cutoff of 4.69, because both the source count and the region

@@ -344,3 +344,30 @@ def test_the_candidate_pool_reaches_past_the_cutoff(session: Session, settings: 
     assert len(pool) == 10
     assert all(only_from(story, "IN") for story in pool)
     assert not set(pool) & set(top)
+
+
+def test_re_summaries_get_only_their_share_of_a_run(session: Session, settings: Settings) -> None:
+    """A long-running story gains articles all night. Measured 2026-09-24: the run after the
+    laptop woke re-summarized 19 stories 1-7 days old and summarized 1 of the 251 that broke
+    that day. A re-summary refreshes what the reader has; a new story is what they don't."""
+    old = [
+        Story(first_seen_at=NOW, updated_at=NOW, headline=f"old {n}", summary="Done.")
+        for n in range(4)
+    ]
+    new = [Story(first_seen_at=NOW, updated_at=NOW, headline=f"new {n}") for n in range(4)]
+    for index, story in enumerate(old):
+        # The old stories are the big ones: three outlets each, against one for the new.
+        for outlet, region in (("BBC", "GLOBAL"), ("The Hindu", "IN"), ("CNBC", "US")):
+            session.add(_article(f"old story {index} update", outlet, region, 3, 1, story))
+    for index, story in enumerate(new):
+        session.add(_article(f"new story {index}", "Livemint", "IN", 2, 1, story))
+    session.flush()
+
+    def is_resummary(story: Story) -> bool:
+        return story.summary is not None
+
+    top = rank_stories(session, settings, NOW, limit=4, at_most=(is_resummary, 1))
+
+    assert sum(1 for story in top if is_resummary(story)) == 1  # the biggest one, and only it
+    assert top[0].headline.startswith("old")
+    assert [story.headline.startswith("new") for story in top[1:]] == [True, True, True]

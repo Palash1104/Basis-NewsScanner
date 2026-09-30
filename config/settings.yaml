@@ -78,6 +78,17 @@ pipeline:
   # get an LLM impact call. If the call fails, the importance order is kept.
   rerank_candidates: 40
   snippet_max_chars: 500
+  # At most a quarter of a run's places may re-summarize a story the reader already has; the
+  # rest go to news never summarized at all. Measured 2026-09-24: the run after the laptop
+  # woke spent 19 of its 20 places refreshing stories 1-7 days old that had picked up new
+  # articles overnight, and summarized 1 of the 251 stories that broke that day.
+  max_resummary_share: 0.25
+  # A run after downtime does the work of the runs it missed (the laptop is off most nights).
+  # It reads back to the previous run instead of just lookback_hours, and summarizes
+  # max_stories_per_run for every missed 3-hour slot, reserved slots scaled with it - up to
+  # these bounds. 60 stories is ~125 LLM calls; the daily budget still applies on top.
+  catch_up_max_hours: 24
+  catch_up_max_stories: 60
 
 dedupe:
   same_source_title_similarity: 90

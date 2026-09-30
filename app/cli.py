@@ -107,7 +107,13 @@ from app.pipeline.scoring import (
 )
 from app.pipeline.sections import fresh_enough, may_take_reserved_slot, only_from
 from app.pipeline.summarize import news_articles, resummarize_reason, summarize_stories
-from app.schedule import pipeline_hours
+from app.schedule import (
+    CatchUp,
+    catch_up,
+    pipeline_hours,
+    settings_for_run,
+    start_of_news_day,
+)
 
 log = logging.getLogger("newsdesk")
 
@@ -127,6 +133,7 @@ DIGEST_STATUSES = ("summarized", "analyzed")
 @dataclass
 class PipelineReport:
     run_id: int
+    catch_up: CatchUp | None = None  # how much this run did, given the gap since the last
     feeds_ok: int = 0
     feeds_failed: int = 0
     articles_fetched: int = 0
@@ -225,10 +232,21 @@ def run_pipeline(
     With `llm` None, summaries are skipped and `llm_unavailable` is recorded as the reason."""
     now = now or utcnow()
     with session_factory() as session:
+        # How long since the last run decides how much this one does (see `catch_up`).
+        previous = session.scalars(
+            select(Run.started_at)
+            .where(Run.kind == "pipeline", Run.finished_at.is_not(None))
+            .order_by(Run.started_at.desc())
+            .limit(1)
+        ).first()
+        gap = (now - previous).total_seconds() / 3600 if previous else None
+        plan = catch_up(settings, gap)
+        settings = settings_for_run(settings, plan)
+
         run = Run(kind="pipeline", started_at=utcnow(), errors=[])
         session.add(run)
         session.commit()
-        report = PipelineReport(run_id=run.id)
+        report = PipelineReport(run_id=run.id, catch_up=plan)
         stage = "fetch"
         try:
             enabled = [feed for feed in feeds if feed.enabled]
@@ -307,11 +325,31 @@ def run_pipeline(
             def _owes_summary(story: Story) -> bool:
                 return resummarize_reason(story, news_articles(story)) is not None
 
-            top = rank_stories(session, settings, now, limit=candidates_wanted, keep=_owes_summary)
+            # A re-summary refreshes a story the reader already has; a new story is one they
+            # don't. Re-summaries get at most `max_resummary_share` of the places (measured
+            # 2026-09-24: 19 of 20 after a night off, for 1 of 251 stories that broke that day).
+            def _is_resummary(story: Story) -> bool:
+                return story.summary is not None
+
+            def _never_summarized(story: Story) -> bool:
+                return story.summary is None and _owes_summary(story)
+
+            resummary_cap = int(
+                settings.pipeline.max_resummary_share * settings.pipeline.max_stories_per_run
+            )
+            top = rank_stories(
+                session,
+                settings,
+                now,
+                limit=candidates_wanted,
+                keep=_owes_summary,
+                at_most=(_is_resummary, resummary_cap),
+            )
             # Stories only one region's outlets carry never reach the top 40 on importance,
-            # so they join the candidates before the model orders them (SPEC 7.4).
+            # so they join the candidates before the model orders them (SPEC 7.4). Only news
+            # the reader has never had: a reserved slot is for what would otherwise be missed.
             reserved_candidates = reserved_pool(
-                session, settings, now, exclude=top, keep=_owes_summary
+                session, settings, now, exclude=top, keep=_never_summarized
             )
             report.reserved_candidates = len(reserved_candidates)
             top = top + reserved_candidates
@@ -329,11 +367,11 @@ def run_pipeline(
 
             def _can_reserve(story: Story) -> bool:
                 # A reserved slot is for news the digest would otherwise never carry: recent,
-                # not sport or filler, and only where a summary is actually owed.
+                # not sport or filler, and never summarized before.
                 return (
                     fresh_enough(story, now, settings.pipeline.reserved_max_age_hours)
                     and may_take_reserved_slot(story)
-                    and resummarize_reason(story, news_articles(story)) is not None
+                    and _never_summarized(story)
                 )
 
             top = select_with_reserved(top, settings, eligible=_can_reserve)
@@ -648,23 +686,6 @@ def last_digest_sent_at(session: Session) -> datetime | None:
     return next((run.started_at for run in runs if not run.errors), None)
 
 
-def start_of_news_day(settings: Settings, now: datetime) -> datetime | None:
-    """When the digest's "today" began: the most recent `delivery.day_starts_at` at or before
-    `now`, in the reader's zone. None when the setting is null and no floor applies.
-
-    It is 22:00, not midnight (user, 2026-09-23). The pipeline's last run of the evening is at
-    22:00 and the evening digest goes out at 19:30, so a midnight boundary dropped everything
-    that broke in between: too old for the morning digest, already past for the evening one.
-    Starting the day at 22:00 makes the night's news part of tomorrow's.
-    """
-    if not settings.delivery.day_starts_at:
-        return None
-    hour, minute = (int(part) for part in settings.delivery.day_starts_at.split(":"))
-    local = now.astimezone(settings.tz)
-    start = local.replace(hour=hour, minute=minute, second=0, microsecond=0)
-    return start if start <= local else start - timedelta(days=1)
-
-
 def select_digest_stories(
     session: Session, settings: Settings, now: datetime
 ) -> tuple[list[Story], datetime]:
@@ -849,7 +870,17 @@ def run_once(settings: Settings, session_factory: sessionmaker[Session]) -> list
         if report.reserved_candidates
         else ""
     )
+    plan = report.catch_up
+    catching_up = (
+        [
+            f"catch-up: {plan.slots} slots since the last run, so reading {plan.lookback_hours}h "
+            f"back and summarizing up to {plan.max_stories} stories"
+        ]
+        if plan is not None and plan.catching_up
+        else []
+    )
     lines = [
+        *catching_up,
         f"run {report.run_id}: feeds {report.feeds_ok} ok / {report.feeds_failed} failed · "
         f"articles fetched {report.articles_fetched}, in last "
         f"{settings.pipeline.lookback_hours}h {report.articles_recent}, "

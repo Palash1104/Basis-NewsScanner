@@ -56,6 +56,7 @@ def rank_stories(
     now: datetime,
     limit: int | None = None,
     keep: Callable[[Story], bool] | None = None,
+    at_most: tuple[Callable[[Story], bool], int] | None = None,
 ) -> list[Story]:
     """Rescore every story with an article inside the lookback window, store the scores, and
     return the top `limit` (by default `max_stories_per_run`), most important first.
@@ -67,6 +68,12 @@ def rank_stories(
     do nothing on every run after. Measured on the live database on 2026-09-23: 10 of the 20
     places were held by stories already summarized, while stories at 4.2 importance that had
     never been summarized sat below the cut.
+
+    `at_most` is (a test, a count): at most that many of the returned stories may pass the
+    test, and the places they would have taken go to the next stories that don't. The
+    pipeline uses it to cap re-summaries, because a long-running story gains articles all
+    night: measured on 2026-09-24, the run after the laptop woke re-summarized 19 stories
+    1-7 days old and summarized 1 of the 251 stories that broke that day.
     """
     cutoff = now - timedelta(hours=settings.pipeline.lookback_hours)
     recent_story_ids = select(Article.story_id).where(
@@ -93,8 +100,19 @@ def rank_stories(
 
     ranked.sort(key=lambda item: (item[0], item[1]), reverse=True)
     top = limit if limit is not None else settings.pipeline.max_stories_per_run
-    wanted = [story for _, _, story in ranked if keep is None or keep(story)]
-    return wanted[:top]
+    picked: list[Story] = []
+    limited = 0
+    for _, _, story in ranked:
+        if len(picked) >= top:
+            break
+        if keep is not None and not keep(story):
+            continue
+        if at_most is not None and at_most[0](story):
+            if limited >= at_most[1]:
+                continue
+            limited += 1
+        picked.append(story)
+    return picked
 
 
 def pending_stories(session: Session, settings: Settings, now: datetime) -> list[Story]:
