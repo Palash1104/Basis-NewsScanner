@@ -351,7 +351,7 @@ def read_bse_announcements(path: Path, isins: dict[str, str], since: datetime) -
     import sqlite3
 
     if not path.exists():
-        return SharedRead([], None, f"no shared file at {path} (the PEAD tool hasn't run)")
+        return SharedRead([], None, f"the PEAD tool hasn't run yet: no {path.name}")
     since_local = since.astimezone(NSE_TIMEZONE).replace(tzinfo=None).isoformat(timespec="seconds")
     try:
         conn = sqlite3.connect(f"file:{path.as_posix()}?mode=ro", uri=True, timeout=2)
