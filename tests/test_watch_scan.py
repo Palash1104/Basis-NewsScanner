@@ -464,8 +464,10 @@ def test_prices_are_polled_for_stocks_indices_and_the_benchmark(
 def test_the_tick_runs_each_job_when_it_is_due(
     settings: Settings, db: sessionmaker[Session], watchlist: WatchlistFile
 ) -> None:
+    settings.watch.feed_stale_hours = 48  # scheduling only: no feed warning in the way
     clock = Clock(T0)
     watcher = make_watcher(settings, db, watchlist, Web(), clock, FakeSnapshots())
+    watcher.find_gap = lambda now: None  # type: ignore[method-assign]  # jumps aren't gaps here
     assert [r.job for r in watcher.tick()] == ["feeds", "google_news", "prices"]
     clock.now = T0 + timedelta(minutes=5)
     assert [r.job for r in watcher.tick()] == ["prices"]

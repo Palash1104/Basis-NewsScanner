@@ -128,6 +128,7 @@ from app.schedule import (
     settings_for_run,
     start_of_news_day,
 )
+from app.watch.alerts import digest_section
 from app.watch.power import keep_awake, on_ac_power, recent_resumes
 from app.watch.prices import YahooSnapshots
 from app.watch.report import wake_section, watch_report
@@ -758,6 +759,15 @@ def select_digest_stories(
     return list(stories), since
 
 
+def watch_digest_section(session: Session, settings: Settings, now: datetime) -> str | None:
+    """The watchlist's part of the digest; a broken watchlist never stops the digest."""
+    try:
+        return digest_section(session, load_watchlist_file(), settings, now)
+    except Exception as exc:
+        log.warning("digest: watchlist section left out: %s", exc)
+        return None
+
+
 def run_digest(
     session_factory: sessionmaker[Session],
     settings: Settings,
@@ -796,9 +806,10 @@ def run_digest(
             )
             for story in stories
         ]
-        messages = format_digest(items, now, settings.tz)
+        watch = watch_digest_section(session, settings, now)
+        messages = format_digest(items, now, settings.tz, watch_section=watch)
         report = DigestReport(stories=len(items), messages=messages, since=since)
-        if not send or not items:
+        if not send or not (items or watch):
             return report
         if not token or not chat_id:
             raise TelegramError("TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID must be set to send")

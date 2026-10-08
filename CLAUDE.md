@@ -267,6 +267,44 @@ review after each step:
   - **Extraction skip.** `pipeline.skip_extraction_categories` (Politics, Other, Science &
     Health) gets no event extraction. Each skip is logged in `extraction_skips`; read them
     with `newsdesk skipped-extractions --days 30`.
+- **Step 4 done (2026-10-08): alerts and the digest section** (`app/watch/alerts.py`,
+  `app/watch/moves.py`, the scanner's `alerts` job every minute).
+  - **What is sent.** Each item is a `watch_alerts` row whose key makes it happen once. A
+    row is written before sending; a failed send is retried for 30 min, three tries.
+    - `news`: one per story, when the call rates any of its stocks high and the news was
+      first reported in the last 6 hours. It lists every stock the story is about.
+    - `followup`: once, when a filing attaches after the alert. It waits for the reply to
+      be read and the story called again, or 15 min.
+    - `price` / `sector`: "moved, no story yet", see below.
+    - `away`: one summary per catch-up.
+    - `feed`: failing or stale feeds.
+  - **"Moved, no story yet": thresholds from a one-year backtest on hourly bars.**
+    - At 2× a stock's typical day (the median over 60 sessions of the day's largest
+      excursion from the previous close), each stock would have fired 1.4-3.1 times a
+      month.
+    - Prime Focus on the raid day was 2.5×: 2× fires about 10:00, before the first web
+      report at 10:18.
+    - Defence names are judged net of NIFTY_IND_DEFENCE.NS (2.1-3.3 a month at 2×).
+    - A sector move is the index past 2× its own typical day, or 60% of the group past
+      1.5× in one direction. It sends one "defence sector move" instead of one per stock.
+    - Nothing for a stock with a story since the last close. At most one per stock a day.
+    - Typical moves are computed once a day from hourly bars (`hourly_bars`).
+  - **The away summary.**
+    - Contents: everything a catch-up read that was first reported between the gap's start
+      and an hour before the catch-up, newest first, with original times. It also covers
+      price moves replayed from the backfill and the possible gaps.
+    - Fresher items alert as usual.
+    - It waits until the catch-up's stories have been called, or 10 min.
+  - **Feed health.**
+    - Failing: 3 errors in a row.
+    - Stale: nothing new for more than 6 h and more than twice the feed's own usual
+      daytime age, and only once there are 12 daytime checks of history.
+    - On the first day, a US outlet's overnight lull and ET's always-slow curated feed would
+      otherwise have warned.
+  - **The digest.** A WATCHLIST block goes first: stories first *reported* since 22:00 the
+    night before, most material first, with the low ones in an expandable block, then
+    today's price and sector alerts. The digest now also sends when only the watchlist has
+    something.
 - **Scanner behaviour worth knowing:**
   - Only headlines naming a watchlist stock are stored, at any verdict.
   - One article seen through several feeds has one row and a sighting per feed. All the

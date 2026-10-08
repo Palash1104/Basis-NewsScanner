@@ -86,6 +86,11 @@ class HistoryProvider(Protocol):
         """Each session's close over the last `days` days, by session date (exchange time)."""
         ...
 
+    def hourly_bars(self, symbol: str, days: int) -> list[tuple[datetime, float, float, float]]:
+        """(bar start in UTC, high, low, close) for each hourly bar over the last `days` days:
+        what each stock's typical day is measured from (app/watch/moves.py)."""
+        ...
+
 
 # Yahoo keeps 1-minute bars for the last 30 days and serves at most 8 days of them per
 # request (both verified 2026-10-08: "The requested range must be within the last 30 days").
@@ -123,6 +128,17 @@ class YahooHistory:
         for stamp, close in zip(frame.index, frame["Close"], strict=True):
             closes[stamp.date()] = float(close)  # the last bar of each day wins
         return closes
+
+    def hourly_bars(self, symbol: str, days: int) -> list[tuple[datetime, float, float, float]]:
+        import yfinance as yf
+
+        frame = yf.Ticker(symbol).history(period=f"{days}d", interval="60m", auto_adjust=False)
+        return [
+            (_utc(stamp), float(high), float(low), float(close))  # type: ignore[misc]
+            for stamp, high, low, close in zip(
+                frame.index, frame["High"], frame["Low"], frame["Close"], strict=True
+            )
+        ]
 
 
 def previous_close(closes: dict[date, float], day: date) -> float | None:

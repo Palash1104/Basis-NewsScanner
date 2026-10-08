@@ -513,6 +513,26 @@ class WatchCall(Base):
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, index=True)
 
 
+class WatchAlert(Base):
+    """One Telegram message the watchlist sent, or tried to: its key is what makes each kind
+    happen once - one alert per story, one follow-up, one price alert per stock per day, one
+    sector alert per group, day and direction, one summary per catch-up."""
+
+    __tablename__ = "watch_alerts"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    key: Mapped[str] = mapped_column(String(200), unique=True)
+    kind: Mapped[str] = mapped_column(String(16), index=True)  # news | followup | price |
+    # sector | away | feed
+    story_id: Mapped[int | None] = mapped_column(ForeignKey("watch_stories.id"), index=True)
+    symbols: Mapped[list[str]] = mapped_column(JSON, default=list)
+    text: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, index=True)
+    sent_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    error: Mapped[str | None] = mapped_column(Text)
+
+
 class WatchPrice(Base):
     """One intraday price poll of a watchlist stock or benchmark, in market hours. Kept to
     measure Yahoo's lag and each stock's typical intraday move before any alert uses it."""

@@ -147,14 +147,27 @@ def _fit_story(item: DigestItem, limit: int, number: int) -> str:
     return text
 
 
+def _fit_block(text: str, limit: int) -> str:
+    """A block cut at a line so it fits one message, saying how much was left out."""
+    if telegram_length(text) <= limit:
+        return text
+    lines = text.split("\n")
+    more = "<i>… more on the watchlist page</i>"
+    while lines and telegram_length("\n".join([*lines, more])) > limit:
+        lines.pop()
+    return "\n".join([*lines, more])
+
+
 def format_digest(
     items: Sequence[DigestItem],
     generated_at: datetime,
     tz: ZoneInfo,
     limit: int = TELEGRAM_LIMIT,
+    watch_section: str | None = None,
 ) -> list[str]:
     """Build the digest as one or more messages under `limit`, never splitting a story.
-    The last message ends with the not-financial-advice footer."""
+    The watchlist section, when there is one, comes first (user, 2026-10-07). The last
+    message ends with the not-financial-advice footer."""
     local = generated_at.astimezone(tz)
     count = f"{len(items)} {'story' if len(items) == 1 else 'stories'}"
     header = f"<b>BASIS</b> · {local:%a %d %b %Y, %H:%M} {local.tzname()} · {count}"
@@ -166,6 +179,8 @@ def format_digest(
     blocks = [
         _fit_story(item, story_limit, number) for number, item in enumerate(items, start=1)
     ] or ["No new stories since the last digest."]
+    if watch_section:
+        blocks.insert(0, _fit_block(watch_section, story_limit))
     for block in [*blocks, FOOTER]:
         candidate = f"{current}{STORY_SEPARATOR}{block}"
         if telegram_length(candidate) <= limit:

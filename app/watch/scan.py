@@ -20,7 +20,7 @@ import asyncio
 import logging
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any
 
 import httpx
@@ -46,10 +46,24 @@ from app.net import make_client
 from app.pipeline.dedupe import normalize_source, normalize_title
 from app.pipeline.embed import Embedder, article_text
 from app.pipeline.fetch import FetchedArticle, SourceResolver
+from app.watch.alerts import (
+    Sender,
+    away_summaries,
+    deliver,
+    detect_now,
+    feed_warnings,
+    followups,
+    group_layout,
+    mark_summarised,
+    move_alerts,
+    news_alerts,
+    retry_pending,
+)
 from app.watch.analyse import analyse, read_replies
 from app.watch.catchup import Gap, SourceCoverage, find_gap, possible_gaps
 from app.watch.group import StoryGrouper
 from app.watch.match import Match, Matcher
+from app.watch.moves import Typical, typical_moves
 from app.watch.power import keep_awake, on_ac_power
 from app.watch.prices import (
     MINUTE_HISTORY,
@@ -77,8 +91,11 @@ from app.watch.sources import (
 
 log = logging.getLogger(__name__)
 
-# analyse comes after the news jobs, so what they just stored is called in the same tick.
-JOBS = ("feeds", "google_news", "analyse", "prices")
+# analyse comes after the news jobs, so what they just stored is called in the same tick;
+# alerts come last, so a call or a price made this tick is alerted this tick.
+JOBS = ("feeds", "google_news", "analyse", "prices", "alerts")
+FEED_HEALTH_EVERY = timedelta(minutes=10)
+TYPICAL_RETRY = timedelta(hours=1)  # after failing to fetch the bars thresholds come from
 RETRY_AFTER_FAILURE = timedelta(minutes=1)  # after a pass in which every source failed
 NSE_FEED_NAME = "NSE announcements"
 # Two sightings are one article when the outlet is the same and the titles this close: a
@@ -137,6 +154,7 @@ class Watcher:
         clock: Callable[[], datetime] = utcnow,
         history: HistoryProvider | None = None,
         llm: LLMClient | None = None,
+        sender: Sender | None = None,
     ) -> None:
         self.settings = settings
         self.session_factory = session_factory
@@ -160,6 +178,10 @@ class Watcher:
         # (story, articles, filings) whose call came back invalid: not asked again as is.
         self._bad_inputs: set[tuple[int, int, int]] = set()
         self._calls_paused_until: datetime | None = None  # the watch lane's budget is spent
+        self.sender = sender
+        self._typical: tuple[date, dict[str, Typical]] | None = None
+        self._typical_failed_at: datetime | None = None
+        self._feed_health_at: datetime | None = None
         # Set by `newsdesk watch --since`: catch up from here on the next feed scan.
         self.force_since: datetime | None = None
         # The feeds whose health is tracked: not the one-off catch-up searches.
@@ -180,8 +202,8 @@ class Watcher:
             return timedelta(minutes=minutes)
         if job == "prices":
             return timedelta(minutes=watch.prices_every_minutes) if market else None
-        if job == "analyse":
-            return timedelta(minutes=1) if self.llm is not None else None
+        if job in ("analyse", "alerts"):
+            return timedelta(minutes=1)
         raise ValueError(job)
 
     def due(self, job: str, now: datetime) -> bool:
@@ -203,6 +225,8 @@ class Watcher:
                 continue
             self.last_run[job] = now
             result = self.run_job(job, now)
+            if job in ("analyse", "alerts") and not result.entries and not result.errors:
+                continue  # checked every minute; a pass that found nothing to do is quiet
             results.append(result)
             every = self.interval(job, now)
             news = job in ("feeds", "google_news")
@@ -221,6 +245,8 @@ class Watcher:
                 result = self.scan_google_news(now)
             elif job == "analyse":
                 result = self.analyse_stories(now)
+            elif job == "alerts":
+                result = self.send_alerts(now)
             else:
                 result = self.poll_prices(now)
         except Exception as exc:  # the loop must outlive any one bad pass
@@ -228,7 +254,7 @@ class Watcher:
             result = JobResult(
                 job, errors=[{"stage": job, "error": f"{type(exc).__name__}: {exc}"}]
             )
-        if job == "analyse" and not result.entries and not result.errors:
+        if job in ("analyse", "alerts") and not result.entries and not result.errors:
             return result  # checked every minute; only a pass that did something is recorded
         run.entries = result.entries
         run.new_articles = result.new_articles
@@ -323,6 +349,60 @@ class Watcher:
                 self._calls_paused_until = self.llm.limiter.next_reset()
         for note in outcome.notes:
             log.info("watch call: %s", note)
+        return result
+
+    def typical_moves(self, now: datetime) -> dict[str, Typical] | None:
+        """Each stock's and index's typical day (app/watch/moves.py), worked out once a day
+        from hourly bars. None when they couldn't be fetched (tried again in an hour)."""
+        today = now.astimezone(self.settings.tz).date()
+        if self._typical and self._typical[0] == today:
+            return self._typical[1]
+        if self.history is None or (
+            self._typical_failed_at and now - self._typical_failed_at < TYPICAL_RETRY
+        ):
+            return None
+        groups, ungrouped = group_layout(self.watchlist)
+        index_of = {s: index for index, members in groups.values() for s in members}
+        symbols = [*ungrouped, *index_of, *(i for i in index_of.values() if i)]
+        try:
+            bars = {s: self.history.hourly_bars(s, 120) for s in dict.fromkeys(symbols)}
+        except Exception as exc:
+            log.warning("typical moves unavailable: %s", exc)
+            self._typical_failed_at = now
+            return None
+        tz = self.settings.tz
+        found = typical_moves(bars, index_of, today, lambda moment: moment.astimezone(tz).date())
+        self._typical = (today, found)
+        return found
+
+    def send_alerts(self, now: datetime) -> JobResult:
+        """Everything Telegram should hear about now (app/watch/alerts.py)."""
+        result = JobResult("alerts")
+        names = {stock.symbol: stock.name or stock.symbol for stock in self.stocks}
+        typical = self.typical_moves(now)
+        with self.session_factory() as session:
+            outgoing = retry_pending(session, now)
+            outgoing += news_alerts(session, self.settings, names, now)
+            outgoing += followups(session, self.settings, names, now)
+            if typical and in_market_hours(now, self.settings):
+                events = detect_now(session, self.watchlist, typical, self.settings, now)
+                outgoing += move_alerts(events, session, names, self.settings)
+            summaries, empty = away_summaries(session, self.watchlist, typical, self.settings, now)
+            outgoing += summaries
+            if self._feed_health_at is None or now - self._feed_health_at >= FEED_HEALTH_EVERY:
+                self._feed_health_at = now
+                outgoing += feed_warnings(session, self.settings, now)
+        if empty:
+            mark_summarised(self.session_factory, empty, "nothing to report")
+        unique = list({item.key: item for item in outgoing}.values())
+        delivered = deliver(self.session_factory, unique, self.sender, now)
+        runs = [int(item.key.split(":")[1]) for item in summaries]
+        if runs:
+            with self.session_factory() as session:
+                done = session.scalars(select(WatchRun).where(WatchRun.id.in_(runs))).all()
+            mark_summarised(self.session_factory, done, "summary sent or queued")
+        result.entries = len(delivered.sent)
+        result.errors = [{"stage": "alerts", "key": key, "error": e} for key, e in delivered.failed]
         return result
 
     def poll_prices(self, now: datetime) -> JobResult:
@@ -914,7 +994,25 @@ def build_watcher(
         snapshots,
         history=YahooHistory(),
         llm=_watch_llm(settings, session_factory),
+        sender=_telegram(settings),
     )
+
+
+def _telegram(settings: Settings) -> Sender | None:
+    """Sends a list of messages to the user's chat, or None without credentials (alerts are
+    then recorded with that as their error, never lost silently)."""
+    from app.config import get_secret
+    from app.delivery.telegram import send_messages
+
+    token, chat_id = get_secret("TELEGRAM_BOT_TOKEN"), get_secret("TELEGRAM_CHAT_ID")
+    if not token or not chat_id:
+        log.warning("watchlist alerts can't be sent: no Telegram credentials")
+        return None
+
+    def send(messages: list[str]) -> None:
+        asyncio.run(send_messages(messages, token, chat_id, settings.http))
+
+    return send
 
 
 def _watch_llm(settings: Settings, session_factory: sessionmaker[Session]) -> LLMClient | None:
