@@ -329,25 +329,49 @@ order (the user dropped the stops between steps 3 and 7 on 2026-10-08):
   - **First live run.** 25 rows; the four Prime Focus raid stories were hits at 1d against
     the Nifty.
 - **Step 7 done (2026-10-08): BSE through the PEAD tool.**
-  - `pead_tool.py` (Documents/resultscanner, commit 750f728) appends every announcement
-    it reads to `announcements.db` beside it (`PEAD_ANNOUNCEMENTS_DB` overrides): table
-    `announcements`, keyed by its own id, `INSERT OR IGNORE`, WAL, never raises. Additive
-    only: backup in `archive/pead_tool.2026-10-08.before-basis.py`, its 423 checks pass.
-  - BASIS opens it read-only (`mode=ro`, `watch.bse_announcements_db`) on every feed pass
-    (`sources.read_bse_announcements`): BSE rows whose ISIN is a watchlist stock's
-    (`isin` in watchlist.yaml), taken by `fetched_at` since the last read with a minute's
-    overlap, so what the PEAD tool caught up on late still arrives. NSE rows are ignored:
-    BASIS reads NSE itself.
-  - Its times are naive IST: `exchange_time` is the exchange's clock and `fetched_at` is
-    the laptop's (India Standard Time). Change the reader if the laptop's zone changes.
+  - `pead_tool.py` (Documents/resultscanner, branch `pead-scanner-fixes`) appends every
+    announcement it reads to `announcements.db` beside it (`PEAD_ANNOUNCEMENTS_DB`
+    overrides): table `announcements`, `seq INTEGER PRIMARY KEY AUTOINCREMENT` (write
+    order, never reused or renumbered), `id` unique, `INSERT OR IGNORE`, WAL. Additive
+    only: backup in `archive/pead_tool.2026-10-08.before-basis.py`; 427 checks pass.
+    - It never raises: building the rows is inside its guard too, and a filing that can't
+      be turned into a row is skipped on its own, so it costs neither the poll nor the
+      other rows.
+    - `exchange_time` is the exchange's clock (IST, no zone); `fetched_at` carries its UTC
+      offset.
+  - **BASIS reads by `seq`, never by exchange time** (user, 2026-10-08). The last seq it
+    processed is a `watch_cursors` row (`scan.BSE_CURSOR`), written in the same transaction
+    as the filings, so a crash re-reads rather than skips, and a restart carries on where it
+    stopped. The PEAD tool backfills after a restart: a filing from 02:00 written at 09:30 is
+    simply the next seq.
+    - The file is opened read-only (`mode=ro`, `watch.bse_announcements_db`); only BSE rows
+      whose ISIN is a watchlist stock's are kept (`isin` in watchlist.yaml). NSE rows are
+      ignored: BASIS reads NSE itself.
+    - With no cursor yet, or one past the file's end (the file was recreated), the file is
+      read from the start and only the last `catch_up_max_days` (7) are kept. Behind a
+      cursor nothing is dropped for its age.
+  - **Late filings go into a summary, never an alert** (user, 2026-10-08). A filing BASIS
+    first sees more than `away_after_minutes` (60) after it was filed (`alerts.arrived_late`)
+    is a late arrival.
+    - In a catch-up, the catch-up's summary takes it, even when it was filed before the gap
+      began.
+    - In any other pass, `_record_late` writes a `watch_runs` row with `job = 'late'`, and
+      `away_summaries` sends one "while you were away" for it ("BSE filings the PEAD tool
+      caught up on, first seen at HH:MM"), newest first at original times.
+    - Its stories are kept out of instant alerts like a catch-up's backlog, and a late
+      filing never triggers a follow-up. A late filing on a story BASIS already had is in
+      the summary at the filing's time.
+    - A late run replays no price moves: the live check was running.
+    - The very first pass of a new install records none: nobody was away.
+  - No BSE gap reporting (user, 2026-10-08): the PEAD tool catches up from when it was shut
+    down, and BASIS reads whatever it writes.
   - Filings are one per exchange: the identity is (exchange, symbol, time, subject), so a
     BSE copy of an NSE filing is its own row. Follow-ups are once per story, so a
     double filing can't send two. Alerts and the digest name the exchange.
-  - A catch-up counts BSE as covered only if the PEAD tool wrote after the gap began;
-    otherwise "BSE filings" is a possible gap, with when it last wrote. A missing or
-    unreadable file is logged once, not on every pass, and never fails a pass.
+  - A missing or unreadable file is logged once, not on every pass, and never fails a pass.
   - Tests never read the real file: the `settings` fixture sets it to None.
   - The PEAD tool is started by hand (`py pead_tool.py`); BSE flows only while it runs.
+    Auto-starting it is deferred (user, 2026-10-08).
 - **Scanner behaviour worth knowing:**
   - Only headlines naming a watchlist stock are stored, at any verdict.
   - One article seen through several feeds has one row and a sighting per feed. All the

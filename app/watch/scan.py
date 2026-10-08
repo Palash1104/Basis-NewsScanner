@@ -35,6 +35,7 @@ from app.llm.client import LLMClient
 from app.models import (
     FeedCheck,
     WatchArticle,
+    WatchCursor,
     WatchFiling,
     WatchMatch,
     WatchPrice,
@@ -49,6 +50,7 @@ from app.pipeline.embed import Embedder, article_text
 from app.pipeline.fetch import FetchedArticle, SourceResolver
 from app.watch.alerts import (
     Sender,
+    arrived_late,
     away_summaries,
     deliver,
     detect_now,
@@ -93,6 +95,8 @@ from app.watch.sources import (
 )
 
 log = logging.getLogger(__name__)
+# watch_cursors row for the PEAD tool's shared file: the last seq processed.
+BSE_CURSOR = "pead_announcements"
 
 # analyse comes after the news jobs, so what they just stored is called in the same tick;
 # alerts come last, so a call or a price made this tick is alerted this tick.
@@ -185,7 +189,6 @@ class Watcher:
         self._typical: tuple[date, dict[str, Typical]] | None = None
         self._typical_failed_at: datetime | None = None
         self._feed_health_at: datetime | None = None
-        self._bse_read_at: datetime | None = None
         self._bse_error: str | None = None
         # Set by `newsdesk watch --since`: catch up from here on the next feed scan.
         self.force_since: datetime | None = None
@@ -287,28 +290,25 @@ class Watcher:
         history: dict[str, tuple[list[Announcement], str | None]] = {}
         if gap is not None:
             history = asyncio.run(self._nse_history(gap, now))
-        shared = self._read_bse(gap, now)
-        result = self._process("feeds", reads, nse, now, history, shared)
+        shared = self._read_bse(now)
+        result = self._process("feeds", reads, nse, now, history, shared, gap is not None)
         if gap is not None:
-            self._record_catch_up(gap, reads, searches, nse, history, result, now, shared)
+            self._record_catch_up(gap, reads, searches, nse, history, result, now)
         return result
 
-    def _read_bse(self, gap: Gap | None, now: datetime) -> SharedRead | None:
-        """New rows in the PEAD tool's shared file since the last read (with a minute's
-        overlap), or since the gap's start after a gap, or the story window on a first read."""
+    def _read_bse(self, now: datetime) -> SharedRead | None:
+        """The rows the PEAD tool wrote since the last one processed (`watch_cursors`). It
+        catches up on its own after a restart, so BASIS needs no BSE catch-up of its own: what
+        it backfills is simply read on the next pass."""
         path = self.settings.watch.bse_announcements_db
         isins = {stock.isin: stock.symbol for stock in self.stocks if stock.isin}
         if not path or not isins:
             return None
-        if gap is not None:
-            since = gap.start
-        elif self._bse_read_at is not None:
-            since = self._bse_read_at - timedelta(minutes=1)
-        else:
-            since = now - timedelta(hours=self.settings.watch.story_window_hours)
-        shared = read_bse_announcements(Path(path), isins, since)
-        if shared.error is None:
-            self._bse_read_at = now
+        with self.session_factory() as session:
+            cursor = session.get(WatchCursor, BSE_CURSOR)
+            after = cursor.position if cursor else None
+        floor = now - timedelta(days=self.settings.watch.catch_up_max_days)
+        shared = read_bse_announcements(Path(path), isins, after, floor)
         if shared.error != self._bse_error:  # said once, not every pass
             if shared.error:
                 log.warning("BSE filings unavailable: %s", shared.error)
@@ -501,6 +501,7 @@ class Watcher:
         now: datetime,
         history: dict[str, tuple[list[Announcement], str | None]] | None = None,
         shared: SharedRead | None = None,
+        catch_up: bool = False,
     ) -> JobResult:
         result = JobResult(job)
         checks = [
@@ -586,6 +587,12 @@ class Watcher:
             session.add_all(new_filings)
             session.flush()
             result.stories_created = self._group(session, window, new_articles, new_filings, now)
+            if shared is not None and shared.position is not None:
+                # In the same transaction as the filings: a crash re-reads, never skips.
+                session.merge(
+                    WatchCursor(source=BSE_CURSOR, position=shared.position, updated_at=now)
+                )
+            self._record_late(session, new_filings, now, catch_up)
             session.commit()
         result.new_articles = len(new_articles)
         result.new_filings = len(new_filings)
@@ -724,6 +731,48 @@ class Watcher:
         # Oldest first, so a story's seed is the earliest filing.
         return sorted(fresh.values(), key=lambda pair: pair[1].filed_at)
 
+    def _record_late(
+        self, session: Session, filings: Sequence[WatchFiling], now: datetime, catch_up: bool
+    ) -> None:
+        """Filings that reached BASIS more than an hour after they were filed - the PEAD
+        tool backfilling BSE after it was started, typically - go into a "while you were
+        away" summary, never an alert of their own (user, 2026-10-08). A catch-up's own
+        summary already takes them; any other pass records a `late` run for one - except the
+        very first pass, which has nothing to be late against (a new install reads the day's
+        filings; nobody was away)."""
+        away = timedelta(minutes=self.settings.watch.away_after_minutes)
+        late = [filing for filing in filings if arrived_late(filing, away)]
+        if not late or catch_up:
+            return
+        earlier = session.scalar(
+            select(WatchRun.id).where(WatchRun.job == "feeds", WatchRun.started_at < now).limit(1)
+        )
+        if earlier is None:
+            return
+        session.add(
+            WatchRun(
+                job="late",
+                started_at=now,
+                finished_at=now,
+                new_filings=len(late),
+                errors=[],
+                details={
+                    "gap": {
+                        "start": min(f.filed_at for f in late).isoformat(),
+                        "end": now.isoformat(),
+                    },
+                    "exchanges": sorted({f.exchange for f in late}),
+                    "possible_gaps": [],
+                    "summary_sent": False,
+                },
+            )
+        )
+        log.info(
+            "%d filings arrived late (%s); they go into a summary",
+            len(late),
+            ", ".join(f"{f.exchange} {f.symbol}" for f in late),
+        )
+
     # ------------------------------------------------------------ catching up
 
     def _record_catch_up(
@@ -735,7 +784,6 @@ class Watcher:
         history: dict[str, tuple[list[Announcement], str | None]],
         result: JobResult,
         now: datetime,
-        shared: SharedRead | None = None,
     ) -> None:
         """What the catch-up reached, source by source, and what no source could: the
         "while you were away" summary is built from this row."""
@@ -793,23 +841,6 @@ class Watcher:
                 f"API failed for {', '.join(history_errors)}" if history_errors else "",
             )
         )
-        if shared is not None:
-            # The PEAD tool catches up on its own when it starts; BSE is covered only if it
-            # has written since the gap began.
-            alive = shared.newest_fetch is not None and shared.newest_fetch >= gap.start
-            note = shared.error or (
-                ""
-                if alive
-                else "the PEAD tool hasn't written since "
-                + (
-                    shared.newest_fetch.astimezone(self.settings.tz).strftime("%a %d %b %H:%M")
-                    if shared.newest_fetch
-                    else "it was set up"
-                )
-            )
-            sources.append(
-                SourceCoverage("bse", "BSE (via the PEAD tool)", gap.start if alive else None, note)
-            )
         sources.append(self._backfill_prices(gap, now))
 
         details = {

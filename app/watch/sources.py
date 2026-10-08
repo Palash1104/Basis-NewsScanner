@@ -337,42 +337,59 @@ async def fetch_nse_history(
 class SharedRead:
     """What one read of the PEAD tool's shared file found."""
 
-    found: list[tuple[str, "Announcement"]]  # (watchlist symbol, announcement)
-    newest_fetch: datetime | None  # when the PEAD tool last wrote anything (UTC)
+    found: list[tuple[str, "Announcement"]]  # (watchlist symbol, announcement), write order
+    position: int | None  # the last seq this read covered; None leaves the cursor alone
     error: str | None = None
 
 
-def read_bse_announcements(path: Path, isins: dict[str, str], since: datetime) -> SharedRead:
+def read_bse_announcements(
+    path: Path, isins: dict[str, str], after: int | None, floor: datetime
+) -> SharedRead:
     """BSE announcements by watchlist companies from the PEAD tool's shared SQLite file
-    (user, 2026-10-07: BSE's API answers BASIS with 403, the PEAD tool reads it fine). The
-    file is opened read-only; rows are matched on ISIN (`isins`: ISIN -> symbol) and taken
-    by when the PEAD tool wrote them, so an announcement it caught up on late still arrives.
-    Its times are the exchange's own clock (IST)."""
+    (user, 2026-10-07: BSE's API answers BASIS with 403, the PEAD tool reads it fine).
+
+    Rows are read by `seq`, the order the PEAD tool wrote them, after `after` - the last
+    seq already processed - and never by exchange time (user, 2026-10-08). A filing the tool
+    backfills after a restart (written at 09:30, filed at 02:00) is read like any other.
+    With no cursor yet, or one past the file's end (the file was recreated), the file is
+    read from the start and only filings since `floor` are kept. The file is opened
+    read-only; rows are matched on ISIN (`isins`: ISIN -> symbol). Times without a zone are
+    the exchange's own clock (IST)."""
     import sqlite3
 
     if not path.exists():
         return SharedRead([], None, f"the PEAD tool hasn't run yet: no {path.name}")
-    since_local = since.astimezone(NSE_TIMEZONE).replace(tzinfo=None).isoformat(timespec="seconds")
     try:
         conn = sqlite3.connect(f"file:{path.as_posix()}?mode=ro", uri=True, timeout=2)
         try:
-            newest = conn.execute("SELECT MAX(fetched_at) FROM announcements").fetchone()[0]
+            conn.execute("BEGIN")  # one snapshot for both reads
+            top = conn.execute("SELECT MAX(rowid) FROM announcements").fetchone()[0] or 0
+            # No cursor, or one past the end: a first read. Any real cursor - 0 included,
+            # left by a read of an empty file - keeps every row behind it, however old.
+            first_read = after is None or after > top
+            start = 0 if first_read else after
             marks = ",".join("?" * len(isins))
             rows = conn.execute(
-                "SELECT id, company, isin, category, headline, attachment_url, exchange_time "
-                f"FROM announcements WHERE exchange = 'BSE' AND isin IN ({marks}) "
-                "AND fetched_at >= ? ORDER BY exchange_time",
-                [*isins, since_local],
+                "SELECT company, category, headline, attachment_url, exchange_time, isin "
+                "FROM announcements WHERE rowid > ? AND rowid <= ? AND exchange = 'BSE' "
+                f"AND isin IN ({marks}) ORDER BY rowid",
+                [start, top, *isins],
             ).fetchall()
         finally:
             conn.close()
     except Exception as exc:
         return SharedRead([], None, f"{type(exc).__name__}: {exc}")
     found: list[tuple[str, Announcement]] = []
-    for _id, company, isin, category, headline, link, stamp in rows:
-        if not stamp:
+    for company, category, headline, link, stamp, isin in rows:
+        try:
+            filed = datetime.fromisoformat(stamp)
+        except (TypeError, ValueError):
+            continue  # no usable time: it can't be placed
+        if filed.tzinfo is None:
+            filed = filed.replace(tzinfo=NSE_TIMEZONE)
+        filed = filed.astimezone(UTC)
+        if first_read and filed < floor:
             continue
-        filed = datetime.fromisoformat(stamp).replace(tzinfo=NSE_TIMEZONE)
         found.append(
             (
                 isins[isin],
@@ -381,19 +398,14 @@ def read_bse_announcements(path: Path, isins: dict[str, str], since: datetime) -
                     subject=(category or "BSE announcement").strip(),
                     description=html_to_text(headline or ""),
                     link=link or "",
-                    filed_at=filed.astimezone(UTC),
+                    filed_at=filed,
                     kind="filing",
                     quoted_headline=None,
                     exchange="BSE",
                 ),
             )
         )
-    newest_fetch = (
-        datetime.fromisoformat(newest).replace(tzinfo=NSE_TIMEZONE).astimezone(UTC)
-        if newest
-        else None
-    )
-    return SharedRead(found, newest_fetch)
+    return SharedRead(found, top)
 
 
 def watched_announcements(

@@ -595,3 +595,15 @@ class WatchRun(Base):
     # The wake run's answers: did the timer fire, did the network come up, did a scan run
     # (app/watch/wake.py). Null on every other job.
     details: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+
+
+class WatchCursor(Base):
+    """How far the scanner has read a source it reads in order: for the PEAD tool's shared
+    file, the last `seq` processed. Written in the same transaction as what was read from it,
+    so a crash can neither skip rows nor store them twice."""
+
+    __tablename__ = "watch_cursors"
+
+    source: Mapped[str] = mapped_column(String(32), primary_key=True)
+    position: Mapped[int] = mapped_column(Integer)
+    updated_at: Mapped[datetime] = mapped_column(UTCDateTime)

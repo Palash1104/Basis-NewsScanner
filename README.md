@@ -343,7 +343,9 @@ used to improve Google's products. On Anthropic, `claude-haiku-4-5` costs a few 
   with 403, so BASIS reads the BSE announcements that `pead_tool.py` (in
   `Documents/resultscanner`) appends to its `announcements.db`, matched on ISIN and opened
   read-only (`watch.bse_announcements_db`). When that tool isn't running, BSE-only filings
-  are missed until it next starts and catches up, and a catch-up says so as a possible gap.
+  reach BASIS when it next starts and catches up. BASIS reads the file in the order rows were
+  written, so a filing backfilled hours late is never skipped; it arrives in one "while you
+  were away" message, not as an alert of its own.
 - **The digest holds at most 15 stories** (`delivery.max_stories_per_digest`). Summarized
   stories that don't make the cut aren't carried into the next digest unless they're
   summarized again.

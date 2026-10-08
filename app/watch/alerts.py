@@ -11,7 +11,9 @@ What reaches Telegram, and when:
   sector     one "defence sector move" when the peers moved together, instead of one each
   away       after a catch-up: ONE summary of what was first reported more than an hour
              before BASIS saw it, newest first, each with its original time, and any part of
-             the gap no source covered. Fresher items are alerted as usual.
+             the gap no source covered. Fresher items are alerted as usual. Filings that
+             reach BASIS late outside a catch-up (the PEAD tool backfilling BSE after it was
+             started) get one too, from their `late` run, and never an alert of their own.
   feed       a feed failing (errors in a row) or gone stale (nothing new for much longer
              than is usual for it, in the daytime)
 
@@ -60,6 +62,10 @@ SOURCES_SHOWN = 3
 DIGEST_STORIES = 8
 STALE_HISTORY = 12  # daytime checks of a feed before it can be called stale
 
+# Runs whose stories get a "while you were away" summary: catch-ups, and passes that read
+# filings late (app/watch/scan.py `_record_late`).
+SUMMARISED_JOBS = ("catchup", "late")
+
 Sender = Callable[[list[str]], None]
 # Between the messages of one alert in watch_alerts.text: never in a message itself.
 MESSAGE_SEPARATOR = "\x1e"
@@ -93,6 +99,13 @@ def _local(moment: datetime, settings: Settings, ref: datetime | None = None) ->
 
 
 # ---------------------------------------------------------------- what a story says
+
+
+def arrived_late(filing: WatchFiling, away: timedelta) -> bool:
+    """A filing BASIS first saw more than `away` after it was filed: read in a catch-up, or
+    backfilled by the PEAD tool after it was started. It belongs in a "while you were away"
+    summary, never an alert of its own."""
+    return filing.first_seen_at - filing.filed_at > away
 
 
 def first_reported(story: WatchStory) -> datetime:
@@ -208,23 +221,25 @@ def _sent_keys(session: Session, keys: Sequence[str]) -> set[str]:
 def _catch_up_passes(session: Session, since: datetime) -> list[WatchRun]:
     return list(
         session.scalars(
-            select(WatchRun).where(WatchRun.job == "catchup", WatchRun.started_at >= since)
+            select(WatchRun).where(WatchRun.job.in_(SUMMARISED_JOBS), WatchRun.started_at >= since)
         )
     )
 
 
-def _load_stories(session: Session, since: datetime) -> list[WatchStory]:
-    return list(
-        session.scalars(
-            select(WatchStory)
-            .where(WatchStory.first_seen_at >= since)
-            .options(
-                selectinload(WatchStory.articles).selectinload(WatchArticle.matches),
-                selectinload(WatchStory.articles).selectinload(WatchArticle.sightings),
-                selectinload(WatchStory.filings),
-            )
-        )
+def _load_stories(
+    session: Session, since: datetime | None = None, ids: Sequence[int] | None = None
+) -> list[WatchStory]:
+    """Stories first seen since `since`, or the stories `ids`, with what a message needs."""
+    statement = select(WatchStory).options(
+        selectinload(WatchStory.articles).selectinload(WatchArticle.matches),
+        selectinload(WatchStory.articles).selectinload(WatchArticle.sightings),
+        selectinload(WatchStory.filings),
     )
+    if since is not None:
+        statement = statement.where(WatchStory.first_seen_at >= since)
+    if ids is not None:
+        statement = statement.where(WatchStory.id.in_(list(ids)))
+    return list(session.scalars(statement))
 
 
 def news_alerts(
@@ -281,11 +296,17 @@ def followups(
         )
     ).all()
     calls = current_calls(session, [s.id for s in stories])
+    away = timedelta(minutes=settings.watch.away_after_minutes)
     out: list[Outgoing] = []
     for story in stories:
         alert = alerted[story.id]
         key = f"followup:{story.id}"
-        new = [f for f in story.filings if f.first_seen_at > alert.created_at]
+        # A filing that arrived late is in a "while you were away" summary instead.
+        new = [
+            f
+            for f in story.filings
+            if f.first_seen_at > alert.created_at and not arrived_late(f, away)
+        ]
         if key in done or not new:
             continue
         latest_filing = max(new, key=lambda f: f.first_seen_at)
@@ -526,18 +547,33 @@ def away_summaries(
     empty: list[WatchRun] = []
     away = timedelta(minutes=settings.watch.away_after_minutes)
     for run in session.scalars(
-        select(WatchRun).where(WatchRun.job == "catchup").order_by(WatchRun.started_at)
+        select(WatchRun).where(WatchRun.job.in_(SUMMARISED_JOBS)).order_by(WatchRun.started_at)
     ):
         details = run.details or {}
         if details.get("summary_sent"):
             continue
         gap_start = datetime.fromisoformat(details["gap"]["start"])
         gap_end = datetime.fromisoformat(details["gap"]["end"])
+        cutoff = run.started_at - away
+        # What this pass read: the stories it started, and any story that gained a filing
+        # it read late - whenever that was filed, even before the gap began (the PEAD tool
+        # backfilling BSE after a restart).
+        late_story_ids = set(
+            session.scalars(
+                select(WatchFiling.story_id).where(
+                    WatchFiling.first_seen_at == run.started_at,
+                    WatchFiling.filed_at < cutoff,
+                    WatchFiling.story_id.is_not(None),
+                )
+            )
+        )
         stories = [
             s
             for s in _load_stories(session, run.started_at - timedelta(seconds=1))
             if s.first_seen_at == run.started_at and kept_symbols(s)
         ]
+        if missing := late_story_ids - {s.id for s in stories}:
+            stories += _load_stories(session, ids=sorted(missing))
         calls = current_calls(session, [s.id for s in stories])
         unfinished = [s for s in stories if trigger_for(s, list(calls.get(s.id, {}).values()))]
         finished_at = run.finished_at or run.started_at
@@ -546,7 +582,16 @@ def away_summaries(
         items: list[tuple[datetime, str]] = []
         for story in stories:
             reported = first_reported(story)
-            if not gap_start <= reported < run.started_at - away:
+            late = [
+                f
+                for f in story.filings
+                if f.first_seen_at == run.started_at and f.filed_at < cutoff
+            ]
+            if story.first_seen_at == run.started_at and (gap_start <= reported < cutoff or late):
+                when = reported
+            elif late:  # a story BASIS already had: the item is the late filing
+                when = max(f.filed_at for f in late)
+            else:
                 continue
             visible = shown(calls.get(story.id, {}), list(names))
             if story.id in calls and not visible:
@@ -556,11 +601,11 @@ def away_summaries(
                 if visible
                 else _t(", ".join(names.get(s, s) for s in sorted(kept_symbols(story))))
             )
-            line = f"• <b>{_local(reported, settings, gap_end)}</b> · {head} — {_t(story.headline)}"
+            line = f"• <b>{_local(when, settings, gap_end)}</b> · {head} — {_t(story.headline)}"
             detail = _t(visible[0].reason) if visible else ""
             state = _t(story_state(story, settings))
-            items.append((reported, f"{line}\n  <i>{detail + ' · ' if detail else ''}{state}</i>"))
-        if typical:
+            items.append((when, f"{line}\n  <i>{detail + ' · ' if detail else ''}{state}</i>"))
+        if typical and run.job == "catchup":  # through a late run the live check was running
             for event in moves_in_period(
                 session, watchlist, typical, settings, gap_start, run.started_at
             ):
@@ -574,8 +619,15 @@ def away_summaries(
         if not items and not gaps:
             empty.append(run)
             continue
-        header = [
-            "<b>BASIS · while you were away</b>",
+        header = ["<b>BASIS · while you were away</b>"]
+        if run.job == "late":
+            seen = _local(run.started_at, settings)
+            header.append(
+                f"<i>BSE filings the PEAD tool caught up on, first seen at {seen}</i>"
+                if details.get("exchanges") == ["BSE"]
+                else f"<i>Filings that reached BASIS late, first seen at {seen}</i>"
+            )
+        header += [
             f"<i>{_local(gap_start, settings)} – {_local(gap_end, settings)} · "
             f"{len(items)} {'item' if len(items) == 1 else 'items'}, newest first</i>",
             "",
