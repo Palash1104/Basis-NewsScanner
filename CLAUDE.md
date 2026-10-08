@@ -207,6 +207,27 @@ review after each step:
     `newsdesk watch` process running, holding its lock, so a fresh start exits with
     "already running". End the tree from the wrapper instead (`taskkill /PID <run_task
     powershell pid> /T /F`), then `Start-ScheduledTask`.
+- **Catch-up instead of waking (user, 2026-10-08).**
+  - The wake task is disabled; `install_tasks.ps1` registers it only with `-WithWake`, and
+    the code stays.
+  - Whenever the scanner starts or wakes, it resumes from the start of its last completed
+    feed scan (`app/watch/catchup.py`), at most `watch.catch_up_max_days` (7) back.
+  - Verified reach, 2026-10-08:
+    - RSS feeds keep 7 h (Livemint markets, ET stocks) to days (BusinessLine 80 h,
+      CNBC-TV18 markets 68 h).
+    - Google News takes `when:6h` and `after:/before:` dates (10 days back worked).
+    - NSE's API per company and date range needs no cookies and went 30 days back.
+    - Yahoo's 1-minute bars cover the last 30 days, at most 8 days per request.
+  - A catch-up also searches Google News over the gap and asks NSE's API for each
+    company's filings since the gap's date. NSE's RSS only ever holds today, and the API's
+    rows match it (`an_dt` = pubDate), so filings are deduplicated on stock + time +
+    subject. It also backfills 5-minute prices from 1-minute bars (`watch_prices.backfill`).
+  - It writes a `watch_runs` row with `job = 'catchup'`, holding each source's reach and the
+    possible gaps no source could cover. The "while you were away" summary is built from
+    that row.
+  - `newsdesk watch --once --since "YYYY-MM-DD HH:MM"` forces one. First live run, from
+    22:00 the previous night: 5 filings from the API, 754 prices backfilled, no possible
+    gap.
 - **Scanner behaviour worth knowing:**
   - Only headlines naming a watchlist stock are stored, at any verdict.
   - One article seen through several feeds has one row and a sighting per feed. All the

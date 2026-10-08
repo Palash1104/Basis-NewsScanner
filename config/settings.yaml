@@ -221,6 +221,12 @@ watch:
   wake_start: "08:30"
   wake_end: "16:30"
   story_window_hours: 72
+  # After the laptop was off or asleep, the scanner reads back to its last completed scan,
+  # at most this far (NSE's API and Google News reach further; Yahoo's 1-minute bars 30 days).
+  catch_up_max_days: 7
+  # A catch-up item first reported longer ago than this goes into one "while you were away"
+  # summary; fresher ones are alerted as they would have been anyway.
+  away_after_minutes: 60
   benchmark: "^NSEI"
   # Feed health, as the warning would judge it (reported only at this step).
   feed_failing_after: 3 # failed checks in a row

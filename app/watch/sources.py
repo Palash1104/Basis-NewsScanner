@@ -11,7 +11,7 @@ import re
 import time
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Literal
 from urllib.parse import quote_plus
 from zoneinfo import ZoneInfo
@@ -136,8 +136,24 @@ async def read_feed(
     return read
 
 
-def google_news_queries(items: Sequence[WatchItem], settings: Settings) -> list[FeedConfig]:
-    """Every stock alias, quoted, OR-ed together a few at a time, over the last day.
+GOOGLE_NEWS_CAP = 100  # Google News returns at most this many items per search
+
+
+def google_news_window(since: datetime, now: datetime) -> str:
+    """The search operator covering `since` to now. Verified 2026-10-08: `when:6h` returns
+    only the last 6 hours and `after:/before:` dates reach back at least 10 days. Hours are
+    exact; past three days the date form is used, which may start up to a day early."""
+    hours = int((now - since).total_seconds() // 3600) + 1
+    if hours <= 72:
+        return f"when:{hours}h"
+    return f"after:{(since - timedelta(days=1)).date().isoformat()}"
+
+
+def google_news_queries(
+    items: Sequence[WatchItem], settings: Settings, window: str = "when:1d"
+) -> list[FeedConfig]:
+    """Every stock alias, quoted, OR-ed together a few at a time, over `window` (the last
+    day; a catch-up passes the missed period).
 
     Verified 2026-10-07: an OR query of five names returns results for all five (72 items),
     so the whole watchlist costs a handful of requests. The matcher then judges each
@@ -157,8 +173,8 @@ def google_news_queries(items: Sequence[WatchItem], settings: Settings) -> list[
         queries.append(
             FeedConfig(
                 name="Google News",
-                url=f"https://news.google.com/rss/search?q={quote_plus(query)}+when:1d"
-                f"&{settings.watch.google_news_edition}",
+                url=f"https://news.google.com/rss/search?q={quote_plus(query)}+"
+                f"{quote_plus(window)}&{settings.watch.google_news_edition}",
                 region="IN",
                 weight=1,
             )
@@ -209,23 +225,104 @@ def parse_nse_announcements(content: bytes) -> list[Announcement]:
         except ValueError:
             continue
         description, _, subject = raw.partition("|SUBJECT:")
-        description, subject = description.strip(), subject.strip()
-        quoted = _QUOTED.search(description)
-        kind: FilingKind = "filing"
-        if subject.casefold() == "news verification":
-            kind = "company_reply" if "is attached" in description else "clarification_sought"
         found.append(
-            Announcement(
-                company=company,
-                subject=subject or "(no subject)",
-                description=description,
-                link=(entry.get("link") or "").strip(),
-                filed_at=filed.astimezone(UTC),
-                kind=kind,
-                quoted_headline=quoted.group(1).strip() if quoted else None,
+            _announcement(
+                company,
+                subject.strip(),
+                description.strip(),
+                (entry.get("link") or "").strip(),
+                filed,
             )
         )
     return found
+
+
+def _announcement(
+    company: str, subject: str, description: str, link: str, filed: datetime
+) -> Announcement:
+    quoted = _QUOTED.search(description)
+    kind: FilingKind = "filing"
+    if subject.casefold() == "news verification":
+        kind = "company_reply" if "is attached" in description else "clarification_sought"
+    return Announcement(
+        company=company,
+        subject=subject or "(no subject)",
+        description=description,
+        link=link,
+        filed_at=filed.astimezone(UTC),
+        kind=kind,
+        quoted_headline=quoted.group(1).strip() if quoted else None,
+    )
+
+
+# NSE's announcements API, per company and date range. Verified 2026-10-08 with no cookies:
+# PFOCUS over the last 30 days returned 22 rows back to 08 Sep. Its fields match the RSS:
+# `an_dt` is the RSS pubDate, `desc` the subject, `attchmntText` the description. The RSS
+# holds only today, so a catch-up over earlier days reads this instead.
+NSE_API_URL = (
+    "https://www.nseindia.com/api/corporate-announcements"
+    "?index=equities&symbol={symbol}&from_date={from_date}&to_date={to_date}"
+)
+NSE_API_HEADERS = {
+    # NSE answers its API to a browser-like request; the Referer is the page that calls it.
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like "
+    "Gecko) Chrome/120 Safari/537.36",
+    "Accept": "application/json, text/plain, */*",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Referer": "https://www.nseindia.com/companies-listing/corporate-filings-announcements",
+}
+
+
+def parse_nse_api(rows: Sequence[dict]) -> list[Announcement]:
+    found = []
+    for row in rows:
+        stamp = str(row.get("an_dt") or "").strip()
+        try:
+            filed = datetime.strptime(stamp, NSE_TIME_FORMAT).replace(tzinfo=NSE_TIMEZONE)
+        except ValueError:
+            continue
+        link = str(row.get("attchmntFile") or "")
+        found.append(
+            _announcement(
+                html_to_text(str(row.get("sm_name") or "")),
+                html_to_text(str(row.get("desc") or "")).strip(),
+                html_to_text(str(row.get("attchmntText") or "")).strip(),
+                link if link.startswith("http") else "",
+                filed,
+            )
+        )
+    return found
+
+
+async def fetch_nse_history(
+    client: httpx.AsyncClient,
+    symbol: str,
+    since: datetime,
+    now: datetime,
+    settings: Settings,
+) -> tuple[list[Announcement], str | None]:
+    """One company's announcements from `since`'s date to today; (found, error)."""
+    url = NSE_API_URL.format(
+        symbol=quote_plus(symbol),
+        from_date=since.astimezone(NSE_TIMEZONE).strftime("%d-%m-%Y"),
+        to_date=now.astimezone(NSE_TIMEZONE).strftime("%d-%m-%Y"),
+    )
+    try:
+        response = await request_with_retries(
+            client,
+            "GET",
+            url,
+            max_attempts=settings.http.max_attempts,
+            backoff_base=settings.http.backoff_base_seconds,
+            headers=NSE_API_HEADERS,
+        )
+        if not response.is_success:
+            return [], f"HTTP {response.status_code}"
+        body = response.json()
+        rows = body if isinstance(body, list) else (body or {}).get("data") or []
+        return parse_nse_api(rows), None
+    except Exception as exc:
+        return [], f"{type(exc).__name__}: {exc}"
 
 
 def watched_announcements(

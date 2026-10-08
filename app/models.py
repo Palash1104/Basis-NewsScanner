@@ -469,6 +469,9 @@ class WatchPrice(Base):
     day_high: Mapped[float | None] = mapped_column(Float)
     day_low: Mapped[float | None] = mapped_column(Float)
     error: Mapped[str | None] = mapped_column(Text)
+    # Filled in afterwards from 1-minute bars by a catch-up, not polled live: polled_at is
+    # the end of the bar, and there is no last-trade time, so the lag report skips it.
+    backfill: Mapped[bool] = mapped_column(default=False)
 
 
 class WatchRun(Base):

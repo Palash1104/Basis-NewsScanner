@@ -324,6 +324,8 @@ class WatchSettings(_Strict):
         "https://nsearchives.nseindia.com/content/RSS/Online_announcements.xml"
     )
     story_window_hours: int = Field(default=72, gt=0)  # how long a story takes new articles
+    catch_up_max_days: int = Field(default=7, gt=0, le=29)  # Yahoo keeps 30 days of 1m bars
+    away_after_minutes: int = Field(default=60, gt=0)
     benchmark: str = "^NSEI"  # polled with the watch stocks, for the price-move alert later
     # Feed health: a feed is failing after this many failed checks in a row, and stale when
     # it has brought nothing new for this many hours inside the daytime window.

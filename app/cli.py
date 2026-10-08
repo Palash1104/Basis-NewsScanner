@@ -1385,6 +1385,14 @@ def watch(
             "doesn't).",
         ),
     ] = False,
+    since: Annotated[
+        str | None,
+        typer.Option(
+            "--since",
+            help="Catch up from this time (YYYY-MM-DD HH:MM, IST) on the first feed scan, as "
+            "if the laptop had been off since then.",
+        ),
+    ] = None,
 ) -> None:
     """The watchlist scanner: watch feeds and NSE filings every 10 minutes, Google News
     searches, and intraday prices in market hours. Stores what names a watchlist stock and
@@ -1420,6 +1428,10 @@ def watch(
             typer.echo("the watchlist scanner is already running; nothing to do")
             return
         watcher = make_watcher()
+        if since:
+            watcher.force_since = datetime.strptime(since, "%Y-%m-%d %H:%M").replace(
+                tzinfo=settings.tz
+            )
         if once:
             for result in watcher.tick(force=True):
                 typer.echo(result.line())

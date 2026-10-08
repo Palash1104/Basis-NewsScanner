@@ -109,6 +109,10 @@ ADDED_COLUMNS: dict[str, dict[str, str]] = {
         # Added 2026-10-08 for the wake test: what each market-hours wake found.
         "details": "JSON",
     },
+    "watch_prices": {
+        # Added 2026-10-08 with the catch-up: prices filled in from 1-minute bars.
+        "backfill": "BOOLEAN NOT NULL DEFAULT 0",
+    },
 }
 
 

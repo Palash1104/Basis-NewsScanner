@@ -45,17 +45,29 @@ from app.net import make_client
 from app.pipeline.dedupe import normalize_source, normalize_title
 from app.pipeline.embed import Embedder, article_text
 from app.pipeline.fetch import FetchedArticle, SourceResolver
+from app.watch.catchup import Gap, SourceCoverage, find_gap, possible_gaps
 from app.watch.group import StoryGrouper
 from app.watch.match import Match, Matcher
 from app.watch.power import keep_awake, on_ac_power
-from app.watch.prices import SnapshotProvider, in_market_hours, price_symbols
+from app.watch.prices import (
+    MINUTE_HISTORY,
+    HistoryProvider,
+    SnapshotProvider,
+    YahooHistory,
+    backfill_rows,
+    in_market_hours,
+    price_symbols,
+)
 from app.watch.sources import (
+    GOOGLE_NEWS_CAP,
     Announcement,
     FeedRead,
     Fetched,
     Validators,
     conditional_get,
+    fetch_nse_history,
     google_news_queries,
+    google_news_window,
     parse_nse_announcements,
     read_feed,
     watched_announcements,
@@ -117,6 +129,7 @@ class Watcher:
         snapshots: SnapshotProvider | None,
         transport: httpx.AsyncBaseTransport | None = None,
         clock: Callable[[], datetime] = utcnow,
+        history: HistoryProvider | None = None,
     ) -> None:
         self.settings = settings
         self.session_factory = session_factory
@@ -135,6 +148,11 @@ class Watcher:
         self.carried: dict[str, set[str]] = {}
         self._vectors: dict[str, np.ndarray] = {}
         self.last_run: dict[str, datetime] = {}
+        self.history = history
+        # Set by `newsdesk watch --since`: catch up from here on the next feed scan.
+        self.force_since: datetime | None = None
+        # The feeds whose health is tracked: not the one-off catch-up searches.
+        self._checked = {feed.url for feed in [*self.feeds, *self.queries]}
 
     # ------------------------------------------------------------ scheduling
 
@@ -207,8 +225,52 @@ class Watcher:
     # ------------------------------------------------------------ jobs
 
     def scan_feeds(self, now: datetime) -> JobResult:
-        reads, nse = asyncio.run(self._fetch(self.feeds, include_nse=True, now=now))
-        return self._process("feeds", reads, nse, now)
+        """The watch feeds and NSE's announcements. After the laptop was off or asleep, also
+        the catch-up: Google News over the missed period, NSE's API for the missed days and
+        1-minute prices (app/watch/catchup.py)."""
+        gap = self.find_gap(now)
+        searches = (
+            google_news_queries(self.stocks, self.settings, google_news_window(gap.start, now))
+            if gap is not None
+            else []
+        )
+        reads, nse = asyncio.run(self._fetch([*self.feeds, *searches], include_nse=True, now=now))
+        history: dict[str, tuple[list[Announcement], str | None]] = {}
+        if gap is not None:
+            history = asyncio.run(self._nse_history(gap, now))
+        result = self._process("feeds", reads, nse, now, history)
+        if gap is not None:
+            self._record_catch_up(gap, reads, searches, nse, history, result, now)
+        return result
+
+    def find_gap(self, now: datetime) -> Gap | None:
+        """What the scanner missed: everything since its last completed feed scan started."""
+        every = timedelta(minutes=self.settings.watch.feeds_every_minutes)
+        if self.force_since is not None:
+            since, self.force_since = self.force_since, None
+            return Gap(since, now, since)
+        with self.session_factory() as session:
+            last = session.scalar(
+                select(WatchRun.started_at)
+                .where(WatchRun.job == "feeds", WatchRun.entries > 0, WatchRun.started_at < now)
+                .order_by(WatchRun.started_at.desc())
+                .limit(1)
+            )
+        return find_gap(last, now, every, self.settings.watch.catch_up_max_days)
+
+    async def _nse_history(
+        self, gap: Gap, now: datetime
+    ) -> dict[str, tuple[list[Announcement], str | None]]:
+        """Each company's NSE announcements over the gap's days, one request per company."""
+        stocks = [stock for stock in self.stocks if stock.nse_symbol]
+        async with make_client(self.settings.http, transport=self.transport) as client:
+            found = await asyncio.gather(
+                *(
+                    fetch_nse_history(client, stock.nse_symbol or "", gap.start, now, self.settings)
+                    for stock in stocks
+                )
+            )
+        return {stock.symbol: pair for stock, pair in zip(stocks, found, strict=True)}
 
     def scan_google_news(self, now: datetime) -> JobResult:
         reads, _ = asyncio.run(self._fetch(self.queries, include_nse=False, now=now))
@@ -273,10 +335,19 @@ class Watcher:
     # ------------------------------------------------------------ storing
 
     def _process(
-        self, job: str, reads: list[FeedRead], nse: Fetched | None, now: datetime
+        self,
+        job: str,
+        reads: list[FeedRead],
+        nse: Fetched | None,
+        now: datetime,
+        history: dict[str, tuple[list[Announcement], str | None]] | None = None,
     ) -> JobResult:
         result = JobResult(job)
-        checks = [self._feed_check(read.feed, read.fetched, read.articles, now) for read in reads]
+        checks = [
+            self._feed_check(read.feed, read.fetched, read.articles, now)
+            for read in reads
+            if read.feed.url in self._checked
+        ]
         candidates: list[_Candidate] = []
         for read in reads:
             result.entries += len(read.articles)
@@ -317,6 +388,10 @@ class Watcher:
             announcements = [
                 (item.symbol, found) for item, found in watched_announcements(parsed, self.stocks)
             ]
+        for symbol, (found, error) in (history or {}).items():
+            announcements += [(symbol, item) for item in found]
+            if error:
+                result.errors.append({"stage": "nse history", "symbol": symbol, "error": error})
 
         with self.session_factory() as session:
             window = self._window_members(session, now)
@@ -461,16 +536,165 @@ class Watcher:
     def _unseen_filings(
         self, session: Session, announcements: Sequence[tuple[str, Announcement]]
     ) -> list[tuple[str, Announcement]]:
-        keys = [found.key for _, found in announcements]
-        if not keys:
+        """The announcements not stored yet. The same one arrives from the RSS and, in a
+        catch-up, from the API: it is the same filing when the company, the time and the
+        subject agree."""
+        if not announcements:
             return []
-        known = set(session.scalars(select(WatchFiling.key).where(WatchFiling.key.in_(keys))))
-        fresh: dict[str, tuple[str, Announcement]] = {}
+        symbols = {symbol for symbol, _ in announcements}
+        earliest = min(found.filed_at for _, found in announcements)
+        known = {
+            (symbol, filed_at, subject.casefold())
+            for symbol, filed_at, subject in session.execute(
+                select(WatchFiling.symbol, WatchFiling.filed_at, WatchFiling.subject).where(
+                    WatchFiling.symbol.in_(symbols), WatchFiling.filed_at >= earliest
+                )
+            )
+        }
+        fresh: dict[tuple[str, datetime, str], tuple[str, Announcement]] = {}
         for symbol, found in announcements:
-            if found.key not in known:
-                fresh.setdefault(found.key, (symbol, found))
+            identity = (symbol, found.filed_at, found.subject.casefold())
+            if identity not in known:
+                fresh.setdefault(identity, (symbol, found))
         # Oldest first, so a story's seed is the earliest filing.
         return sorted(fresh.values(), key=lambda pair: pair[1].filed_at)
+
+    # ------------------------------------------------------------ catching up
+
+    def _record_catch_up(
+        self,
+        gap: Gap,
+        reads: Sequence[FeedRead],
+        searches: Sequence[FeedConfig],
+        nse: Fetched | None,
+        history: dict[str, tuple[list[Announcement], str | None]],
+        result: JobResult,
+        now: datetime,
+    ) -> None:
+        """What the catch-up reached, source by source, and what no source could: the
+        "while you were away" summary is built from this row."""
+        sources: list[SourceCoverage] = []
+        search_urls = {feed.url for feed in searches}
+        for read in reads:
+            if read.feed.url in search_urls:
+                continue
+            fetched = read.fetched
+            if fetched.status == "not_modified":
+                # Unchanged since the last fetch, which was before the gap: nothing missed.
+                reached: datetime | None = gap.start
+            elif fetched.status == "ok" and read.articles:
+                reached = min(article.published_at for article in read.articles)
+            else:
+                reached = None
+            sources.append(
+                SourceCoverage(
+                    "news", f"{read.feed.name} ({read.feed.url})", reached, fetched.error or ""
+                )
+            )
+        searched = [read for read in reads if read.feed.url in search_urls]
+        failed = [read for read in searched if read.fetched.error]
+        capped = [read for read in searched if len(read.articles) >= GOOGLE_NEWS_CAP]
+        if failed or not searched:
+            sources.append(
+                SourceCoverage("news", "Google News", None, f"{len(failed)} searches failed")
+            )
+        elif capped:
+            oldest = max(min(a.published_at for a in read.articles) for read in capped)
+            sources.append(
+                SourceCoverage(
+                    "news", "Google News", oldest, f"{len(capped)} searches hit the 100-result cap"
+                )
+            )
+        else:
+            sources.append(SourceCoverage("news", "Google News", gap.start))
+
+        midnight = now.astimezone(self.settings.tz).replace(
+            hour=0, minute=0, second=0, microsecond=0
+        )
+        history_errors = [symbol for symbol, (_, error) in history.items() if error]
+        rss_ok = nse is not None and nse.error is None
+        if gap.start >= midnight and rss_ok:
+            nse_reached: datetime | None = gap.start
+        elif history and not history_errors:
+            nse_reached = gap.start
+        else:
+            nse_reached = midnight if rss_ok else None
+        sources.append(
+            SourceCoverage(
+                "filings",
+                "NSE",
+                nse_reached,
+                f"API failed for {', '.join(history_errors)}" if history_errors else "",
+            )
+        )
+        sources.append(self._backfill_prices(gap, now))
+
+        details = {
+            "gap": {"start": gap.start.isoformat(), "end": gap.end.isoformat()},
+            "sources": [source.as_dict() for source in sources],
+            "possible_gaps": possible_gaps(gap, sources),
+            "summary_sent": False,
+        }
+        with self.session_factory() as session:
+            session.add(
+                WatchRun(
+                    job="catchup",
+                    started_at=now,
+                    finished_at=self.clock(),
+                    entries=result.entries,
+                    new_articles=result.new_articles,
+                    new_filings=result.new_filings,
+                    errors=result.errors,
+                    details=details,
+                )
+            )
+            session.commit()
+        log.info(
+            "catch-up from %s: %d new articles, %d new filings, possible gaps: %s",
+            gap.start.astimezone(self.settings.tz).strftime("%a %d %b %H:%M"),
+            result.new_articles,
+            result.new_filings,
+            details["possible_gaps"] or "none",
+        )
+
+    def _backfill_prices(self, gap: Gap, now: datetime) -> SourceCoverage:
+        """Prices for the missed sessions from Yahoo's 1-minute bars, one row every
+        `prices_every_minutes` like the live polls, so "moved, no story yet" can be checked
+        for the time the laptop was off."""
+        if self.history is None:
+            return SourceCoverage("prices", "Yahoo 1-minute bars", None, "no price source")
+        start = max(gap.start, now - MINUTE_HISTORY)
+        every = self.settings.watch.prices_every_minutes
+        indices = [group.index for group in self.watchlist.groups.values() if group.index]
+        symbols = price_symbols(
+            [stock.symbol for stock in self.stocks], indices, self.settings.watch.benchmark
+        )
+        rows: list[WatchPrice] = []
+        failures: list[str] = []
+        for symbol in symbols:
+            try:
+                closes = self.history.session_closes(symbol, 40)
+                bars = self.history.minute_closes(symbol, start, now)
+            except Exception as exc:
+                failures.append(f"{symbol}: {type(exc).__name__}")
+                continue
+            rows += backfill_rows(symbol, bars, closes, every, self.settings)
+        with self.session_factory() as session:
+            have = {
+                (symbol, polled)
+                for symbol, polled in session.execute(
+                    select(WatchPrice.symbol, WatchPrice.polled_at).where(
+                        WatchPrice.polled_at >= start
+                    )
+                )
+            }
+            session.add_all(row for row in rows if (row.symbol, row.polled_at) not in have)
+            session.commit()
+        note = f"{len(rows)} prices filled in"
+        if failures:
+            note += f"; failed: {', '.join(failures)}"
+        reached = start if len(failures) < len(symbols) else None
+        return SourceCoverage("prices", "Yahoo 1-minute bars", reached, note)
 
     # ------------------------------------------------------------ grouping
 
@@ -639,6 +863,7 @@ def build_watcher(
         resolver,
         embedder,
         snapshots,
+        history=YahooHistory(),
     )
 
 
