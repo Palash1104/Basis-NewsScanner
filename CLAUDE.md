@@ -182,12 +182,31 @@ review after each step:
     extraction for low-yield categories come with step 3, the first step that calls the
     LLM.
   - **Wake caveat:**
-    - This laptop uses Modern Standby (S0 Low Power Idle), with networking off in standby.
-    - Wake timers are enabled on AC and DC, yet none of roughly 30 overnight `WakeToRun`
-      pipeline slots fired between 2026-09-28 and 2026-10-08. Every resume was from the
-      power button or the lid ("Wake Source: Unknown").
-    - The wake task records each run (`watch_runs.job = 'wake'`: on AC, whether a pass
-      ran, network up or down). The report shows whether it ever worked.
+    - This laptop supports Modern Standby (S0 Low Power Idle), with networking off in
+      standby. But Windows's resume log (Power-Troubleshooter event 1) shows it actually
+      **hibernates** when the lid closes or the power button is pressed (TargetState 5).
+    - Most nights are a Start-menu **shutdown** (User32 1074, TargetState 6, logged as
+      hibernation by Fast Startup). After a shutdown nothing runs: wake timers don't fire,
+      and the tasks need the user logged in. That is why the overnight pipeline slots were
+      missed.
+    - Wake timers are enabled on AC and DC, yet no resume between 2026-09-28 and
+      2026-10-08 had a timer as its source.
+    - Each wake run answers three questions, in `watch_runs.details` and in
+      `data/logs/tasks/watch-wake.log` (`app/watch/wake.py`):
+      - fired: what Windows says woke the laptop for this run
+      - network: up, and after how many seconds
+      - scan: whether one ran, by the resident scanner or by the wake task itself
+    - `newsdesk wake-log [--days 1]` gives a verdict per weekday morning: fired, or
+      "did not fire: the laptop was hibernating from X until Y, woken by...". It is built
+      from Windows's resume log, so a timer that never fired still shows.
+    - The first test is the night of 2026-10-08: plugged in, lid closed, until after 08:30
+      Friday.
+    - The network probe sends the scanner's User-Agent. NSE leaves a request with httpx's
+      default one unanswered until it times out, which read as "network down".
+  - **Restarting the scanner:** `Stop-ScheduledTask` ends the wscript launcher but leaves the
+    `newsdesk watch` process running, holding its lock, so a fresh start exits with
+    "already running". End the tree from the wrapper instead (`taskkill /PID <run_task
+    powershell pid> /T /F`), then `Start-ScheduledTask`.
 - **Scanner behaviour worth knowing:**
   - Only headlines naming a watchlist stock are stored, at any verdict.
   - One article seen through several feeds has one row and a sighting per feed. All the
@@ -231,6 +250,7 @@ uv run newsdesk health [--days 7]              # scheduler slots, LLM budgets, l
 uv run python scripts/watch_alias_review.py [--refresh]   # every watchlist keep/mention/drop -> data/watch_alias_review.md
 uv run newsdesk watch [--once | --wake]       # the watchlist scanner (resident; no LLM calls)
 uv run newsdesk watch-report [--days 3]       # scanner volumes, first sources, feed health -> data/watch_report.md
+uv run newsdesk wake-log [--days 1]           # did the market-hours wake fire, network, scan; per weekday morning
 powershell -ExecutionPolicy Bypass -File scripts/install_tasks.ps1 [-Remove]   # Windows tasks
 ```
 
@@ -245,7 +265,8 @@ powershell -ExecutionPolicy Bypass -File scripts/install_tasks.ps1 [-Remove]   #
 - `app/watch/scan.py` the scanner (`Watcher`: feeds, google_news and prices jobs, storing,
   grouping) · `sources.py` conditional GETs, Google News queries, NSE announcements ·
   `group.py` the cross-stock story grouper · `prices.py` intraday polls, market hours ·
-  `power.py` AC or battery · `report.py` `newsdesk watch-report`
+  `power.py` AC or battery, keep-awake, Windows's resume log · `wake.py` the wake run ·
+  `report.py` `newsdesk watch-report` and the wake section
 - `app/assets.py` ticker validation (yfinance), stored checks, the unvalidated-symbol warning,
   `benchmark_for` (by exchange)
 - `app/config.py` pydantic models for config, `.env` loading

@@ -60,7 +60,7 @@ from app.llm.client import (
 )
 from app.llm.prompts import IMPACT_PROMPT_VERSION
 from app.locks import job_lock
-from app.models import Article, FeedCheck, RuleDisagreementRow, Run, Story, utcnow
+from app.models import Article, FeedCheck, RuleDisagreementRow, Run, Story, WatchRun, utcnow
 from app.net import make_client
 from app.pipeline.classify import non_news_reason
 from app.pipeline.cluster import GroupingResult, assign_to_stories
@@ -115,10 +115,11 @@ from app.schedule import (
     settings_for_run,
     start_of_news_day,
 )
-from app.watch.power import on_ac_power
+from app.watch.power import keep_awake, on_ac_power, recent_resumes
 from app.watch.prices import YahooSnapshots
-from app.watch.report import watch_report
-from app.watch.scan import build_watcher, record_wake, run_forever
+from app.watch.report import wake_section, watch_report
+from app.watch.scan import Watcher, build_watcher, run_forever
+from app.watch.wake import probe_network, run_wake
 
 log = logging.getLogger("newsdesk")
 
@@ -1379,8 +1380,9 @@ def watch(
         bool,
         typer.Option(
             "--wake",
-            help="For the market-hours wake task: record the wake, and do one pass unless the "
-            "resident scanner is already running.",
+            help="For the market-hours wake task: record whether the wake timer fired, whether "
+            "the network came up and whether a scan ran (doing one if the resident scanner "
+            "doesn't).",
         ),
     ] = False,
 ) -> None:
@@ -1388,28 +1390,39 @@ def watch(
     searches, and intraday prices in market hours. Stores what names a watchlist stock and
     groups it into stories. Makes no LLM calls."""
     settings, session_factory = _bootstrap()
-    started = utcnow()
-    on_ac = on_ac_power()
-    with job_lock(_lock_dir(settings), "watch") as acquired:
-        if not acquired:
-            if wake:
-                record_wake(
-                    session_factory, started, on_ac, None, "the resident scanner is running"
-                )
-            typer.echo("the watchlist scanner is already running; nothing to do")
-            return
+
+    def make_watcher() -> Watcher:
         embedder: Embedder | None = None
         if settings.grouping.method == "embedding":
             embedder, unavailable = load_embedder(settings.grouping.embedding_model)
             if unavailable:
                 typer.echo(f"embedding model unavailable, so no grouping: {unavailable}")
-        watcher = build_watcher(settings, session_factory, embedder, YahooSnapshots())
-        if once or wake:
-            results = watcher.tick(force=True)
-            for result in results:
+        return build_watcher(settings, session_factory, embedder, YahooSnapshots())
+
+    if wake:
+        with keep_awake():  # the laptop must not drop back to sleep mid-check
+            outcome = run_wake(
+                settings,
+                session_factory,
+                _lock_dir(settings),
+                lambda: make_watcher().tick(force=True),
+                on_ac=on_ac_power(),
+                resumes=recent_resumes,
+                probe=lambda: probe_network(
+                    settings.watch.nse_announcements_url, settings.http.user_agent
+                ),
+            )
+        for line in outcome.lines:
+            typer.echo(line)
+        return
+    with job_lock(_lock_dir(settings), "watch") as acquired:
+        if not acquired:
+            typer.echo("the watchlist scanner is already running; nothing to do")
+            return
+        watcher = make_watcher()
+        if once:
+            for result in watcher.tick(force=True):
                 typer.echo(result.line())
-            if wake:
-                record_wake(session_factory, started, on_ac, results)
             return
         typer.echo(
             f"watching {len(watcher.stocks)} stocks: {len(watcher.feeds)} feeds + NSE every "
@@ -1432,11 +1445,31 @@ def watch_report_command(
     sources, feed health, Yahoo's lag. Writes data/watch_report.md."""
     settings, session_factory = _bootstrap()
     with session_factory() as session:
-        text = watch_report(session, settings, load_watchlist_file(), utcnow(), days)
+        text = watch_report(
+            session, settings, load_watchlist_file(), utcnow(), days, recent_resumes()
+        )
     path = settings.resolve_path("data/watch_report.md")
     path.write_text(text, encoding="utf-8")
     typer.echo(text)
     typer.echo(f"written to {path}")
+
+
+@app.command("wake-log")
+def wake_log(
+    days: Annotated[int, typer.Option("--days", min=1, help="How many days back to show.")] = 1,
+) -> None:
+    """Did the market-hours wake work? Each wake run (fired, network, scan) and every time
+    Windows resumed, with what woke it. Reads the database and the event log only."""
+    settings, session_factory = _bootstrap()
+    now = utcnow()
+    with session_factory() as session:
+        runs = session.scalars(
+            select(WatchRun)
+            .where(WatchRun.started_at >= now - timedelta(days=days))
+            .order_by(WatchRun.started_at)
+        ).all()
+        for line in wake_section(runs, recent_resumes(), settings, now - timedelta(days=days), now):
+            typer.echo(line)
 
 
 # ---------------------------------------------------------------- tickers

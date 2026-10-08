@@ -485,3 +485,6 @@ class WatchRun(Base):
     new_articles: Mapped[int] = mapped_column(Integer, default=0)
     new_filings: Mapped[int] = mapped_column(Integer, default=0)
     errors: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
+    # The wake run's answers: did the timer fire, did the network come up, did a scan run
+    # (app/watch/wake.py). Null on every other job.
+    details: Mapped[dict[str, Any] | None] = mapped_column(JSON)

@@ -47,7 +47,7 @@ from app.pipeline.embed import Embedder, article_text
 from app.pipeline.fetch import FetchedArticle, SourceResolver
 from app.watch.group import StoryGrouper
 from app.watch.match import Match, Matcher
-from app.watch.power import on_ac_power
+from app.watch.power import keep_awake, on_ac_power
 from app.watch.prices import SnapshotProvider, in_market_hours, price_symbols
 from app.watch.sources import (
     Announcement,
@@ -64,6 +64,7 @@ from app.watch.sources import (
 log = logging.getLogger(__name__)
 
 JOBS = ("feeds", "google_news", "prices")
+RETRY_AFTER_FAILURE = timedelta(minutes=1)  # after a pass in which every source failed
 NSE_FEED_NAME = "NSE announcements"
 # Two sightings are one article when the outlet is the same and the titles this close: a
 # CNBC-TV18 story reached through its own RSS and through Google News.
@@ -170,7 +171,13 @@ class Watcher:
             if not force and not self.due(job, now):
                 continue
             self.last_run[job] = now
-            results.append(self.run_job(job, now))
+            result = self.run_job(job, now)
+            results.append(result)
+            every = self.interval(job, now)
+            if job != "prices" and result.entries == 0 and result.errors and every:
+                # Nothing answered - no network yet, typically right after a wake. Try again
+                # in a minute rather than a whole interval later.
+                self.last_run[job] = now - every + RETRY_AFTER_FAILURE
         return results
 
     def run_job(self, job: str, now: datetime) -> JobResult:
@@ -643,42 +650,13 @@ def run_forever(
     """Run due jobs until stopped. A job's failure is logged and recorded, never fatal."""
     while not should_stop():
         try:
-            for result in watcher.tick():
-                log.info("watch %s", result.line())
+            # Held only while jobs run: a scan that starts finishes before the laptop sleeps.
+            with keep_awake():
+                for result in watcher.tick():
+                    log.info("watch %s", result.line())
         except Exception:  # anything tick itself didn't catch: log it and keep going
             log.exception("watch tick failed")
         sleep(TICK_SECONDS)
-
-
-def record_wake(
-    session_factory: sessionmaker[Session],
-    started_at: datetime,
-    on_ac: bool | None,
-    results: Sequence[JobResult] | None,
-    skipped: str | None = None,
-) -> None:
-    """What the market-hours wake task found: whether it ran a pass, and whether the
-    network was there (the laptop's standby turns networking off)."""
-    errors: list[dict[str, Any]] = []
-    if skipped:
-        errors.append({"stage": "skipped", "error": skipped})
-    feeds = next((r for r in results or [] if r.job == "feeds"), None)
-    if feeds is not None and feeds.entries == 0 and feeds.errors:
-        errors.append({"stage": "network", "error": feeds.errors[0].get("error")})
-    with session_factory() as session:
-        session.add(
-            WatchRun(
-                job="wake",
-                started_at=started_at,
-                finished_at=utcnow(),
-                on_ac=on_ac,
-                entries=feeds.entries if feeds else 0,
-                new_articles=sum(r.new_articles for r in results or []),
-                new_filings=sum(r.new_filings for r in results or []),
-                errors=errors,
-            )
-        )
-        session.commit()
 
 
 def _match_row(match: Match) -> WatchMatch:

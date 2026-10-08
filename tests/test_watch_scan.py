@@ -29,7 +29,7 @@ from app.pipeline.fetch import FeedResult, SourceResolver
 from app.watch.group import StoryGrouper
 from app.watch.prices import Snapshot, in_market_hours
 from app.watch.report import watch_report
-from app.watch.scan import Watcher, record_wake
+from app.watch.scan import Watcher
 from app.watch.sources import (
     Validators,
     company_key,
@@ -44,6 +44,7 @@ from tests.fakes import FakeEmbedder
 T0 = datetime(2026, 10, 8, 6, 0, tzinfo=UTC)
 FEED_URL = "https://markets.example.com/rss.xml"
 NSE_URL = "https://nsearchives.nseindia.com/content/RSS/Online_announcements.xml"
+RSS = {"Content-Type": "application/rss+xml; charset=utf-8"}  # as the real feeds send it
 
 NSE_XML = read_fixture("nse_announcements.xml").decode("utf-8")
 
@@ -120,15 +121,17 @@ class Web:
     def __call__(self, request: httpx.Request) -> httpx.Response:
         self.requests.append(request)
         if request.url.host == "news.google.com":
-            return httpx.Response(200, text=self.google)
+            return httpx.Response(200, text=self.google, headers=RSS)
         if str(request.url) == NSE_URL:
             if request.headers.get("if-modified-since"):
                 return httpx.Response(304)
             return httpx.Response(
-                200, text=NSE_XML, headers={"Last-Modified": "Thu, 08 Oct 2026 05:59:00 GMT"}
+                200,
+                text=NSE_XML,
+                headers={**RSS, "Last-Modified": "Thu, 08 Oct 2026 05:59:00 GMT"},
             )
         if str(request.url) == FEED_URL:
-            return httpx.Response(200, text=self.feed)
+            return httpx.Response(200, text=self.feed, headers=RSS)
         return httpx.Response(404)
 
 
@@ -476,6 +479,25 @@ def test_the_tick_runs_each_job_when_it_is_due(
     assert [r.job for r in watcher.tick()] == ["feeds"]
 
 
+def test_a_pass_where_nothing_answered_is_retried_a_minute_later(
+    settings: Settings, db: sessionmaker[Session], watchlist: WatchlistFile
+) -> None:
+    """No network yet, right after a wake: don't wait a whole interval to try again."""
+    settings.http.max_attempts = 1  # no real backoff waits in a test
+    clock = Clock(datetime(2026, 10, 8, 14, 0, tzinfo=UTC))  # evening: no prices
+    offline = httpx.MockTransport(
+        lambda request: (_ for _ in ()).throw(httpx.ConnectError("no route"))
+    )
+    watcher = make_watcher(settings, db, watchlist, Web(), clock)
+    watcher.transport = offline
+    assert [r.job for r in watcher.tick()] == ["feeds", "google_news"]
+    clock.now += timedelta(minutes=1)
+    watcher.transport = httpx.MockTransport(Web())
+    assert [r.job for r in watcher.tick()] == ["feeds", "google_news"]
+    clock.now += timedelta(minutes=1)
+    assert watcher.tick() == []  # this time it worked: back to the normal interval
+
+
 # ---------------------------------------------------------------- health, wake, report
 
 
@@ -489,14 +511,6 @@ def test_the_pipeline_records_a_check_for_every_feed() -> None:
         ("A", "ok", 200, "pipeline"),
         ("B", "error", 403, "pipeline"),
     ]
-
-
-def test_a_wake_records_what_it_found(db: sessionmaker[Session]) -> None:
-    record_wake(db, T0, True, None, "the resident scanner is running")
-    with db() as session:
-        run = session.scalars(select(WatchRun)).one()
-        assert run.job == "wake" and run.on_ac is True
-        assert run.errors == [{"stage": "skipped", "error": "the resident scanner is running"}]
 
 
 def test_the_report_counts_volumes_multi_stock_stories_and_first_sources(
@@ -523,7 +537,7 @@ def test_the_report_counts_volumes_multi_stock_stories_and_first_sources(
     assert "1 story counted, 3 left out as backlog" in text
     assert "| Markets Daily | 1 |" in text
     assert "| HAL.NS | 1 | 0 |" in text  # one poll, no errors
-    assert "The wake task never ran" in text
+    assert "None: the task never ran" in text
 
 
 # ---------------------------------------------------------------- config

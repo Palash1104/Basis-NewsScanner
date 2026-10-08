@@ -105,6 +105,10 @@ ADDED_COLUMNS: dict[str, dict[str, str]] = {
         # Added in Phase 4: trading-day counting needs each exchange's time zone.
         "timezone": "VARCHAR(48)",
     },
+    "watch_runs": {
+        # Added 2026-10-08 for the wake test: what each market-hours wake found.
+        "details": "JSON",
+    },
 }
 
 

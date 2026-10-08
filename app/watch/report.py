@@ -28,6 +28,7 @@ from app.models import (
     WatchRun,
     WatchStory,
 )
+from app.watch.power import Resume
 
 VERDICT_ORDER = {"keep": 0, "mention": 1, "drop": 2}
 VERDICTS = ("keep", "mention", "drop")
@@ -70,7 +71,12 @@ def _clock(value: str) -> time:
 
 
 def watch_report(
-    session: Session, settings: Settings, watchlist: WatchlistFile, now: datetime, days: int
+    session: Session,
+    settings: Settings,
+    watchlist: WatchlistFile,
+    now: datetime,
+    days: int,
+    resumes: Sequence[Resume] = (),
 ) -> str:
     since = now - timedelta(days=days)
     names = {stock.symbol: stock.name or stock.symbol for stock in watchlist.stocks}
@@ -123,7 +129,7 @@ def watch_report(
     )
     lines += _price_lag(prices, settings)
     lines += _moves(prices, watchlist, settings)
-    lines += _wakes(runs, settings)
+    lines += wake_section(runs, resumes, settings, since, now)
     return "\n".join(lines) + "\n"
 
 
@@ -597,23 +603,135 @@ def _moves(prices: Sequence[WatchPrice], watchlist: WatchlistFile, settings: Set
 # ---------------------------------------------------------------- the wake
 
 
-def _wakes(runs: Iterable[WatchRun], settings: Settings) -> list[str]:
+def wake_section(
+    runs: Iterable[WatchRun],
+    resumes: Sequence[Resume],
+    settings: Settings,
+    since: datetime,
+    now: datetime,
+) -> list[str]:
+    """Did the market-hours wake work? For each weekday morning in the period: whether the
+    timer fired, whether the network came up, whether a scan ran - and when nothing fired,
+    what Windows says woke the laptop instead. Then every wake run, and every resume."""
+    tz = settings.tz
     lines = ["", "## Market-hours wake", ""]
     wakes = [run for run in runs if run.job == "wake"]
+    in_period = [r for r in resumes if r.woke_at >= since]
+    start_at = _clock(settings.watch.wake_start)
+
+    lines.append(
+        f"The wake task runs weekdays {settings.watch.wake_start}-{settings.watch.wake_end}, "
+        "every 10 min, on AC power only. A run that found the laptop already awake had "
+        "nothing to fire."
+    )
+    lines += ["", "### Each weekday morning", ""]
+    day = since.astimezone(tz).date()
+    any_day = False
+    while day <= now.astimezone(tz).date():
+        first_slot = datetime.combine(day, start_at, tzinfo=tz)
+        if day.weekday() < 5 and since <= first_slot <= now:
+            any_day = True
+            lines.append(
+                f"- {day:%a %d %b}: " + _morning(day, first_slot, wakes, resumes, settings)
+            )
+        day += timedelta(days=1)
+    if not any_day:
+        lines.append(f"- No weekday {settings.watch.wake_start} in this period yet.")
+
+    lines += ["", "### Wake runs", ""]
     if not wakes:
-        return [
-            *lines,
-            "The wake task never ran. Either the laptop was on battery (the task is AC-only), "
-            "or it was asleep and the timer did not wake it.",
-        ]
-    lines += ["| Time | on AC | did a pass | network |", "|---|---|---|---|"]
-    tz = settings.tz
-    for run in wakes:
-        notes = {error.get("stage"): error.get("error") for error in run.errors}
-        passed = "yes" if "skipped" not in notes else f"no ({notes['skipped']})"
-        network = "down" if "network" in notes else "up"
-        on_ac = {True: "yes", False: "no", None: "?"}[run.on_ac]
-        lines.append(
-            f"| {run.started_at.astimezone(tz):%a %d %b %H:%M} | {on_ac} | {passed} | {network} |"
-        )
+        lines.append("None: the task never ran (on battery, or the timer didn't wake the laptop).")
+    else:
+        lines += ["| Time | AC | fired | network | scan |", "|---|---|---|---|---|"]
+        for run in wakes:
+            fired, network, scan = _wake_cells(run, settings)
+            on_ac = {True: "yes", False: "no", None: "?"}[run.on_ac]
+            lines.append(
+                f"| {run.started_at.astimezone(tz):%a %d %b %H:%M} | {on_ac} | {fired} | "
+                f"{network} | {scan} |"
+            )
+
+    lines += ["", "### Every resume Windows logged", ""]
+    if not in_period:
+        lines.append("None in this period (or the event log couldn't be read).")
+    else:
+        lines += ["| Asleep from | Woke at | State | What woke it |", "|---|---|---|---|"]
+        for resume in in_period:
+            lines.append(
+                f"| {resume.slept_at.astimezone(tz):%a %d %b %H:%M} | "
+                f"{resume.woke_at.astimezone(tz):%a %d %b %H:%M} | {resume.slept_as} | "
+                f"{resume.woken_by} |"
+            )
     return lines
+
+
+def _morning(
+    day: date,
+    first_slot: datetime,
+    wakes: Sequence[WatchRun],
+    resumes: Sequence[Resume],
+    settings: Settings,
+) -> str:
+    tz = settings.tz
+    todays = [w for w in wakes if w.started_at.astimezone(tz).date() == day and w.details]
+    fired = [w for w in todays if (w.details or {}).get("fired") == "timer"]
+    if fired:
+        first = fired[0]
+        _, network, scan = _wake_cells(first, settings)
+        return (
+            f"**the wake timer fired** at {first.started_at.astimezone(tz):%H:%M}; network "
+            f"{network}; scan {scan}."
+        )
+    # Asleep across the first slot? Then the timer should have woken it, and didn't.
+    asleep = next((r for r in resumes if r.slept_at <= first_slot <= r.woke_at), None)
+    if asleep is not None:
+        shut = (
+            " A shut-down laptop can't be woken by a timer, and the tasks only run while you "
+            "are logged in."
+            if asleep.slept_as == "shut down"
+            else ""
+        )
+        return (
+            f"**the wake timer did not fire**: the laptop was {asleep.slept_as} from "
+            f"{asleep.slept_at.astimezone(tz):%a %H:%M} until "
+            f"{asleep.woke_at.astimezone(tz):%a %H:%M}, woken by {asleep.woken_by}.{shut}"
+        )
+    if todays:
+        return (
+            f"the laptop was already awake at {settings.watch.wake_start}; "
+            f"{len(todays)} wake runs found it so."
+        )
+    return (
+        f"no wake run and no sleep covering {settings.watch.wake_start} in Windows's log "
+        "(on battery, shut down and not logged in, or the log has no record)."
+    )
+
+
+def _wake_cells(run: WatchRun, settings: Settings) -> tuple[str, str, str]:
+    """fired, network and scan, in words, from a wake run's details."""
+    tz = settings.tz
+    details = run.details or {}
+    resume = details.get("resume") or {}
+    fired = {
+        "timer": f"YES, {resume.get('woken_by', 'a wake timer')}",
+        "resume": f"no - resumed by {resume.get('woken_by', '?')}",
+        "awake": "not needed (awake)",
+    }.get(details.get("fired", ""), "?")
+    network_info = details.get("network") or {}
+    if network_info.get("up"):
+        network = f"up after {network_info.get('after_seconds') or 0:.0f} s"
+    elif network_info:
+        network = "DOWN"
+    else:
+        network = "?"
+    scan_info = details.get("scan") or {}
+    if scan_info.get("by") in ("resident", "this task") and scan_info.get("at"):
+        at = datetime.fromisoformat(scan_info["at"]).astimezone(tz)
+        failed = scan_info.get("feed_errors") or 0
+        who = "the resident scanner" if scan_info["by"] == "resident" else "the wake task"
+        scan = f"YES, by {who} at {at:%H:%M}, {scan_info.get('new_articles', 0)} new" + (
+            f", {failed} feeds failed" if failed else ""
+        )
+    else:
+        scan = f"NONE ({scan_info.get('note') or 'no details'})"
+    return fired, network, scan
