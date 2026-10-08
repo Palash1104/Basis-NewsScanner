@@ -1,0 +1,137 @@
+# The watchlist: one list for stocks and commodities (user, 2026-10-07).
+#
+# Stocks get the fast news scan, filings and alerts. Commodities get a price card and the
+# playbook impacts that touch them, nothing else, so they carry no aliases and must already
+# be in config/assets.yaml.
+#
+# Fields (stocks):
+#   symbol     the Yahoo ticker. All eight below verified on Yahoo and NSE on 2026-10-07.
+#   nse_name   exactly as NSE writes the company in its announcements feed, which has no
+#              symbol column - this is how NSE filings are matched.
+#   isin       how BSE filings are matched (they arrive through the PEAD tool, keyed by ISIN).
+#   aliases
+#     strong   in the headline, enough alone: full names, distinctive brands, subsidiaries,
+#              founders, and the NSE symbol where it is distinctive.
+#     weak     short or shared names; they count only with a market word (shares, order,
+#              results...) or one of the stock's own `vocab` words in the headline or snippet.
+#   exclude    other things that contain an alias ("Tejas Networks" is not HAL's Tejas).
+#   stop       regexes for a weak alias used as an ordinary word. None needed yet.
+#
+# Every alias was checked against real headlines; `scripts/watch_alias_review.py` re-runs that
+# check and writes every keep and drop to data/watch_alias_review.md. Run it after any edit.
+
+watchlist:
+  - type: stock
+    symbol: PFOCUS.NS
+    name: Prime Focus
+    nse_symbol: PFOCUS
+    nse_name: Prime Focus Limited
+    isin: INE367G01020
+    aliases:
+      # Brahma AI is the venture it backs: 22 headlines in 30 days, nearly all funding and
+      # valuation news. "Ramayana" alone is the epic, not the company.
+      strong: [Prime Focus, Brahma AI, PFOCUS]
+      # DNEG is its VFX subsidiary and Namit Malhotra its founder, the "Ramayana producer" of
+      # the I-T raid coverage. Both were strong at first, and pulled in VFX trade press
+      # ("VFX breakdown by DNEG for 'Coyote Vs. ACME'") and film gossip ("Namit Malhotra
+      # Images, HD Wallpapers") - so they now need a market word: raid, shares, crore...
+      weak: [DNEG, Namit Malhotra]
+
+  - type: stock
+    symbol: APOLLO.NS
+    name: Apollo Micro Systems
+    nse_symbol: APOLLO
+    nse_name: Apollo Micro Systems Limited
+    isin: INE713T01010
+    aliases:
+      # Never "Apollo" alone: Apollo Hospitals, Apollo Tyres and Apollo Global took 20 of 100
+      # "Apollo" headlines in a week. The NSE symbol is the bare word too, so it is left out.
+      strong: [Apollo Micro Systems, Apollo Micro]
+
+  - type: stock
+    symbol: HAL.NS
+    name: HAL
+    nse_symbol: HAL
+    nse_name: Hindustan Aeronautics Limited
+    isin: INE066F01012
+    aliases:
+      # HATSOFF is its helicopter-training JV ("HAL to acquire full stake in HATSOFF").
+      strong: [Hindustan Aeronautics, HATSOFF]
+      # Tejas is HAL's fighter: 27 headlines in 30 days, many never naming HAL
+      # ("GE Aerospace ships 4 more F404 engines for Tejas").
+      weak: [HAL, Tejas]
+    vocab: [aircraft, jet, fighter, LCA, IAF, Air Force, helicopter, Dhruv, Prachand, LCH, LUH,
+            HTT-40, HTT 40, Su-30MKI, Sukhoi, engine, aero-engine, F404, F414, AL-31FP, Shakti,
+            trainer, training, Mk1A, Mk2, AMCA, Koraput, aerospace, defence, Rajnath]
+    exclude: [Tejas Networks, Tejas Express]
+    # Air exercises and flypasts fly Tejas often - 25 headlines in 30 days, "Japan air chief
+    # flies Tejas" among them - and none is HAL's business.
+    noise: [sortie, exercise, Veer Guardian, Tarang Shakti, formation, air show, airshow,
+            flypast]
+
+  - type: stock
+    symbol: BDL.NS
+    name: Bharat Dynamics
+    nse_symbol: BDL
+    nse_name: Bharat Dynamics Limited
+    isin: INE171Z01018
+    aliases:
+      strong: [Bharat Dynamics]
+      weak: [BDL]
+    vocab: [missile, SAT-SAAW, Akash, Astra, torpedo, weapon, Air Force, Navy, Army, defence,
+            Ministry, MRSAM, anti-tank, contract]
+    # BDL is also Banque du Liban, Lebanon's central bank: four L'Orient Today headlines in 30
+    # days, one with "IMF deal" in it, which passed as a market word.
+    noise: [Lebanon, Lebanese, Beirut, IMF, Salameh, Banque du Liban]
+
+  - type: stock
+    symbol: AEQUS.NS
+    name: Aequs
+    nse_symbol: AEQUS
+    nse_name: Aequs Limited
+    isin: INE947N01017
+    aliases:
+      strong: [Aequs]
+    # Its CSR arm: education campaigns, not company news.
+    exclude: [Aequs Foundation]
+
+  - type: stock
+    symbol: DATAPATTNS.NS
+    name: Data Patterns
+    nse_symbol: DATAPATTNS
+    nse_name: Data Patterns (India) Limited
+    isin: INE0IX101010
+    aliases:
+      strong: [Data Patterns (India), DATAPATTNS]
+      # Also an ordinary phrase ("spotting data patterns"), so it needs context.
+      weak: [Data Patterns]
+    vocab: [defence, radar, electronics, avionics, satellite, BrahMos, missile]
+
+  - type: stock
+    symbol: ZENTEC.NS
+    name: Zen Technologies
+    nse_symbol: ZENTEC
+    nse_name: Zen Technologies Limited
+    isin: INE251B01027
+    aliases:
+      strong: [Zen Technologies, ZENTEC]
+      weak: [Zen Tech]
+    vocab: [defence, simulator, anti-drone, drone, training, Army]
+
+  - type: stock
+    symbol: ASTRAMICRO.NS
+    name: Astra Microwave
+    nse_symbol: ASTRAMICRO
+    nse_name: Astra Microwave Products Limited
+    isin: INE386C01029
+    aliases:
+      # Never "Astra" alone: that is also the BDL-built missile and AstraZeneca.
+      strong: [Astra Microwave, ASTRAMICRO]
+
+  # Commodities: the four the web rail's watchlist held by default, moved here so there is
+  # one watchlist. A browser's own edited list was never sent to the server, so anything
+  # added in the old "Edit watchlist" dialog has to be added here by hand.
+  - {type: commodity, symbol: BZ=F}
+  - {type: commodity, symbol: GC=F}
+  - {type: commodity, symbol: HG=F}
+  - {type: commodity, symbol: INR=X}

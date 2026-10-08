@@ -131,6 +131,41 @@ Open follow-ups (not Phase 1 criteria):
   2026-09-20). Every per-story loop commits before the next call, and connections set
   `PRAGMA busy_timeout=10000`.
 
+**Stock watchlist (in progress, plan approved 2026-10-07).** Build order, with a stop for
+review after each step:
+1. list + alias review
+2. scan and storage, no LLM
+3. the combined call + fixture gate
+4. alerts + digest section
+5. `/watchlist` page
+6. scoring + lead-time report
+7. BSE via the PEAD tool
+
+- **Step 1 done (2026-10-08).** 8 stocks and 4 commodities are in `config/watchlist.yaml`.
+  The matcher was reviewed on 21,015 real headlines over four rounds; every verdict is in
+  `data/watch_alias_review.md`.
+- **Decisions (user, 2026-10-07):**
+  - Quota: main lane 300 / watchlist 120 / retry 80. Skip event extraction for Politics,
+    Other and Science & Health, logging every skipped story for a monthly check.
+  - BSE comes through the PEAD tool (`Documents/resultscanner/pead_tool.py`). The change
+    must be additive: it appends to a shared SQLite file that BASIS reads read-only. Show
+    the diff before applying it.
+  - One watchlist: stocks get the news scan; commodities get price cards and playbook
+    impacts only. The browser-stored list goes.
+  - Wake the laptop for the scan in market hours (08:30-16:30 IST), on AC power only.
+  - `pypdf` (pinned) is approved, to read company replies.
+  - Price-move alert ("moved, no story yet"): the threshold comes from the stock's typical
+    intraday move, at most once per stock per day.
+  - Feed-health alerts: warn when a feed goes stale or starts failing.
+- **Additions (user, 2026-10-08):**
+  - One alert per story, listing every watchlist stock it is a keep for, and the same in
+    the digest.
+  - The price-move alert checks peers first. When most defence names move together, it
+    sends one "defence sector move" alert, and alerts a single stock only when it moves
+    well beyond its peers.
+  - Score defence stocks against a Nifty India Defence index as well as the Nifty (if
+    Yahoo has one, verified live), and show both in the track record.
+
 ## Commands
 
 ```
@@ -150,6 +185,7 @@ uv run python scripts/event_fixtures.py [story_ids...]   # live extractions -> t
 uv run newsdesk score [--rescore]              # judge due calls, print the track record
 uv run python scripts/impact_gate.py [--model summary|reasoning] [--story ID...]
 uv run newsdesk health [--days 7]              # scheduler slots, LLM budgets, layer B, rules at n>=5
+uv run python scripts/watch_alias_review.py [--refresh]   # every watchlist keep/mention/drop -> data/watch_alias_review.md
 powershell -ExecutionPolicy Bypass -File scripts/install_tasks.ps1 [-Remove]   # Windows tasks
 ```
 
@@ -158,6 +194,9 @@ powershell -ExecutionPolicy Bypass -File scripts/install_tasks.ps1 [-Remove]   #
 - `config/settings.yaml` tunables · `config/feeds.yaml` verified feeds (see header comment)
 - `config/assets.yaml` asset universe (82 SPEC §8 starter symbols, all validated)
 - `config/playbook.yaml` 15 cause → effect rules (SPEC §9)
+- `config/watchlist.yaml` the one watchlist (stocks with aliases; commodities by symbol) ·
+  `config/watch_feeds.yaml` market feeds for the watchlist scan (header lists those left out)
+- `app/watch/match.py` which watchlist stocks a headline is about: keep / mention / drop
 - `app/assets.py` ticker validation (yfinance), stored checks, the unvalidated-symbol warning,
   `benchmark_for` (by exchange)
 - `app/config.py` pydantic models for config, `.env` loading

@@ -1,7 +1,9 @@
-"""Load and validate settings.yaml, feeds.yaml, assets.yaml and secrets from .env."""
+"""Load and validate settings.yaml, feeds.yaml, assets.yaml, watchlist.yaml and secrets
+from .env."""
 
 import os
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
@@ -413,6 +415,97 @@ class AssetsFile(_Strict):
         if duplicates:
             raise ValueError(f"duplicate asset symbols: {sorted(duplicates)}")
         return self
+
+
+WatchType = Literal["stock", "commodity"]
+ISIN = re.compile(r"[A-Z]{2}[A-Z0-9]{9}\d")
+
+
+class WatchAliases(_Strict):
+    # A full name, a distinctive brand or subsidiary, a founder: in the headline, enough alone.
+    strong: list[str] = Field(default_factory=list)
+    # Short or shared names (HAL, Tejas): they count only with a market word or one of the
+    # stock's own `vocab` words nearby, because "HAL" is also a first name and "Tejas" a train.
+    weak: list[str] = Field(default_factory=list)
+
+
+class WatchItem(_Strict):
+    """One entry in config/watchlist.yaml.
+
+    Stocks get the news scan; commodities get a price card and their playbook impacts only,
+    so a commodity carries no aliases and must already be in config/assets.yaml.
+    """
+
+    type: WatchType
+    symbol: str = Field(min_length=1)  # the Yahoo Finance ticker, e.g. PFOCUS.NS
+    name: str | None = None  # how the page writes it; commodities take assets.yaml's
+    nse_symbol: str | None = None
+    # Exactly as NSE names the company in its announcements feed, which carries no symbol.
+    nse_name: str | None = None
+    isin: str | None = None  # how BSE filings (via the PEAD tool) are matched
+    aliases: WatchAliases = Field(default_factory=WatchAliases)
+    vocab: list[str] = Field(default_factory=list)  # words that make a weak alias count
+    exclude: list[str] = Field(default_factory=list)  # other things that share a name
+    stop: list[str] = Field(default_factory=list)  # regexes: a weak alias as an ordinary word
+    # Headline words that make a weak-alias match not company business: an air exercise
+    # flying Tejas is IAF news, not HAL's. Strong-alias headlines are never affected.
+    noise: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _check(self) -> "WatchItem":
+        if self.type == "stock":
+            if not self.name:
+                raise ValueError(f"{self.symbol}: a stock needs a name")
+            if not self.aliases.strong:
+                raise ValueError(f"{self.symbol}: a stock needs at least one strong alias")
+        elif any(
+            (
+                self.aliases.strong,
+                self.aliases.weak,
+                self.vocab,
+                self.exclude,
+                self.stop,
+                self.noise,
+            )
+        ):
+            raise ValueError(f"{self.symbol}: commodities are not news-scanned; drop the aliases")
+        if self.isin and not ISIN.fullmatch(self.isin):
+            raise ValueError(f"{self.symbol}: {self.isin!r} is not an ISIN")
+        for pattern in self.stop:
+            try:
+                re.compile(pattern)
+            except re.error as exc:
+                raise ValueError(f"{self.symbol}: stop pattern {pattern!r}: {exc}") from exc
+        return self
+
+
+class WatchlistFile(_Strict):
+    watchlist: list[WatchItem]
+
+    @model_validator(mode="after")
+    def _check_unique_symbols(self) -> "WatchlistFile":
+        symbols = [item.symbol for item in self.watchlist]
+        duplicates = {symbol for symbol in symbols if symbols.count(symbol) > 1}
+        if duplicates:
+            raise ValueError(f"duplicate watchlist symbols: {sorted(duplicates)}")
+        return self
+
+
+def load_watchlist(
+    path: Path | None = None, assets: Sequence[AssetConfig] | None = None
+) -> list[WatchItem]:
+    """The watchlist, checked against the asset universe: a commodity must be one BASIS
+    already prices and runs the playbook on, or its card would have nothing to show."""
+    items = WatchlistFile.model_validate(
+        _read_yaml(path or CONFIG_DIR / "watchlist.yaml")
+    ).watchlist
+    known = {asset.symbol for asset in (assets if assets is not None else load_assets())}
+    unknown = [
+        item.symbol for item in items if item.type == "commodity" and item.symbol not in known
+    ]
+    if unknown:
+        raise ValueError(f"watchlist commodities not in config/assets.yaml: {unknown}")
+    return items
 
 
 def _read_yaml(path: Path) -> object:

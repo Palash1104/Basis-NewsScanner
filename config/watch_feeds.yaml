@@ -1,0 +1,33 @@
+# Feeds for the watchlist's fast scan: Indian business and markets news, where a listed
+# company's news breaks first. Separate from config/feeds.yaml on purpose - these never reach
+# the main pipeline, so they can't change what the 3-hourly run ranks and summarizes.
+#
+# Every URL comes from the publisher's own RSS index page, not a guess, and was verified
+# live with scripts/verify_feeds.py on 2026-10-07 (newest entry under 3.5 hours old in each).
+# Re-verify with:  uv run python scripts/verify_feeds.py --file config/watch_feeds.yaml
+#
+# Left out, and why (all 2026-10-07):
+#   Moneycontrol official feeds    newest entry 2.5 years old (the feeds are dead)
+#   NDTV Profit, Zee Business      RSS returns 403
+#   Financial Express /market/feed malformed XML
+#   BS stock-market-news           nothing in 24.5h
+#   BS quarterly-results           nothing in 12.3h; re-check in results season
+#   ET latest-news                 newest entry 5.6h old despite 49 entries
+# Moneycontrol, Zee Business and NDTV Profit are still reached through the Google News
+# fallback. Zee Business broke the Prime Focus raid first (10:18), so that fallback matters.
+
+feeds:
+  # Carried "Prime Focus shares tank 8% after Income Tax raids": live by 10:23, though its
+  # pubDate says 13:46 - this outlet stamps the last update, not first publication.
+  - {name: CNBC-TV18, url: "https://www.cnbctv18.com/commonfeeds/v1/cne/rss/market.xml", region: IN, weight: 2}
+  - {name: CNBC-TV18, url: "https://www.cnbctv18.com/commonfeeds/v1/cne/rss/latest.xml", region: IN, weight: 2}
+  - {name: The Economic Times, url: "https://economictimes.indiatimes.com/markets/stocks/rssfeeds/2146842.cms", region: IN, weight: 2}
+  - {name: The Economic Times, url: "https://economictimes.indiatimes.com/news/company/rssfeeds/2143429.cms", region: IN, weight: 2}
+  - {name: Business Standard, url: "https://www.business-standard.com/rss/markets/news-10601.rss", region: IN, weight: 2}
+  - {name: Business Standard, url: "https://www.business-standard.com/rss/companies/news-10101.rss", region: IN, weight: 2}
+  - {name: Business Standard, url: "https://www.business-standard.com/rss/latest.rss", region: IN, weight: 2}
+  - {name: Livemint, url: "https://www.livemint.com/rss/markets", region: IN, weight: 2}
+  - {name: Livemint, url: "https://www.livemint.com/rss/companies", region: IN, weight: 2}
+  - {name: BusinessLine, url: "https://www.thehindubusinessline.com/markets/stock-markets/feeder/default.rss", region: IN, weight: 2}
+  - {name: BusinessLine, url: "https://www.thehindubusinessline.com/companies/feeder/default.rss", region: IN, weight: 2}
+  - {name: Business Today, url: "https://www.businesstoday.in/rssfeeds?id=home", region: IN, weight: 2}
