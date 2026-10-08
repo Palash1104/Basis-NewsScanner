@@ -26,6 +26,13 @@ from app.models import (
     RuleDisagreementRow,
     Run,
     Story,
+    WatchArticle,
+    WatchCall,
+    WatchFiling,
+    WatchMatch,
+    WatchPrice,
+    WatchSighting,
+    WatchStory,
     utcnow,
 )
 from app.pipeline.rank import RERANK_FALLBACK_NOTE
@@ -389,77 +396,185 @@ def test_the_assets_a_story_calls_are_one_scrolling_row(client: TestClient) -> N
     assert "flex: none" in chip  # never squeezed to fit; the row scrolls instead
 
 
-def test_the_watchlist_shows_the_settings_default(database: Path, settings: Settings) -> None:
-    """The page renders the configured list server-side, so it reads correctly before any
-    JavaScript runs and for a browser that has never edited it."""
+def test_the_rail_lists_the_watchlist_file_in_its_order(database: Path, settings: Settings) -> None:
+    """One watchlist, config/watchlist.yaml (user, 2026-10-07): the rail shows its stocks
+    and its commodities in the file's order, rendered on the server."""
     now = utcnow()
     _cache_hourly(database, "BZ=F", [70.0] * 24 + [70.0, 71.4], now)
     _cache_hourly(database, "GC=F", [3800.0] * 24 + [3800.0, 3762.0], now)
-    engine = make_read_only_engine(database)
-    client = TestClient(create_app(settings, make_read_only_session_factory(engine)))
-
-    body = client.get("/").text
+    body = _client(database, settings).get("/").text
     rail = body.split('<aside class="rail">')[1].split("</aside>")[0]
 
-    assert "Your watchlist" in rail
-    # Every configured symbol has a row, in the order settings.yaml gives them.
-    assert [name for name in ("Brent crude", "Gold", "Copper", "USD/INR") if name in rail] == [
+    expected = [
+        "Prime Focus",
+        "Apollo Micro Systems",
+        "HAL",
+        "Bharat Dynamics",
+        "Aequs",
+        "Data Patterns",
+        "Zen Technologies",
+        "Astra Microwave",
         "Brent crude",
         "Gold",
         "Copper",
         "USD/INR",
     ]
+    places = [rail.index(f">{name}</a>") for name in expected]
+    assert places == sorted(places)
     assert "$71.40" in rail and "+2.0%" in rail  # last price, then the 24-hour move
     assert "-1.0%" in rail
-    # Copper and the rupee have no cached bars here, and are shown as such, never invented.
-    assert rail.count("no price yet") == 2
-    assert "Edit watchlist" in rail
+    # The rest have no cached bars here, and say so, never a made-up price.
+    assert rail.count("no price yet") == len(expected) - 2
+    assert 'href="/watchlist">Open the watchlist' in rail
 
 
-def test_a_watchlist_row_links_to_its_asset_page(client: TestClient) -> None:
-    assert '<a class="watch-name" href="/asset/BZ=F">Brent crude</a>' in client.get("/").text
-
-
-def test_the_fragment_takes_a_browsers_own_list(client: TestClient) -> None:
-    """The editor saves to localStorage and asks for these rows; the server still decides
-    what each symbol means."""
-    body = client.get("/watchlist", params={"symbols": "GC=F,^NSEI"}).text
-    assert "<html" not in body  # a fragment, not a page
-    assert 'data-symbols="GC=F,^NSEI"' in body
-    assert "Gold" in body and "Nifty 50" in body
-    assert "Brent crude" not in body  # the default is gone, as asked
-
-
-def test_a_symbol_the_universe_does_not_have_is_dropped(client: TestClient) -> None:
-    """Whatever a browser has stored - stale, hand-edited, from an older universe - can only
-    ever put a real asset on the page."""
-    body = client.get("/watchlist", params={"symbols": "GC=F,NOT_A_TICKER,GC=F"}).text
-    assert 'data-symbols="GC=F"' in body  # unknown dropped, duplicate collapsed
-    assert "NOT_A_TICKER" not in body
-
-
-def test_an_empty_list_falls_back_to_the_default(client: TestClient) -> None:
-    body = client.get("/watchlist").text
-    assert "Brent crude" in body and "Gold" in body
-
-
-def test_the_watchlist_is_capped(client: TestClient, settings: Settings) -> None:
-    """A list from a browser is not trusted to be a sensible length."""
-    every = ",".join(asset.symbol for asset in load_assets())
-    body = client.get("/watchlist", params={"symbols": every}).text
-    shown = body.split('data-symbols="')[1].split('"')[0].split(",")
-    assert len(shown) == settings.web.watchlist_max
-
-
-def test_the_editor_offers_the_universe_and_saves_in_the_browser(client: TestClient) -> None:
-    """The web app opens the database read-only, so the choice cannot live there."""
+def test_the_browser_kept_watchlist_is_gone(client: TestClient) -> None:
+    """Its editor, its script and its fragment: the list is the file now."""
     body = client.get("/").text
-    assert 'id="watchlist-editor"' in body and "data-max=" in body
-    assert body.count('input type="checkbox" name="symbol"') == len(load_assets())
-    assert "not in the database" in body
+    assert "Edit watchlist" not in body and 'id="watchlist-editor"' not in body
+    assert "watchlist.js" not in body
+    assert not (Path("app/web/static/js") / "watchlist.js").exists()
 
-    script = (Path("app/web/static/js") / "watchlist.js").read_text(encoding="utf-8")
-    assert "localStorage" in script and "newsdesk-watchlist" in script
+
+def test_the_header_links_the_watchlist(client: TestClient) -> None:
+    body = client.get("/watchlist").text
+    assert '<a href="/watchlist"\n              aria-current="page">Watchlist</a>' in body
+
+
+def test_the_watchlist_page_has_a_card_for_every_entry(client: TestClient) -> None:
+    body = client.get("/watchlist").text
+    assert body.count('<div class="watch-card">') == 12
+    words = " ".join(body.split())
+    assert "8 stocks · 4 commodities ·" in words
+    assert "The list is config/watchlist.yaml." in words
+
+
+def _watch_story(
+    database: Path,
+    title: str,
+    relevance: str,
+    materiality: str = "high",
+    symbol: str = "HAL.NS",
+    via: str = "rss",
+    filing_kind: str | None = None,
+) -> int:
+    engine = make_engine(database)
+    seen = utcnow() - timedelta(hours=1)
+    with make_session_factory(engine)() as session:
+        story = WatchStory(first_seen_at=seen, headline=title)
+        article = WatchArticle(
+            url=f"https://news.example/{abs(hash(title))}",
+            source_name="CNBC-TV18",
+            title=title,
+            snippet="",
+            published_at=seen,
+            first_seen_at=seen,
+            story=story,
+        )
+        article.matches = [
+            WatchMatch(symbol=symbol, verdict="keep", reason="named in the headline")
+        ]
+        article.sightings = [
+            WatchSighting(
+                feed_name="Google News" if via == "google_news" else "CNBC-TV18",
+                feed_url="https://x/rss",
+                via=via,
+                seen_at=seen,
+            )
+        ]
+        session.add_all([story, article])
+        session.flush()
+        if filing_kind:
+            session.add(
+                WatchFiling(
+                    key=f"f-{story.id}",
+                    exchange="NSE",
+                    symbol=symbol,
+                    company="Hindustan Aeronautics Limited",
+                    subject="News Verification",
+                    description="The Exchange has sought clarification.",
+                    filed_at=seen + timedelta(minutes=30),
+                    first_seen_at=seen + timedelta(minutes=30),
+                    kind=filing_kind,
+                    story_id=story.id,
+                )
+            )
+        session.add(
+            WatchCall(
+                story_id=story.id,
+                symbol=symbol,
+                relevance=relevance,
+                sentiment="positive",
+                materiality=materiality,
+                event_type="order_win",
+                reason="HAL won an order worth Rs 2,000 crore.",
+                summary="HAL won an order. It adds to the order book.",
+                article_count=1,
+                filing_count=1 if filing_kind else 0,
+                read_reply=False,
+                trigger="new",
+                model="gemini-3.5-flash-lite",
+                prompt_version="watch-v1",
+                created_at=seen,
+            )
+        )
+        session.commit()
+        return story.id
+
+
+def test_watchlist_news_shows_real_calls_and_playbook_stories_not_passing_mentions(
+    database: Path, settings: Settings
+) -> None:
+    story_id = _watch_story(database, "HAL wins Rs 2,000 crore order", "primary")
+    _watch_story(database, "HAL options chart", "passing", materiality="low")
+    _cache_hourly(database, "HAL.NS", [4600.0, 4600.0, 4646.0], utcnow())  # 4600 when it broke
+    body = _client(database, settings).get("/watchlist").text
+
+    assert "HAL wins Rs 2,000 crore order" in body
+    assert f'href="/watchlist/story/{story_id}"' in body
+    assert "HAL options chart" not in body  # only named in passing
+    # The fixture's Red Sea story calls Brent, which is on the watchlist.
+    assert "Houthi attacks close the Red Sea to tankers" in body
+    assert '<span class="tag tag-neutral">playbook</span>' in body
+    assert "<b>▲ Brent crude</b>" in body  # followed, so bold
+    row = body.split(f'href="/watchlist/story/{story_id}"')[1].split("</a>")[0]
+    assert ">+1.0%<" in row  # HAL since the story broke: 4600 -> 4646
+
+
+def test_a_watchlist_story_shows_its_call_and_how_it_arrived(
+    database: Path, settings: Settings
+) -> None:
+    story_id = _watch_story(
+        database,
+        "HAL wins Rs 2,000 crore order",
+        "primary",
+        via="google_news",
+        filing_kind="clarification_sought",
+    )
+    client = _client(database, settings)
+    body = client.get(f"/watchlist/story/{story_id}").text
+    assert "HAL won an order worth Rs 2,000 crore." in body
+    assert "NSE asked the company to clarify" in body
+    assert "via Google News" in body and "NSE filing" in body
+    assert body.index("via Google News") < body.index("NSE filing")  # first source first
+    assert client.get("/watchlist/story/99999").status_code == 404
+
+
+def test_a_live_poll_prices_a_stock_card(database: Path, settings: Settings) -> None:
+    """The scanner's own poll is fresher than the hourly cache: a stock card uses it."""
+    engine = make_engine(database)
+    with make_session_factory(engine)() as session:
+        session.add(
+            WatchPrice(
+                symbol="HAL.NS",
+                polled_at=utcnow() - timedelta(minutes=5),
+                price=4700.0,
+                previous_close=4600.0,
+            )
+        )
+        session.commit()
+    words = " ".join(_client(database, settings).get("/watchlist").text.split())
+    assert "₹4,700" in words and "+2.2%" in words and "since the last close" in words
 
 
 def test_a_watchlist_price_is_readable_not_a_caption() -> None:

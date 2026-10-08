@@ -366,92 +366,12 @@ a:hover {
 }
 
 .watch-edit {
+  display: inline-block;
   margin-top: var(--space-3);
 }
 
 .rail-rule {
   margin: var(--space-6) 0;
-}
-
-/* The watchlist editor: a native <dialog>, styled with the system's own tokens because the
- * export's .dialog is built for a div and its own backdrop. */
-.sheet {
-  width: min(420px, 92vw);
-  max-height: 80vh;
-  padding: 0;
-  border: 2px solid var(--color-divider);
-  background: var(--color-bg);
-  color: var(--color-text);
-}
-
-.sheet::backdrop {
-  background: color-mix(in srgb, #201e1d 55%, transparent);
-}
-
-.sheet-form {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-3);
-  max-height: 80vh;
-  padding: var(--space-6);
-}
-
-.sheet-title {
-  font-size: 25px;
-  margin: 0;
-}
-
-.sheet-note {
-  margin: 0;
-  font-size: 12px;
-  color: var(--color-muted);
-}
-
-.sheet-list {
-  flex: 1;
-  overflow-y: auto;
-  border-top: 1px solid var(--rule-light);
-  border-bottom: 1px solid var(--rule-light);
-}
-
-.sheet-option {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  padding: 6px var(--space-1);
-  font-size: 13px;
-  cursor: pointer;
-}
-
-.sheet-option:hover {
-  background: var(--color-surface);
-}
-
-.sheet-option input:disabled + .sheet-name {
-  color: var(--color-muted);
-}
-
-.sheet-name {
-  flex: 1;
-  min-width: 0;
-}
-
-.sheet-symbol {
-  font-size: 10px;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--color-muted);
-}
-
-.sheet-actions {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--space-2);
-}
-
-.sheet-actions .btn-ghost {
-  margin-right: auto;
 }
 
 /* The mockup's mover row: the name takes the space, then the week it traced, then the move
@@ -1303,4 +1223,261 @@ a:hover {
 
 .run-error .tag {
   margin-right: var(--space-2);
+}
+
+/* ---------------------------------------------------------------- the watchlist screen */
+/* The design's watchlist screen (design/NOTES.md 2.4): its card grid, its news rows at
+   120px / fill / 150px, and a 320px side column with a 2px rule. */
+
+.watch-page-note {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--color-muted);
+  text-align: right;
+}
+
+.watch-cards {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  border-bottom: 2px solid var(--color-divider);
+}
+
+.watch-card {
+  min-width: 0;
+  padding: 28px 24px 28px 0;
+  border-right: 1px solid color-mix(in srgb, var(--color-text) 20%, transparent);
+}
+
+.watch-card:not(:nth-child(4n + 1)) {
+  padding-left: 24px;
+}
+
+.watch-card:nth-child(4n) {
+  border-right: none;
+}
+
+.watch-card .kicker {
+  margin-bottom: 8px;
+}
+
+.watch-card-name {
+  margin-bottom: 2px;
+  font-family: var(--font-heading);
+  font-size: 24px;
+  font-weight: 800;
+  letter-spacing: -0.015em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.watch-card-name a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.watch-card-name a:hover {
+  text-decoration: underline;
+}
+
+.watch-card-price {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 16px;
+  font-size: 16px;
+  font-variant-numeric: tabular-nums;
+}
+
+.watch-card-change {
+  font-weight: 800;
+}
+
+.watch-card .spark-card {
+  display: block;
+  background: var(--color-surface);
+}
+
+.spark-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 72px;
+  font-size: 11px;
+  color: var(--color-muted);
+}
+
+.watch-card-driver {
+  margin-top: 10px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--color-muted);
+}
+
+.watch-split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: 48px;
+  align-items: start;
+  padding-top: 36px;
+}
+
+.watch-section {
+  margin: 32px 0 4px;
+}
+
+.watch-split .watch-section {
+  margin-top: 0;
+}
+
+.watch-note {
+  margin: 0 0 8px;
+  font-size: 13px;
+  color: var(--color-muted);
+  max-width: 62ch;
+}
+
+.watch-news {
+  display: grid;
+  grid-template-columns: 120px minmax(0, 1fr) 150px;
+  gap: 24px;
+  align-items: center;
+  padding: 20px 0;
+  border-top: 1px solid color-mix(in srgb, var(--color-text) 25%, transparent);
+  color: inherit;
+  text-decoration: none;
+}
+
+.watch-news:hover .watch-news-headline {
+  text-decoration: underline;
+}
+
+.watch-news-time {
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-muted);
+}
+
+.watch-news-body {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.watch-news-headline {
+  margin-bottom: 4px;
+  font-size: 17px;
+  font-weight: 800;
+  line-height: 1.3;
+}
+
+.watch-news-hits {
+  font-size: 13px;
+  color: var(--color-muted);
+}
+
+.watch-news-hits b {
+  color: var(--color-text);
+}
+
+.watch-news-lead {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.watch-news-lead .spark {
+  flex: none;
+  overflow: visible;
+}
+
+.watch-news-lead .spark .up {
+  stroke: var(--color-up);
+}
+
+.watch-news-lead .spark .down {
+  stroke: var(--color-down);
+}
+
+.watch-news-change {
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.watch-side {
+  padding-left: 28px;
+  border-left: 2px solid var(--color-divider);
+}
+
+.watch-alert {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 0;
+  border-top: 1px solid color-mix(in srgb, var(--color-text) 20%, transparent);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.watch-story-title {
+  max-width: 30ch;
+  margin: 0 0 6px;
+  font-size: 44px;
+  line-height: 1.04;
+}
+
+.watch-story-summary {
+  max-width: 62ch;
+  margin: 16px 0 8px;
+  font-size: 17px;
+  line-height: 1.6;
+}
+
+.cell-nowrap {
+  white-space: nowrap;
+}
+
+@media (max-width: 900px) {
+  .watch-cards {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .watch-card:not(:nth-child(4n + 1)) {
+    padding-left: 0;
+  }
+
+  .watch-card:nth-child(odd) {
+    padding-right: 16px;
+  }
+
+  .watch-card:nth-child(even) {
+    padding-left: 16px;
+    border-right: none;
+  }
+
+  .watch-split {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .watch-side {
+    padding-left: 0;
+    border-left: none;
+  }
+
+  .watch-news {
+    grid-template-columns: 80px minmax(0, 1fr);
+  }
+
+  .watch-news-lead {
+    grid-column: 2;
+    justify-content: flex-start;
+  }
+
+  .watch-story-title {
+    font-size: 32px;
+  }
 }

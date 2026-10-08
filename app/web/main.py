@@ -9,7 +9,7 @@ yfinance, so a page can't race the pipeline's price step or spend its rate limit
 """
 
 import logging
-from collections.abc import Awaitable, Callable, Iterator, Sequence
+from collections.abc import Awaitable, Callable, Iterator
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -24,14 +24,21 @@ from sqlalchemy.orm import Session, sessionmaker
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app import health
-from app.config import AssetConfig, Settings, load_assets, load_settings
+from app.config import (
+    AssetConfig,
+    Settings,
+    WatchlistFile,
+    load_assets,
+    load_settings,
+    load_watchlist_file,
+)
 from app.db import make_read_only_engine, make_read_only_session_factory
 from app.models import Impact, Run, utcnow
 from app.pipeline.prices import format_move
 from app.pipeline.scoring import track_record
 from app.presentation import ORDER_WORDS, ORIGIN_LABEL, story_age
 from app.schedule import pipeline_hours, start_of_news_day
-from app.web import palette, queries
+from app.web import palette, queries, watch_queries
 
 log = logging.getLogger(__name__)
 
@@ -54,6 +61,8 @@ SEMANTIC_SWATCHES = (
 
 NAV = (
     {"name": "today", "label": "Today", "href": "/", "note": ""},
+    # The design's header has "Today" and "Watchlist" side by side.
+    {"name": "watchlist", "label": "Watchlist", "href": "/watchlist", "note": ""},
     {"name": "track", "label": "Track record", "href": "/track-record", "note": ""},
     {"name": "assets", "label": "Assets", "href": "/assets", "note": ""},
     {"name": "runs", "label": "Runs", "href": "/runs", "note": ""},
@@ -223,29 +232,30 @@ def _stamp(value: datetime | None, settings: Settings) -> str:
     return local.strftime("%H:%M %Z" if local.date() == today else "%d %b %H:%M %Z")
 
 
-def _watchlist_context(
-    session: Session,
-    assets: dict[str, AssetConfig],
-    settings: Settings,
-    now: datetime,
-    wanted: Sequence[str],
+def _rail_watchlist(
+    request: Request, session: Session, settings: Settings, now: datetime
 ) -> dict[str, object]:
-    """The rail's watchlist, rendered the same way from the page and from the fragment."""
-    symbols = queries.watchlist_symbols(wanted, assets, settings.web.watchlist_max)
-    if not symbols and wanted != settings.web.watchlist:
-        symbols = queries.watchlist_symbols(
-            settings.web.watchlist, assets, settings.web.watchlist_max
-        )
+    """The rail's watchlist: config/watchlist.yaml, stocks and commodities, rendered on the
+    server. The list a browser used to keep in localStorage is gone (user, 2026-10-07)."""
+    watchlist: WatchlistFile = request.app.state.watchlist
+    assets: dict[str, AssetConfig] = request.app.state.assets
     return {
-        "watchlist": queries.watchlist_rows(session, symbols, assets, now),
-        "watchlist_symbols": symbols,
+        "rail_watch": watch_queries.watch_cards(session, watchlist, assets, settings, now),
         "rail_points": lambda item: queries.sparkline_points(
             item, RAIL_SPARK_WIDTH, RAIL_SPARK_HEIGHT, RAIL_SPARK_PAD
         ),
         "rail_spark": (RAIL_SPARK_WIDTH, RAIL_SPARK_HEIGHT),
         "mover_hours": queries.MOVER_HOURS,
-        "watchlist_max": settings.web.watchlist_max,
     }
+
+
+def _load_watchlist() -> WatchlistFile:
+    """The watchlist, or an empty one: a broken watchlist.yaml must not take the pages down."""
+    try:
+        return load_watchlist_file()
+    except Exception as exc:
+        log.warning("watchlist.yaml could not be loaded: %s", exc)
+        return WatchlistFile(watchlist=[])
 
 
 def _rate_gates(settings: Settings) -> dict[str, int]:
@@ -288,6 +298,7 @@ def create_app(
     web.state.settings = settings
     web.state.session_factory = session_factory
     web.state.assets = {asset.symbol: asset for asset in load_assets()}
+    web.state.watchlist = _load_watchlist()
     web.mount("/static", StaticFiles(directory=WEB_DIR / "static"), name="static")
     templates = Jinja2Templates(directory=WEB_DIR / "templates")
     templates.env.filters["ist"] = lambda value: _in_zone(value, settings)
@@ -368,28 +379,59 @@ def create_app(
             "movers": queries.movers(session, assets, now),
             "mover_hours": queries.MOVER_HOURS,
             "prices_as_of": _stamp(last_pipeline_finish(session), settings),
-            "universe": sorted(assets.values(), key=lambda asset: asset.display_name),
         }
-        context |= _watchlist_context(session, assets, settings, now, settings.web.watchlist)
+        context |= _rail_watchlist(request, session, settings, now)
         # HTMX asks for the list alone; a plain visit gets the whole page.
         name = "_feed.html" if request.headers.get("hx-request") else "index.html"
         return templates.TemplateResponse(request, name, context)
 
     @web.get("/watchlist", response_class=HTMLResponse)
-    def watchlist(request: Request, session: ReadSession, symbols: str = "") -> HTMLResponse:
-        """The watchlist rows alone, for a browser that keeps its own list.
-
-        The page ships with the settings.yaml default already rendered; this is what the
-        editor asks for afterwards. Unknown symbols are dropped here, so whatever a browser
-        has stored - stale, hand-edited, from an older universe - can only ever show assets
-        that exist.
-        """
+    def watchlist(request: Request, session: ReadSession) -> HTMLResponse:
+        """The design's watchlist screen: a card per entry, then the week's news touching
+        the list, and what the watchlist sent to Telegram."""
+        now = utcnow()
         assets: dict[str, AssetConfig] = request.app.state.assets
-        context = {"request": request}
-        context |= _watchlist_context(
-            session, assets, settings, utcnow(), symbols.split(",") if symbols else []
-        )
-        return templates.TemplateResponse(request, "_watchlist.html", context)
+        listed: WatchlistFile = request.app.state.watchlist
+        news = watch_queries.watch_news(session, listed, assets, settings, now)
+        context = base_context(request, session, active="watchlist", now=now)
+        context |= {
+            "cards": watch_queries.watch_cards(session, listed, assets, settings, now),
+            "news": news,
+            "alerts": watch_queries.recent_alerts(session, now),
+            "stocks": len(listed.stocks),
+            "commodities": len(listed.watchlist) - len(listed.stocks),
+            "news_days": watch_queries.NEWS_DAYS,
+            "card_points": lambda item: queries.sparkline_points(
+                item, CARD_SPARK_WIDTH, CARD_SPARK_HEIGHT, CARD_SPARK_PAD
+            ),
+            "points": lambda item: queries.sparkline_points(
+                item, SPARK_WIDTH, SPARK_HEIGHT, SPARK_PAD
+            ),
+            "prices_as_of": _stamp(last_pipeline_finish(session), settings),
+        }
+        return templates.TemplateResponse(request, "watchlist.html", context)
+
+    @web.get("/watchlist/story/{story_id}", response_class=HTMLResponse)
+    def watch_story(request: Request, session: ReadSession, story_id: int) -> HTMLResponse:
+        """One watchlist story: each company's call, how the news arrived source by source
+        and when the exchange came in, and each company's price since it broke."""
+        now = utcnow()
+        assets: dict[str, AssetConfig] = request.app.state.assets
+        listed: WatchlistFile = request.app.state.watchlist
+        view = watch_queries.watch_story(session, story_id, listed, assets, settings, now)
+        if view is None:
+            raise HTTPException(status_code=404, detail=f"no watchlist story {story_id}")
+        names = {item.symbol: item.name or item.symbol for item in listed.watchlist}
+        context = base_context(request, session, active="watchlist", now=now)
+        context |= {
+            "view": view,
+            "names": names,
+            "marks": watch_queries.MARK,
+            "points": lambda item: queries.sparkline_points(
+                item, STORY_SPARK_WIDTH, STORY_SPARK_HEIGHT, STORY_SPARK_PAD
+            ),
+        }
+        return templates.TemplateResponse(request, "watch_story.html", context)
 
     @web.get("/story/{story_id}", response_class=HTMLResponse)
     def story(request: Request, session: ReadSession, story_id: int) -> HTMLResponse:

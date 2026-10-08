@@ -1,0 +1,104 @@
+{% extends "base.html" %}
+{% block title %}BASIS · Watchlist{% endblock %}
+
+{% block content %}
+{# The design's watchlist screen (design/NOTES.md 2.4). Its "Add a commodity" button and its
+   Exposure panel have no data behind them: the list lives in config/watchlist.yaml, and the
+   side column shows what the watchlist actually sent to Telegram instead. #}
+<div class="screen-head">
+  <div>
+    <h1>Watchlist</h1>
+    <p class="sub">
+      {{ stocks }} {{ "stock" if stocks == 1 else "stocks" }} ·
+      {{ commodities }} {{ "commodity" if commodities == 1 else "commodities" }} ·
+      {{ news | length }} {{ "story" if news | length == 1 else "stories" }} touched them in the
+      last {{ news_days }} days
+    </p>
+  </div>
+  <p class="watch-page-note">The list is config/watchlist.yaml.<br />Prices as of {{ prices_as_of }}.</p>
+</div>
+
+<div class="watch-cards">
+  {% for card in cards %}
+    <div class="watch-card">
+      <div class="kicker">{{ card.kicker or ("Stock" if card.stock else "Commodity") }}</div>
+      <div class="watch-card-name">
+        {% if card.href %}<a href="{{ card.href }}">{{ card.name }}</a>{% else %}{{ card.name }}{% endif %}
+      </div>
+      <div class="watch-card-price">
+        <span>{{ card.price or "no price yet" }}</span>
+        {% if card.change %}
+          <span class="watch-card-change {{ 'up' if card.up else 'down' }}">{{ card.change }}</span>
+          <span class="cell-note">{{ "since the last close" if card.change_label == "today" else "24h" }}</span>
+        {% endif %}
+      </div>
+      {% if card.series.points %}
+        <svg class="spark-card" viewBox="0 0 300 72" width="100%" height="72"
+          preserveAspectRatio="none" aria-hidden="true">
+          <polyline points="{{ card_points(card.series) }}" fill="none" stroke-width="2"
+            vector-effect="non-scaling-stroke" stroke-linejoin="round"
+            class="{{ 'up' if card.series.rose else 'down' }}" />
+        </svg>
+      {% else %}
+        <div class="spark-card spark-empty">no prices cached yet</div>
+      {% endif %}
+      <div class="watch-card-driver">
+        {% if card.driver %}{{ card.driver_mark }} {{ card.driver }}{% else %}No calls in the last week.{% endif %}
+      </div>
+    </div>
+  {% endfor %}
+</div>
+
+<div class="watch-split">
+  <div>
+    <h6 class="watch-section">News touching your watchlist</h6>
+    <p class="watch-note">
+      Newest first, by when it was first reported. Names in bold are on your watchlist; a
+      "playbook" row is a story from the main feed whose calls touch one of them.
+    </p>
+    {% for row in news %}
+      <a class="watch-news" href="{{ row.href }}">
+        <span class="watch-news-time">{{ row.at | ist }}</span>
+        <span class="watch-news-body">
+          <span class="watch-news-headline">{{ row.headline }}</span>
+          <span class="watch-news-hits">
+            {%- for hit in row.hits -%}
+              {%- if hit.followed %}<b>{{ hit.mark }} {{ hit.name }}</b>{% else %}{{ hit.mark }} {{ hit.name }}{% endif -%}
+              {%- if not loop.last %} · {% endif -%}
+            {%- endfor %}
+            <span class="tag tag-neutral">{{ row.tag }}</span>
+          </span>
+        </span>
+        <span class="watch-news-lead">
+          {% if row.lead_series and row.lead_series.points %}
+            <svg viewBox="0 0 68 22" width="68" height="22" aria-hidden="true" class="spark">
+              <polyline points="{{ points(row.lead_series) }}" fill="none" stroke-width="1.6"
+                stroke-linejoin="round" class="{{ 'up' if row.lead_series.rose else 'down' }}" />
+            </svg>
+          {% endif %}
+          {% if row.lead_change %}
+            <span class="watch-news-change {{ 'up' if row.lead_up else 'down' }}">{{ row.lead_change }}</span>
+          {% endif %}
+        </span>
+      </a>
+    {% else %}
+      <p class="rail-empty">Nothing touched the watchlist in the last {{ news_days }} days.</p>
+    {% endfor %}
+  </div>
+
+  <aside class="watch-side">
+    <h6 class="watch-section">Sent to Telegram</h6>
+    <p class="watch-note">The watchlist's alerts in the last {{ news_days }} days, newest first.</p>
+    {% for alert in alerts %}
+      {% set lines = alert.text.split("\n") %}
+      <div class="watch-alert">
+        <span class="kicker">{{ alert.kind }} · {{ alert.created_at | ist }}</span>
+        <span class="watch-alert-text">{{ (lines[1] if lines | length > 1 else lines[0]) | striptags }}</span>
+        {% if not alert.sent_at %}<span class="tag tag-neutral">not sent{% if alert.error %}: {{ alert.error }}{% endif %}</span>{% endif %}
+      </div>
+    {% else %}
+      <p class="rail-empty">Nothing yet.</p>
+    {% endfor %}
+  </aside>
+</div>
+{% endblock %}

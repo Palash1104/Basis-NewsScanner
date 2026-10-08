@@ -130,7 +130,7 @@ from app.schedule import (
 )
 from app.watch.alerts import digest_section
 from app.watch.power import keep_awake, on_ac_power, recent_resumes
-from app.watch.prices import YahooSnapshots
+from app.watch.prices import YahooSnapshots, price_symbols
 from app.watch.report import wake_section, watch_report
 from app.watch.scan import Watcher, build_watcher, run_forever
 from app.watch.wake import probe_network, run_wake
@@ -219,6 +219,23 @@ async def _fetch(
 ) -> list[FeedResult]:
     async with make_client(settings.http, transport=transport) as client:
         return await fetch_all(feeds, settings, resolver=resolver, client=client)
+
+
+def priced_symbols(assets: dict[str, AssetConfig], settings: Settings) -> list[str]:
+    """The universe plus the watchlist's stocks, their groups' indices and the benchmark: one
+    price cache behind every page, so a watchlist card has a line like any other asset. A
+    broken watchlist.yaml only costs the watchlist's prices."""
+    extra: list[str] = []
+    try:
+        watchlist = load_watchlist_file()
+        extra = price_symbols(
+            [stock.symbol for stock in watchlist.stocks],
+            [group.index for group in watchlist.groups.values() if group.index],
+            settings.watch.benchmark,
+        )
+    except Exception as exc:
+        log.warning("watchlist prices left out: %s", exc)
+    return sorted(set(assets) | set(extra))
 
 
 def feed_checks(results: Sequence[FeedResult], now: datetime) -> list[FeedCheck]:
@@ -616,7 +633,7 @@ def run_pipeline(
                 # show the day's biggest movers and not only the assets a story called.
                 # After the impacts on purpose: see `refresh_universe`.
                 started = time.perf_counter()
-                universe = refresh_universe(session, prices, sorted(assets), now)
+                universe = refresh_universe(session, prices, priced_symbols(assets, settings), now)
                 report.universe_seconds = time.perf_counter() - started
                 report.universe_symbols = universe.symbols
                 report.universe_bars_stored = universe.bars_stored

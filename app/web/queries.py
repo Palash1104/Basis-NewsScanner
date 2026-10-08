@@ -426,66 +426,6 @@ def format_price(asset: AssetConfig, close: float) -> str:
     return f"{mark}{figure}" if mark else f"{figure} {asset.currency}".strip()
 
 
-@dataclass(frozen=True)
-class WatchRow:
-    """One asset on the rail's watchlist: what it costs, where it has been, how far it moved."""
-
-    symbol: str
-    name: str
-    price: str | None  # the last cached close; None when nothing is cached
-    change: str | None  # over the same window as the movers
-    up: bool
-    series: Series
-
-
-def watchlist_symbols(
-    wanted: Sequence[str], assets: dict[str, AssetConfig], limit: int
-) -> list[str]:
-    """The symbols to show, in the order asked for: known, deduplicated and capped.
-
-    Anything not in the universe is dropped rather than shown as an empty row - the list can
-    arrive from settings.yaml or from a browser, and neither is checked anywhere else.
-    """
-    seen: list[str] = []
-    for symbol in wanted:
-        cleaned = symbol.strip()
-        if cleaned in assets and cleaned not in seen:
-            seen.append(cleaned)
-    return seen[:limit]
-
-
-def watchlist_rows(
-    session: Session,
-    symbols: Sequence[str],
-    assets: dict[str, AssetConfig],
-    now: datetime,
-    window: str = RAIL_WINDOW,
-    hours: int = MOVER_HOURS,
-) -> list[WatchRow]:
-    """The watchlist, in the order the symbols were given - it is a list someone chose, so it
-    is not re-sorted by size the way the movers are."""
-    if not symbols:
-        return []
-    moves = window_moves(session, now, hours)
-    series = series_for(session, symbols, window, now)
-    rows = []
-    for symbol in symbols:
-        asset = assets[symbol]
-        move = moves.get(symbol)
-        pct = move_pct(*move) if move else None
-        rows.append(
-            WatchRow(
-                symbol=symbol,
-                name=asset.display_name,
-                price=format_price(asset, move[1]) if move else None,
-                change=format_move(asset, move[0], pct) if move and pct is not None else None,
-                up=pct is None or pct >= 0,
-                series=series.get(symbol, Series(symbol)),
-            )
-        )
-    return rows
-
-
 def story_count(session: Session, now: datetime, hours: int = FEED_HOURS) -> int:
     cutoff = now - timedelta(hours=hours)
     return (

@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+{% block title %}BASIS · {{ view.story.headline }}{% endblock %}
+
+{% block content %}
+<p class="back"><a href="/watchlist">&larr; Watchlist</a></p>
+
+<h1 class="watch-story-title">{{ view.story.headline }}</h1>
+<p class="sub">{{ view.state }} · first reported {{ view.reported | ist }}</p>
+{% if view.summary %}<p class="watch-story-summary">{{ view.summary }}</p>{% endif %}
+
+<h6 class="watch-section">The call</h6>
+{% if view.calls %}
+  <table class="table">
+    <thead>
+      <tr><th>Company</th><th>Relevance</th><th>Sentiment</th><th>Materiality</th><th>Event</th><th>Why</th></tr>
+    </thead>
+    <tbody>
+      {% for call in view.calls %}
+        <tr>
+          <td>{{ names.get(call.symbol, call.symbol) }}</td>
+          <td>{{ call.relevance }}</td>
+          <td>{{ marks[call.sentiment] }} {{ call.sentiment }}</td>
+          <td>{{ call.materiality }}</td>
+          <td>{{ call.event_type | replace("_", " ") }}</td>
+          <td>{{ call.reason }}</td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <p class="cell-note">
+    {{ view.calls[0].model }} · {{ view.calls[0].prompt_version }} · called {{ view.calls[0].created_at | ist }}
+    ({{ view.calls[0].trigger }})
+  </p>
+{% else %}
+  <p class="rail-empty">Not called yet{% if view.passing %}, or only named in passing{% endif %}.</p>
+{% endif %}
+{% if view.passing %}
+  <p class="cell-note">
+    Named only in passing:
+    {% for call in view.passing %}{{ names.get(call.symbol, call.symbol) }}{% if not loop.last %}, {% endif %}{% endfor %}.
+  </p>
+{% endif %}
+
+{% if view.prices %}
+  <h6 class="watch-section">Prices since it broke</h6>
+  <div class="watch-cards">
+    {% for symbol, name, change, up, series in view.prices %}
+      <div class="watch-card">
+        <div class="watch-card-name">{{ name }}</div>
+        <div class="watch-card-price">
+          {% if change %}<span class="watch-card-change {{ 'up' if up else 'down' }}">{{ change }}</span>
+          <span class="cell-note">since first reported</span>{% else %}<span class="cell-note">no cached price around then</span>{% endif %}
+        </div>
+        {% if series.points %}
+          <svg class="spark-card" viewBox="0 0 300 64" width="100%" height="64"
+            preserveAspectRatio="none" aria-hidden="true">
+            <polyline points="{{ points(series) }}" fill="none" stroke-width="2"
+              vector-effect="non-scaling-stroke" stroke-linejoin="round"
+              class="{{ 'up' if series.rose else 'down' }}" />
+          </svg>
+        {% endif %}
+      </div>
+    {% endfor %}
+  </div>
+{% endif %}
+
+<h6 class="watch-section">How it arrived</h6>
+<p class="watch-note">
+  Articles by when BASIS first saw them, filings by when the exchange published them. The
+  first row is the story's first source.
+</p>
+<table class="table">
+  <thead><tr><th>When</th><th>Source</th><th>How</th><th>What</th></tr></thead>
+  <tbody>
+    {% for item in view.timeline %}
+      <tr>
+        <td class="cell-nowrap">{{ item.at | ist }}</td>
+        <td>{{ item.source }}</td>
+        <td>{{ item.detail }}</td>
+        <td>{% if item.url %}<a href="{{ item.url }}" rel="noopener">{{ item.text }}</a>{% else %}{{ item.text }}{% endif %}</td>
+      </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

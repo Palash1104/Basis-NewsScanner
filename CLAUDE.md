@@ -404,7 +404,8 @@ powershell -ExecutionPolicy Bypass -File scripts/install_tasks.ps1 [-Remove]   #
 - `app/presentation.py` what a story says about the market, decided once for the digest and
   the web: asset calls, "mixed signals", "N rules", "+N more", story age
 - `app/pipeline/sections.py` URL sections, and which stories may take a reserved slot
-- `app/web/main.py` routes and the app factory · `queries.py` every read the pages make ·
+- `app/web/main.py` routes and the app factory · `queries.py` every read the pages make
+  (`watch_queries.py` the watchlist pages') ·
   `palette.py` the colours and their measured contrast · `templates/` · `static/`
   (`design-system.css` is the export, vendored unmodified; `theme.css` is dark mode and the
   mockup's inline values; `app.css` is screen layout)
@@ -534,26 +535,39 @@ powershell -ExecutionPolicy Bypass -File scripts/install_tasks.ps1 [-Remove]   #
   document, because HTMX replaces the whole feed on every filter and search keystroke and
   listeners bound to a row would go with it. The story page is unaffected: it lists every
   call in full-width rows.
-- The rail's watchlist (the design's watchlist card, `web.watchlist` in settings.yaml):
-  - Four assets to start (Brent, gold, copper, USD/INR), above the movers. Each row is the
-    mockup's, on two lines: name and 24-hour move, then the last cached price and the week's
-    sparkline. The price is 12px in ink at 85% (`--color-body-dim`, 9.52:1), not the mockup's
-    11px at 70% (5.79:1), which was the lightest text on the page and hard to read (user,
-    2026-09-22); its digits are tabular so the column lines up. Prices are written as the design writes them - `$71.40`,
-    `₹1,402`, `412¢` - with the code kept for a currency we have no mark for, never a guessed
-    symbol.
-  - **"Edit watchlist" saves in the browser, not the database** (`static/js/watchlist.js`,
-    `newsdesk-watchlist` in localStorage): the web app opens the database read-only, and a
-    watchlist is one person's on one machine, not a fact about the news. settings.yaml holds
-    the default, which is what the page renders server-side - so it reads correctly with no
-    JavaScript at all and for a browser that has never edited it.
-  - The editor is a native `<dialog>` over the whole universe, capped at
-    `web.watchlist_max` (12): at the cap the unchecked boxes go disabled, so the limit is
-    visible before it bites.
-  - `GET /watchlist?symbols=...` renders the rows alone, for the browser's own list. It
-    re-validates every symbol against assets.yaml and drops what it doesn't know, so nothing
-    a browser has stored - stale, hand-edited, from an older universe - can put a made-up
-    asset on the page. An empty or wholly unknown list falls back to the default.
+- **The watchlist is config/watchlist.yaml**, one list for stocks and commodities (user,
+  2026-10-07). The browser-stored editor, `watchlist.js` and the `/watchlist?symbols=`
+  fragment are gone, along with `web.watchlist` in settings.yaml.
+  - **The rail.** It lists every entry in the file's order. Each row is the mockup's, on
+    two lines: name and move, then the last price and the week's sparkline.
+    - The price is 12px in ink at 85% (`--color-body-dim`, 9.52:1), not the mockup's 11px
+      at 70% (user, 2026-09-22). Its digits are tabular.
+    - Prices are written as the design writes them (`$71.40`, `₹1,402`, `412¢`), with the
+      code kept for a currency we have no mark for.
+    - "Open the watchlist" links to the page.
+  - **`/watchlist`** (`app/web/watch_queries.py`, the design's watchlist screen) has a card
+    per entry:
+    - **Kicker:** "NSE · Defence", or a commodity's exchange and currency.
+    - **Price and move:** a stock uses the scanner's own poll today, "since the last
+      close"; anything else uses the cache's 24h move.
+    - **The week's line:** from the cache, or the scanner's polls for a stock the cache
+      lacks.
+    - **Driver:** the latest real call's reason, or the playbook's mechanism.
+  - **"News touching your watchlist"**, under the cards:
+    - Newest first, by when each story was first reported.
+    - It holds the scanner's stories with a real call (never a passing mention) and the
+      pipeline's stories whose impacts touch a watched symbol ("playbook").
+    - Each row draws its lead asset's week and its move since the story broke.
+  - **The side column** shows what the watchlist sent to Telegram. The design's Exposure
+    panel has no data behind it.
+  - **`/watchlist/story/{id}`** shows each company's call with its provenance, prices since
+    the news broke, and how the story arrived: articles by when BASIS first saw them and
+    through what, and filings by when the exchange published them. The first row is the
+    first source.
+  - **Prices.** The pipeline's hourly universe refresh also covers the watchlist's stocks,
+    the defence index and the benchmark (`cli.priced_symbols`), so every card has a line.
+  - **`move_pct` is in percent**, not a fraction. Formatting it as a fraction showed +16.6%
+    for a 0.17% move on the first try.
 - Biggest movers - 24h (`queries.movers`, the design's right rail):
   - The window is the last 24 hours from the moment the page is opened. An asset needs a bar
     inside it *and* one at or before it starts; a market shut all day is left out rather than
