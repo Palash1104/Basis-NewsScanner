@@ -228,6 +228,45 @@ review after each step:
   - `newsdesk watch --once --since "YYYY-MM-DD HH:MM"` forces one. First live run, from
     22:00 the previous night: 5 filings from the API, 754 prices backfilled, no possible
     gap.
+- **Step 3 done (2026-10-08): the call** (`app/watch/analyse.py`, prompt `watch-v1`).
+  - **Shape.** One Flash-Lite call per story covers every watchlist company the story is a
+    keep for (or has a filing for). It returns a summary, then per company: relevance
+    (primary / secondary / passing), sentiment, materiality, event type (the user's eight)
+    and a one-sentence reason.
+  - **Why one call, not one per company.** A HAL+BDL story is one request with two answers,
+    which is also what makes it one alert.
+  - **Storage.** Each answer is a `watch_calls` row with full provenance, written once.
+  - **Calling again.** A story is called again when a filing attaches, when the company's
+    reply PDF has been read (pypdf 6.19.0, pinned), or when it gains two more kept
+    articles.
+  - **Who it calls.** Mentions and drops are never called.
+  - **How the model knows each company.** Its NSE name, its symbol and its other names
+    from the watchlist's aliases. Without the aliases, "Brahma AI raises $150M" read as not
+    about Prime Focus.
+  - **Gate** (`scripts/watch_gate.py`, 26 real stories, three rounds).
+    - Round 1 problems:
+      - Brahma AI marked passing.
+      - Sector pieces called primary.
+      - Engine shipments called order wins.
+      - "Govt." read as a sentence end.
+    - Round 2 problems:
+      - Brahma AI and Apollo's bare revenue figure rated high.
+      - "gets a Rs 218-crore engine line" became "a contract".
+    - Round 3 (final prompt):
+      - High materiality only on the four Prime Focus raid stories.
+      - Junk (the Halliburton options chart, an Air Force Day history piece) is passing/low.
+      - Nothing invented in anything shown.
+    - Known: the options chart's summary still names Hindustan Aeronautics. Passing calls
+      are never shown, so it is left.
+    - The answers are in `tests/fixtures/watch_calls.json`.
+  - **Quota lanes** (`RateLimitSettings.lanes`).
+    - Main 300 a day, held to 12 of the 15 RPM; watch 120; retries up to the 500 cap.
+    - Per-lane counts are in `llm_lane_usage`; `llm_requests.lane` drives the minute share.
+    - Retries aren't held to a lane's budget.
+    - A spent watch lane pauses the scanner's calls until the quota day turns.
+  - **Extraction skip.** `pipeline.skip_extraction_categories` (Politics, Other, Science &
+    Health) gets no event extraction. Each skip is logged in `extraction_skips`; read them
+    with `newsdesk skipped-extractions --days 30`.
 - **Scanner behaviour worth knowing:**
   - Only headlines naming a watchlist stock are stored, at any verdict.
   - One article seen through several feeds has one row and a sighting per feed. All the
@@ -272,6 +311,8 @@ uv run python scripts/watch_alias_review.py [--refresh]   # every watchlist keep
 uv run newsdesk watch [--once | --wake]       # the watchlist scanner (resident; no LLM calls)
 uv run newsdesk watch-report [--days 3]       # scanner volumes, first sources, feed health -> data/watch_report.md
 uv run newsdesk wake-log [--days 1]           # did the market-hours wake fire, network, scan; per weekday morning
+uv run newsdesk skipped-extractions [--days 30]   # stories with no event extraction (by category), for the monthly check
+uv run python scripts/watch_gate.py [--limit 20] [ids]   # the watchlist call, live, on stored stories -> data/watch_gate.md
 powershell -ExecutionPolicy Bypass -File scripts/install_tasks.ps1 [-Remove]   # Windows tasks
 ```
 

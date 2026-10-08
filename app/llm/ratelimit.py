@@ -12,23 +12,27 @@ afternoon in India). When the daily limit is reached, `acquire` raises instead o
 Two daily numbers: the quota (`requests_per_day`) and an optional budget
 (`requests_per_day_budget`). New work stops at the budget; retries of work already started may
 continue up to the quota.
+
+Lanes split the budget between callers (user, 2026-10-07): the pipeline ("main") and the
+watchlist ("watch") each have their own daily share, and a lane may be held to part of the
+minute, so one caller can never starve the other. Retries are not held to a lane's budget.
 """
 
 import logging
 import time
 from collections import defaultdict
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from datetime import time as dt_time
 from typing import Protocol
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import case, delete, func, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.config import RateLimitSettings
-from app.models import LLMDailyUsage, LLMRequest
+from app.models import LLMDailyUsage, LLMLaneUsage, LLMRequest
 
 log = logging.getLogger(__name__)
 
@@ -56,10 +60,21 @@ class DailyUsageStore(Protocol):
         self, day: str, model: str, requests: int = 0, input_tokens: int = 0, output_tokens: int = 0
     ) -> None: ...
 
+    def lane_requests(self, day: str, model: str, lane: str) -> int: ...
+
+    def add_lane(self, day: str, model: str, lane: str) -> None: ...
+
 
 class MemoryDailyUsageStore:
     def __init__(self) -> None:
         self.rows: dict[tuple[str, str], list[int]] = defaultdict(lambda: [0, 0, 0])
+        self.lanes: dict[tuple[str, str, str], int] = defaultdict(int)
+
+    def lane_requests(self, day: str, model: str, lane: str) -> int:
+        return self.lanes[(day, model, lane)]
+
+    def add_lane(self, day: str, model: str, lane: str) -> None:
+        self.lanes[(day, model, lane)] += 1
 
     def requests(self, day: str, model: str) -> int:
         return self.rows[(day, model)][0]
@@ -114,6 +129,32 @@ class SqlDailyUsageStore:
             row.output_tokens += output_tokens
             session.commit()
 
+    def _lane_row(self, session: Session, day: str, model: str, lane: str) -> LLMLaneUsage | None:
+        return session.scalars(
+            select(LLMLaneUsage).where(
+                LLMLaneUsage.day == day,
+                LLMLaneUsage.provider == self._provider,
+                LLMLaneUsage.model == model,
+                LLMLaneUsage.lane == lane,
+            )
+        ).one_or_none()
+
+    def lane_requests(self, day: str, model: str, lane: str) -> int:
+        with self._session_factory() as session:
+            row = self._lane_row(session, day, model, lane)
+            return row.requests if row else 0
+
+    def add_lane(self, day: str, model: str, lane: str) -> None:
+        with self._session_factory() as session:
+            row = self._lane_row(session, day, model, lane)
+            if row is None:
+                row = LLMLaneUsage(
+                    day=day, provider=self._provider, model=model, lane=lane, requests=0
+                )
+                session.add(row)
+            row.requests += 1
+            session.commit()
+
 
 class MinuteWindow(Protocol):
     """Recent requests per model, for the per-minute limits. Times are epoch seconds.
@@ -122,10 +163,13 @@ class MinuteWindow(Protocol):
     processes can't both take the last slot: the earlier reservation wins.
     """
 
-    def reserve(self, model: str, at: float, input_tokens: float) -> int: ...
+    def reserve(self, model: str, at: float, input_tokens: float, lane: str = "main") -> int: ...
 
-    def ahead(self, model: str, reservation: int, since: float) -> tuple[int, float, float | None]:
-        """(requests, input tokens, oldest time) reserved after `since`, before `reservation`."""
+    def ahead(
+        self, model: str, reservation: int, since: float, lane: str = "main"
+    ) -> tuple[int, float, float | None, int]:
+        """(requests, input tokens, oldest time, requests in `lane`) reserved after `since`,
+        before `reservation`."""
         ...
 
     def release(self, reservation: int) -> None: ...
@@ -137,23 +181,30 @@ class MemoryMinuteWindow:
     """This process only (tests, or no database)."""
 
     def __init__(self) -> None:
-        self._rows: dict[int, list] = {}  # id -> [model, at, input tokens]
+        self._rows: dict[int, list] = {}  # id -> [model, at, input tokens, lane]
         self._next_id = 1
 
-    def reserve(self, model: str, at: float, input_tokens: float) -> int:
+    def reserve(self, model: str, at: float, input_tokens: float, lane: str = "main") -> int:
         for row_id in [i for i, row in self._rows.items() if row[1] < at - KEEP_SECONDS]:
             del self._rows[row_id]
         row_id, self._next_id = self._next_id, self._next_id + 1
-        self._rows[row_id] = [model, at, input_tokens]
+        self._rows[row_id] = [model, at, input_tokens, lane]
         return row_id
 
-    def ahead(self, model: str, reservation: int, since: float) -> tuple[int, float, float | None]:
+    def ahead(
+        self, model: str, reservation: int, since: float, lane: str = "main"
+    ) -> tuple[int, float, float | None, int]:
         rows = [
             row
             for row_id, row in self._rows.items()
             if row_id < reservation and row[0] == model and row[1] > since
         ]
-        return len(rows), sum(row[2] for row in rows), min((row[1] for row in rows), default=None)
+        return (
+            len(rows),
+            sum(row[2] for row in rows),
+            min((row[1] for row in rows), default=None),
+            sum(1 for row in rows if row[3] == lane),
+        )
 
     def release(self, reservation: int) -> None:
         self._rows.pop(reservation, None)
@@ -175,7 +226,7 @@ class SqlMinuteWindow:
         self._provider = provider
         self._pruned_at: float | None = None
 
-    def reserve(self, model: str, at: float, input_tokens: float) -> int:
+    def reserve(self, model: str, at: float, input_tokens: float, lane: str = "main") -> int:
         with self._session_factory() as session:
             # Pruning is housekeeping, not per-request work: doing it on every reservation
             # means a write on every LLM call, which fights the pipeline for the database.
@@ -189,18 +240,22 @@ class SqlMinuteWindow:
                 model=model,
                 requested_at=_utc(at),
                 input_tokens=round(input_tokens),
+                lane=lane,
             )
             session.add(row)
             session.commit()
             return row.id
 
-    def ahead(self, model: str, reservation: int, since: float) -> tuple[int, float, float | None]:
+    def ahead(
+        self, model: str, reservation: int, since: float, lane: str = "main"
+    ) -> tuple[int, float, float | None, int]:
         with self._session_factory() as session:
-            count, tokens, oldest = session.execute(
+            count, tokens, oldest, in_lane = session.execute(
                 select(
                     func.count(LLMRequest.id),
                     func.coalesce(func.sum(LLMRequest.input_tokens), 0),
                     func.min(LLMRequest.requested_at),
+                    func.coalesce(func.sum(case((LLMRequest.lane == lane, 1), else_=0)), 0),
                 ).where(
                     LLMRequest.provider == self._provider,
                     LLMRequest.model == model,
@@ -213,7 +268,12 @@ class SqlMinuteWindow:
             oldest = datetime.fromisoformat(oldest)
         if oldest is not None and oldest.tzinfo is None:
             oldest = oldest.replace(tzinfo=UTC)
-        return int(count), float(tokens), oldest.timestamp() if oldest is not None else None
+        return (
+            int(count),
+            float(tokens),
+            oldest.timestamp() if oldest is not None else None,
+            int(in_lane),
+        )
 
     def release(self, reservation: int) -> None:
         with self._session_factory() as session:
@@ -236,6 +296,7 @@ class QuotaStatus:
     budget: int
     limit: int
     resets_at: datetime  # next midnight in the quota time zone, timezone-aware
+    lanes: dict[str, tuple[int, int]] = field(default_factory=dict)  # lane -> (used, budget)
 
 
 @dataclass
@@ -293,16 +354,21 @@ class RateLimiter:
             budget=limits.daily_budget,
             limit=limits.requests_per_day,
             resets_at=self.next_reset(),
+            lanes={
+                name: (self._store.lane_requests(day, model, name), lane.requests_per_day)
+                for name, lane in limits.lanes.items()
+            },
         )
 
     def acquire(
-        self, model: str, estimated_input_tokens: int, retry: bool = False
+        self, model: str, estimated_input_tokens: int, retry: bool = False, lane: str = "main"
     ) -> Reservation | None:
         """Block until a request to `model` fits the minute limits, then reserve it.
 
-        `retry` marks a retry of work already started: it may use the quota beyond the budget.
-        Raises DailyLimitReached when the day's budget (or, for retries, the quota) is used up,
-        and MissingRateLimit if limits are required but not configured for the model.
+        `retry` marks a retry of work already started: it may use the quota beyond the budget,
+        and beyond its lane's. Raises DailyLimitReached when the day's budget or the lane's
+        (or, for retries, the quota) is used up, and MissingRateLimit if limits are required
+        but not configured for the model.
         """
         limits = self._limits.get(model)
         if limits is None:
@@ -322,17 +388,28 @@ class RateLimiter:
                 f"{model}: {label} reached ({used_today}/{cap} requests on quota day {day}; "
                 f"resets {self.format_reset()})"
             )
+        lane_limits = limits.lanes.get(lane)
+        if lane_limits is not None and not retry:
+            lane_used = self._store.lane_requests(day, model, lane)
+            if lane_used >= lane_limits.requests_per_day:
+                raise DailyLimitReached(
+                    f"{model}: {lane} lane budget reached ({lane_used}/"
+                    f"{lane_limits.requests_per_day} requests on quota day {day}; "
+                    f"resets {self.format_reset()})"
+                )
+        lane_minute = lane_limits.requests_per_minute if lane_limits is not None else None
 
         tokens = float(min(max(estimated_input_tokens, 1), limits.input_tokens_per_minute))
         while True:
             now = self._clock()
-            window_id = self._window.reserve(model, now, tokens)
-            used_requests, used_tokens, oldest = self._window.ahead(
-                model, window_id, now - WINDOW_SECONDS
+            window_id = self._window.reserve(model, now, tokens, lane)
+            used_requests, used_tokens, oldest, used_in_lane = self._window.ahead(
+                model, window_id, now - WINDOW_SECONDS, lane
             )
             if (
                 used_requests < limits.requests_per_minute
                 and used_tokens + tokens <= limits.input_tokens_per_minute
+                and (lane_minute is None or used_in_lane < lane_minute)
             ):
                 break
             self._window.release(window_id)
@@ -350,6 +427,8 @@ class RateLimiter:
             self._sleep(wait)
 
         self._store.add(day, model, requests=1)
+        if lane_limits is not None:
+            self._store.add_lane(day, model, lane)
         return Reservation(model, day, window_id)
 
     def settle(

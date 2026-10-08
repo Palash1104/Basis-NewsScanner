@@ -43,9 +43,15 @@ llm:
       requests_per_minute: 15
       input_tokens_per_minute: 250000
       requests_per_day: 500
-      # 70% of the quota for new work; the remaining 150 are kept for retries. When the budget
-      # is used up, the rest of the run's summaries are skipped and done on a later run.
-      requests_per_day_budget: 350
+      # New work stops at 420; the remaining 80 are kept for retries. When a lane's budget is
+      # used up, the rest of its work waits for a later run (user, 2026-10-07).
+      requests_per_day_budget: 420
+      lanes:
+        # The pipeline: summaries, event extraction, layer B, the rerank. Held to 12 of the
+        # 15 requests a minute, so a catch-up run never queues a watchlist alert behind it.
+        main: { requests_per_day: 300, requests_per_minute: 12 }
+        # The watchlist's own call (app/watch/analyse.py).
+        watch: { requests_per_day: 120 }
     # Kept although nothing calls this model now (the rerank moved to Flash-Lite on
     # 2026-09-22): make_llm_client refuses a Gemini model with no limits, so these have to
     # be here before it can ever be used again.
@@ -78,6 +84,11 @@ pipeline:
   # get an LLM impact call. If the call fails, the importance order is kept.
   rerank_candidates: 40
   snippet_max_chars: 500
+  # No event extraction for these summary categories (user, 2026-10-07). Measured over the
+  # two weeks before: 789 extractions in them led to an impact 17 times (2%), so skipping
+  # them saves ~56 calls a day for ~1 impact-bearing event. Every skipped story is logged;
+  # check them monthly with `newsdesk skipped-extractions --days 30`.
+  skip_extraction_categories: ["Politics", "Other", "Science & Health"]
   # At most a quarter of a run's places may re-summarize a story the reader already has; the
   # rest go to news never summarized at all. Measured 2026-09-24: the run after the laptop
   # woke spent 19 of its 20 places refreshing stories 1-7 days old that had picked up new

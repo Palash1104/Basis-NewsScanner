@@ -10,9 +10,14 @@ from app.config import Settings
 from app.llm.client import LLMClient, ProviderError
 from app.llm.prompts import EVENT_PROMPT_VERSION, event_user_prompt
 from app.llm.schemas import EventExtraction
-from app.models import Article, Event, Story
+from app.models import Article, Event, ExtractionSkip, Story
 from app.pipeline.countries import canonical_country, normalize_countries
-from app.pipeline.extract_event import extract_events, normalize_event, pending_event_stories
+from app.pipeline.extract_event import (
+    extract_events,
+    normalize_event,
+    pending_event_stories,
+    skip_by_category,
+)
 from tests.conftest import NOW
 from tests.fakes import FakeProvider, event_json, provider_response
 
@@ -205,3 +210,16 @@ def test_pending_stories_need_a_summary_and_a_recent_article(
     _story(session, event_pending=True, status="failed")
     _story(session, event_pending=True, hours_ago=settings.pipeline.lookback_hours + 1)
     assert pending_event_stories(session, settings, NOW) == [wanted]
+
+
+def test_low_yield_categories_are_skipped_and_logged(session: Session, settings: Settings) -> None:
+    """Politics, Other and Science & Health get no extraction (user, 2026-10-07), and each
+    skipped story is kept for a monthly check that nothing market-moving went past."""
+    politics = _story(session, category="Politics", event_pending=True)
+    markets = _story(session, category="Economy & Markets", event_pending=True)
+    kept, skipped = skip_by_category(session, [politics, markets], settings, NOW)
+    assert kept == [markets] and skipped == [politics]
+    assert politics.event_pending is False
+    logged = session.scalars(select(ExtractionSkip)).one()
+    assert (logged.story_id, logged.category) == (politics.id, "Politics")
+    assert logged.headline == politics.headline

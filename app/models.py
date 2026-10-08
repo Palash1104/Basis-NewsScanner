@@ -281,6 +281,36 @@ class LLMDailyUsage(Base):
     output_tokens: Mapped[int] = mapped_column(Integer, default=0)
 
 
+class ExtractionSkip(Base):
+    """A summarized story whose event extraction was skipped for its category
+    (`pipeline.skip_extraction_categories`), kept so a monthly look can confirm nothing
+    market-moving was missed. Not in SPEC section 6."""
+
+    __tablename__ = "extraction_skips"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    story_id: Mapped[int] = mapped_column(ForeignKey("stories.id"), index=True)
+    category: Mapped[str] = mapped_column(String(40))
+    headline: Mapped[str] = mapped_column(Text)
+    summary: Mapped[str | None] = mapped_column(Text)
+    skipped_at: Mapped[datetime] = mapped_column(UTCDateTime, index=True)
+
+
+class LLMLaneUsage(Base):
+    """Requests per lane ("main", "watch") per model per quota day: each lane has its own
+    budget inside the model's (user, 2026-10-07). Not in SPEC section 6."""
+
+    __tablename__ = "llm_lane_usage"
+    __table_args__ = (UniqueConstraint("day", "provider", "model", "lane"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    day: Mapped[str] = mapped_column(String(10))
+    provider: Mapped[str] = mapped_column(String(16))
+    model: Mapped[str] = mapped_column(String(64))
+    lane: Mapped[str] = mapped_column(String(16))
+    requests: Mapped[int] = mapped_column(Integer, default=0)
+
+
 class LLMRequest(Base):
     """One row per LLM request in roughly the last hour, shared by every process using this
     database, so the per-minute limits count calls made by other runs too (e.g. the smoke test
@@ -294,6 +324,7 @@ class LLMRequest(Base):
     model: Mapped[str] = mapped_column(String(64))
     requested_at: Mapped[datetime] = mapped_column(UTCDateTime)
     input_tokens: Mapped[int] = mapped_column(Integer)  # estimate, replaced by the real count
+    lane: Mapped[str] = mapped_column(String(16), default="main")  # for lane minute caps
 
 
 class TickerCheck(Base):
@@ -446,9 +477,40 @@ class WatchFiling(Base):
     kind: Mapped[str] = mapped_column(String(24))
     # The media headline NSE asked about, word for word, which ties it to that story.
     quoted_headline: Mapped[str | None] = mapped_column(Text)
+    # A company reply's text, read from its PDF (pypdf), so the call can be re-run on it.
+    # Empty when the PDF had no text layer (a scan); null until it has been tried.
+    reply_text: Mapped[str | None] = mapped_column(Text)
     story_id: Mapped[int | None] = mapped_column(ForeignKey("watch_stories.id"), index=True)
 
     story: Mapped[WatchStory | None] = relationship(back_populates="filings")
+
+
+class WatchCall(Base):
+    """The watchlist call on one stock in one story: written once, never edited. A story is
+    called again (new rows) when a filing or the company's reply arrives, or when it gains
+    two more articles; the latest row per stock is the current call."""
+
+    __tablename__ = "watch_calls"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    story_id: Mapped[int] = mapped_column(ForeignKey("watch_stories.id"), index=True)
+    symbol: Mapped[str] = mapped_column(String(32), index=True)
+    relevance: Mapped[str] = mapped_column(String(12))  # primary | secondary | passing
+    sentiment: Mapped[str] = mapped_column(String(8))  # positive | negative | neutral
+    materiality: Mapped[str] = mapped_column(String(8))  # high | medium | low
+    event_type: Mapped[str] = mapped_column(String(16))
+    reason: Mapped[str] = mapped_column(Text)
+    summary: Mapped[str] = mapped_column(Text)  # the story's, as of this call
+    # What the call saw, so a later call knows what has changed since.
+    article_count: Mapped[int] = mapped_column(Integer, default=0)
+    filing_count: Mapped[int] = mapped_column(Integer, default=0)
+    read_reply: Mapped[bool] = mapped_column(default=False)
+    trigger: Mapped[str] = mapped_column(String(16))  # new | articles | filing | reply
+    model: Mapped[str] = mapped_column(String(64))
+    prompt_version: Mapped[str] = mapped_column(String(32))
+    temperature: Mapped[float | None] = mapped_column(Float)
+    seed: Mapped[int | None] = mapped_column(Integer)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, index=True)
 
 
 class WatchPrice(Base):

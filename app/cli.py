@@ -60,13 +60,26 @@ from app.llm.client import (
 )
 from app.llm.prompts import IMPACT_PROMPT_VERSION
 from app.locks import job_lock
-from app.models import Article, FeedCheck, RuleDisagreementRow, Run, Story, WatchRun, utcnow
+from app.models import (
+    Article,
+    ExtractionSkip,
+    FeedCheck,
+    RuleDisagreementRow,
+    Run,
+    Story,
+    WatchRun,
+    utcnow,
+)
 from app.net import make_client
 from app.pipeline.classify import non_news_reason
 from app.pipeline.cluster import GroupingResult, assign_to_stories
 from app.pipeline.dedupe import dedupe_articles
 from app.pipeline.embed import Embedder, load_embedder
-from app.pipeline.extract_event import extract_events, pending_event_stories
+from app.pipeline.extract_event import (
+    extract_events,
+    pending_event_stories,
+    skip_by_category,
+)
 from app.pipeline.fetch import FeedResult, SourceResolver, fetch_all, filter_recent
 from app.pipeline.impact_llm import (
     matched_impacts,
@@ -166,6 +179,7 @@ class PipelineReport:
     event_call_errors: int = 0  # API errors: extracted next run
     events_pending_carried: int = 0
     events_skipped_quota: int = 0
+    events_skipped_category: int = 0  # Politics, Other, Science & Health: logged, not extracted
     stories_analyzed: int = 0  # event extracted and the playbook applied
     impacts_created: int = 0
     reranked: int = 0  # stories the reasoning model reordered
@@ -454,6 +468,9 @@ def run_pipeline(
                 # Summarizing marks a story event_pending, so this covers both the stories
                 # summarized just now and any extraction still owed from an earlier run.
                 to_extract = pending_event_stories(session, settings, now)
+                # Low-yield categories get no extraction; each one is logged for review.
+                to_extract, skipped = skip_by_category(session, to_extract, settings, now)
+                report.events_skipped_category = len(skipped)
                 report.events_pending_carried = len(carried & {s.id for s in to_extract})
                 extraction = extract_events(session, to_extract, llm, settings, now)
                 report.events_extracted = len(extraction.extracted)
@@ -926,6 +943,11 @@ def run_once(settings: Settings, session_factory: sessionmaker[Session]) -> list
         )
         + f", failed {report.events_failed}, API errors {report.event_call_errors}"
         + (
+            f", skipped for their category {report.events_skipped_category}"
+            if report.events_skipped_category
+            else ""
+        )
+        + (
             f", left for next run {report.events_skipped_quota}"
             if report.events_skipped_quota
             else ""
@@ -956,9 +978,12 @@ def run_once(settings: Settings, session_factory: sessionmaker[Session]) -> list
     if llm is not None and llm.limiter is not None:
         quota = llm.limiter.status(settings.llm.summary_model)
         if quota is not None:
+            lanes = "".join(
+                f", {name} {used}/{budget}" for name, (used, budget) in quota.lanes.items()
+            )
             lines.append(
                 f"quota: {quota.used}/{quota.limit} requests used on quota day {quota.day} "
-                f"(budget {quota.budget}), resets {llm.limiter.format_reset()}"
+                f"(budget {quota.budget}{lanes}), resets {llm.limiter.format_reset()}"
             )
     if report.grouping_method == "embedding":
         low, high = settings.grouping.borderline_log_range
@@ -1368,6 +1393,36 @@ def health(
     with session_factory() as session:
         for line in health_lines(session, settings, utcnow(), days):
             typer.echo(line)
+
+
+@app.command("skipped-extractions")
+def skipped_extractions(
+    days: Annotated[int, typer.Option("--days", min=1, help="How many days back.")] = 30,
+) -> None:
+    """Stories that got no event extraction because of their category (Politics, Other,
+    Science & Health): read them to check nothing market-moving went past."""
+    settings, session_factory = _bootstrap()
+    since = utcnow() - timedelta(days=days)
+    with session_factory() as session:
+        rows = session.scalars(
+            select(ExtractionSkip)
+            .where(ExtractionSkip.skipped_at >= since)
+            .order_by(ExtractionSkip.skipped_at.desc())
+        ).all()
+    seen: set[int] = set()
+    unique = [row for row in rows if not (row.story_id in seen or seen.add(row.story_id))]
+    by_category: dict[str, int] = {}
+    for row in unique:
+        by_category[row.category] = by_category.get(row.category, 0) + 1
+    typer.echo(
+        f"{len(unique)} stories skipped in the last {days} days: "
+        + ", ".join(f"{name} {count}" for name, count in sorted(by_category.items()))
+    )
+    for row in unique:
+        when = row.skipped_at.astimezone(settings.tz).strftime("%d %b %H:%M")
+        typer.echo(f"- {when} [{row.category}] story {row.story_id}: {row.headline}")
+        if row.summary:
+            typer.echo(f"    {row.summary}")
 
 
 # ---------------------------------------------------------------- watchlist scanner

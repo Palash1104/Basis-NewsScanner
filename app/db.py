@@ -105,9 +105,17 @@ ADDED_COLUMNS: dict[str, dict[str, str]] = {
         # Added in Phase 4: trading-day counting needs each exchange's time zone.
         "timezone": "VARCHAR(48)",
     },
+    "llm_requests": {
+        # Added 2026-10-08 with the quota lanes: a lane may use only part of the minute.
+        "lane": "VARCHAR(16) NOT NULL DEFAULT 'main'",
+    },
     "watch_runs": {
         # Added 2026-10-08 for the wake test: what each market-hours wake found.
         "details": "JSON",
+    },
+    "watch_filings": {
+        # Added 2026-10-08: the company's reply, read from its PDF.
+        "reply_text": "TEXT",
     },
     "watch_prices": {
         # Added 2026-10-08 with the catch-up: prices filled in from 1-minute bars.

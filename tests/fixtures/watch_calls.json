@@ -1,0 +1,1042 @@
+[
+ {
+  "story_id": 1,
+  "companies": [
+   [
+    "PFOCUS.NS",
+    "Prime Focus Limited (NSE: PFOCUS); the news also names it as: Brahma AI, DNEG, Namit Malhotra"
+   ]
+  ],
+  "articles": [
+   {
+    "source_name": "CNBC-TV18",
+    "title": "Prime Focus shares tank 8% after Income Tax raids at Mumbai offices: Exclusive",
+    "snippet": "Income Tax searches are underway at Prime Focus offices in Mumbai over foreign remittances, with certain individuals linked to the company also being searched.",
+    "published_at": "2026-10-07T08:16:27+00:00"
+   },
+   {
+    "source_name": "TradingView",
+    "title": "IT Dept Searches Premises Linked to Prime Focus Studios",
+    "snippet": "",
+    "published_at": "2026-10-08T04:12:00+00:00"
+   },
+   {
+    "source_name": "Business Today",
+    "title": "Prime Focus shares tank nearly 10% on I-T raids, company says operations unaffected",
+    "snippet": "",
+    "published_at": "2026-10-07T11:00:46+00:00"
+   },
+   {
+    "source_name": "Equitypandit",
+    "title": "Prime Focus Shares Slide After Income Tax Searches in Mumbai",
+    "snippet": "",
+    "published_at": "2026-10-07T07:17:13+00:00"
+   },
+   {
+    "source_name": "Whalesbook",
+    "title": "Prime Focus Confirms Ongoing Income Tax Search; Operations Remain Unaffected",
+    "snippet": "",
+    "published_at": "2026-10-07T08:02:24+00:00"
+   },
+   {
+    "source_name": "TradingView",
+    "title": "Prime Focus Says Income Tax Department Initiates Search At Prime Focus Offices On October 07, 2026",
+    "snippet": "",
+    "published_at": "2026-10-07T09:20:16+00:00"
+   }
+  ],
+  "filings": [
+   {
+    "exchange": "NSE",
+    "subject": "News Verification",
+    "description": "The Exchange has sought clarification from Prime Focus Limited with respect to recent news item captioned Prime Focus shares tank 8% after Income Tax raids at Mumbai offices: Exclusive. The response from the Company is awaited.",
+    "filed_at": "2026-10-07T05:35:31+00:00"
+   },
+   {
+    "exchange": "NSE",
+    "subject": "News Verification",
+    "description": "The Exchange has sought clarification from Prime Focus Limited with respect to recent news item captioned Prime Focus shares tank 8% after Income Tax raids at Mumbai offices: Exclusive. The response from the Company is attached.",
+    "filed_at": "2026-10-07T10:03:17+00:00"
+   }
+  ],
+  "reply": null,
+  "output": {
+   "summary": "Income Tax Department searches are underway at Prime Focus offices in Mumbai over foreign remittances. The searches caused the company's shares to tank, though Prime Focus confirmed that its operations remain unaffected.",
+   "stocks": [
+    {
+     "symbol": "PFOCUS.NS",
+     "relevance": "primary",
+     "sentiment": "negative",
+     "materiality": "high",
+     "event_type": "regulatory",
+     "reason": "Income Tax Department searches are underway at Prime Focus offices in Mumbai, causing its shares to slide."
+    }
+   ]
+  },
+  "model": "gemini-3.5-flash-lite"
+ },
+ {
+  "story_id": 3,
+  "companies": [
+   [
+    "PFOCUS.NS",
+    "Prime Focus Limited (NSE: PFOCUS); the news also names it as: Brahma AI, DNEG, Namit Malhotra"
+   ]
+  ],
+  "articles": [
+   {
+    "source_name": "Business Today",
+    "title": "Ramayana producer Namit Malhotra’s Prime Focus offices raided by I-T department in Mumbai",
+    "snippet": "Prime Focus is headed by Namit Malhotra and has a major presence in the global media and entertainment industry, particularly in visual effects, animation and post-production",
+    "published_at": "2026-10-07T12:47:43+00:00"
+   },
+   {
+    "source_name": "The Times of India",
+    "title": "Income tax raid at 'Ramayana' producer Namit Malhotra's office, weeks before the release of the Ranbir Kapoor, Sai Pallavi starrer this Diwali",
+    "snippet": "",
+    "published_at": "2026-10-07T12:30:00+00:00"
+   },
+   {
+    "source_name": "The Hollywood Reporter India",
+    "title": "'Ramayana': IT Department Searches Producer Namit Malhotra's Residence and Prime Focus Offices",
+    "snippet": "",
+    "published_at": "2026-10-08T05:49:40+00:00"
+   },
+   {
+    "source_name": "GujaratSamachar English",
+    "title": "₹4,000-Crore 'Ramayana' Producer Namit Malhotra’s Prime Foc…",
+    "snippet": "",
+    "published_at": "2026-10-08T06:11:15+00:00"
+   },
+   {
+    "source_name": "Telegraph India",
+    "title": "IT searches at Namit Malhotra’s Prime Focus offices a month before ‘Ramayana’ release: Report",
+    "snippet": "",
+    "published_at": "2026-10-08T05:16:02+00:00"
+   },
+   {
+    "source_name": "Hindustan Times",
+    "title": "Ramayana producer Namit Malhotra's Prime Focus offices face Income Tax raids weeks before Ranbir Kapoor, Yash's film release | Bollywood",
+    "snippet": "",
+    "published_at": "2026-10-08T02:10:30+00:00"
+   }
+  ],
+  "filings": [],
+  "reply": null,
+  "output": {
+   "summary": "Income tax department searches were conducted at the offices and residence of Prime Focus head Namit Malhotra in Mumbai. These searches matter for the company as they occur weeks before the release of the film Ramayana.",
+   "stocks": [
+    {
+     "symbol": "PFOCUS.NS",
+     "relevance": "primary",
+     "sentiment": "negative",
+     "materiality": "high",
+     "event_type": "regulatory",
+     "reason": "The Income Tax department conducted searches at the offices and residence of Prime Focus head Namit Malhotra."
+    }
+   ]
+  },
+  "model": "gemini-3.5-flash-lite"
+ },
+ {
+  "story_id": 4,
+  "companies": [
+   [
+    "PFOCUS.NS",
+    "Prime Focus Limited (NSE: PFOCUS); the news also names it as: Brahma AI, DNEG, Namit Malhotra"
+   ]
+  ],
+  "articles": [
+   {
+    "source_name": "Sahi",
+    "title": "Prime Focus: Income Tax Department Initiates Search At Mumbai Offices and Auditor Premises",
+    "snippet": "",
+    "published_at": "2026-10-07T08:25:54+00:00"
+   }
+  ],
+  "filings": [],
+  "reply": null,
+  "output": {
+   "summary": "The Income Tax Department has initiated searches at the Mumbai offices and auditor premises of Prime Focus. This regulatory action matters because it involves tax authorities investigating the company's premises.",
+   "stocks": [
+    {
+     "symbol": "PFOCUS.NS",
+     "relevance": "primary",
+     "sentiment": "negative",
+     "materiality": "high",
+     "event_type": "regulatory",
+     "reason": "The Income Tax Department initiated a search at the company's Mumbai offices and auditor premises."
+    }
+   ]
+  },
+  "model": "gemini-3.5-flash-lite"
+ },
+ {
+  "story_id": 5,
+  "companies": [
+   [
+    "PFOCUS.NS",
+    "Prime Focus Limited (NSE: PFOCUS); the news also names it as: Brahma AI, DNEG, Namit Malhotra"
+   ]
+  ],
+  "articles": [
+   {
+    "source_name": "The420.in",
+    "title": "Overseas Remittances Under Scrutiny as Tax Department Searches Namit Malhotra Premises",
+    "snippet": "",
+    "published_at": "2026-10-07T12:17:52+00:00"
+   },
+   {
+    "source_name": "Free Press Journal",
+    "title": "I-T Department Searches VFX Major Prime Focus, Auditor & Associates Over Suspected Foreign Remittance",
+    "snippet": "",
+    "published_at": "2026-10-07T14:10:35+00:00"
+   }
+  ],
+  "filings": [],
+  "reply": null,
+  "output": {
+   "summary": "The Income Tax Department has conducted searches at the premises of Prime Focus and its auditor over suspected foreign remittances. This regulatory scrutiny on the company and its key leadership creates uncertainty and potential legal or financial risks.",
+   "stocks": [
+    {
+     "symbol": "PFOCUS.NS",
+     "relevance": "primary",
+     "sentiment": "negative",
+     "materiality": "high",
+     "event_type": "regulatory",
+     "reason": "The Income Tax Department conducted searches at Prime Focus and its auditor over suspected foreign remittances."
+    }
+   ]
+  },
+  "model": "gemini-3.5-flash-lite"
+ },
+ {
+  "story_id": 7,
+  "companies": [
+   [
+    "PFOCUS.NS",
+    "Prime Focus Limited (NSE: PFOCUS); the news also names it as: Brahma AI, DNEG, Namit Malhotra"
+   ]
+  ],
+  "articles": [
+   {
+    "source_name": "Frontier Enterprise",
+    "title": "Brahma AI raises US$150M toward launch of ‘interactive digital humans’",
+    "snippet": "",
+    "published_at": "2026-10-07T07:00:00+00:00"
+   }
+  ],
+  "filings": [],
+  "reply": null,
+  "output": {
+   "summary": "Brahma AI has raised US$150 million toward the launch of interactive digital humans. This funding development matters for Prime Focus Limited because Brahma AI is named as part of the company.",
+   "stocks": [
+    {
+     "symbol": "PFOCUS.NS",
+     "relevance": "primary",
+     "sentiment": "positive",
+     "materiality": "medium",
+     "event_type": "deal",
+     "reason": "Brahma AI raised US$150M toward launching interactive digital humans."
+    }
+   ]
+  },
+  "model": "gemini-3.5-flash-lite"
+ },
+ {
+  "story_id": 8,
+  "companies": [
+   [
+    "APOLLO.NS",
+    "Apollo Micro Systems Limited (NSE: APOLLO)"
+   ]
+  ],
+  "articles": [
+   {
+    "source_name": "scanx.trade",
+    "title": "Apollo Micro Systems publishes Q1FY27 results, reports ₹251.3 crore revenue",
+    "snippet": "",
+    "published_at": "2026-10-07T21:24:59+00:00"
+   }
+  ],
+  "filings": [],
+  "reply": null,
+  "output": {
+   "summary": "Apollo Micro Systems published its Q1FY27 results, reporting a revenue of ₹251.3 crore. This update provides financial figures for the company's performance during the quarter.",
+   "stocks": [
+    {
+     "symbol": "APOLLO.NS",
+     "relevance": "primary",
+     "sentiment": "neutral",
+     "materiality": "medium",
+     "event_type": "results",
+     "reason": "The company published its Q1FY27 results reporting ₹251.3 crore in revenue."
+    }
+   ]
+  },
+  "model": "gemini-3.5-flash-lite"
+ },
+ {
+  "story_id": 10,
+  "companies": [
+   [
+    "HAL.NS",
+    "Hindustan Aeronautics Limited (NSE: HAL); the news also names it as: HATSOFF, Tejas"
+   ]
+  ],
+  "articles": [
+   {
+    "source_name": "https://whispersinthecorridors.net/",
+    "title": "Hindustan Aeronautics Limited appoints Anindya Biswas as Govt. Nominee Director",
+    "snippet": "",
+    "published_at": "2026-10-08T06:03:00+00:00"
+   },
+   {
+    "source_name": "Transfermarkt",
+    "title": "Hindustan Aeronautics Limited SC",
+    "snippet": "",
+    "published_at": "2026-10-07T10:20:21+00:00"
+   },
+   {
+    "source_name": "scanx.trade",
+    "title": "Hindustan Aeronautics appoints Anindya Biswas as part-time official director",
+    "snippet": "",
+    "published_at": "2026-10-07T10:29:42+00:00"
+   },
+   {
+    "source_name": "Business Upturn",
+    "title": "Hindustan Aeronautics announces directorate change with appointment of Anindya Biswas",
+    "snippet": "",
+    "published_at": "2026-10-07T10:17:32+00:00"
+   }
+  ],
+  "filings": [
+   {
+    "exchange": "NSE",
+    "subject": "Change in Director(s)",
+    "description": "Hindustan Aeronautics Limited has informed the Exchange regarding Change in Director(s) of the company.",
+    "filed_at": "2026-10-07T10:09:32+00:00"
+   }
+  ],
+  "reply": null,
+  "output": {
+   "summary": "Hindustan Aeronautics Limited has announced a directorate change with the appointment of Anindya Biswas as a part-time official director. The NSE filing confirms the change in directors for the company.",
+   "stocks": [
+    {
+     "symbol": "HAL.NS",
+     "relevance": "primary",
+     "sentiment": "neutral",
+     "materiality": "low",
+     "event_type": "management",
+     "reason": "Hindustan Aeronautics Limited appointed Anindya Biswas as a Govt. Nominee Director and part-time official director."
+    }
+   ]
+  },
+  "model": "gemini-3.5-flash-lite"
+ },
+ {
+  "story_id": 11,
+  "companies": [
+   [
+    "HAL.NS",
+    "Hindustan Aeronautics Limited (NSE: HAL); the news also names it as: HATSOFF, Tejas"
+   ]
+  ],
+  "articles": [
+   {
+    "source_name": "The Hindu",
+    "title": "GE Aerospace to ship 4 engines for Tejas LCA",
+    "snippet": "",
+    "published_at": "2026-10-07T07:32:35+00:00"
+   },
+   {
+    "source_name": "India Sentinels",
+    "title": "GE Aerospace ships four more F404 engines to HAL for Tejas-Mk1A",
+    "snippet": "",
+    "published_at": "2026-10-07T14:14:01+00:00"
+   },
+   {
+    "source_name": "The New Indian Express",
+    "title": "GE Aerospace ships four more engines for Tejas Mk-1A; tally reaches 14",
+    "snippet": "",
+    "published_at": "2026-10-07T14:05:29+00:00"
+   },
+   {
+    "source_name": "Devdiscourse",
+    "title": "\"Focused on delivering engines needed to power India’s Tejas\": GE Aerospace ships 4 more F404 engines for Tejas in September",
+    "snippet": "",
+    "published_at": "2026-10-07T07:05:26+00:00"
+   },
+   {
+    "source_name": "Defence Watch",
+    "title": "GE Aerospace ships four more F404 engines for Tejas in September",
+    "snippet": "",
+    "published_at": "2026-10-07T08:24:58+00:00"
+   },
+   {
+    "source_name": "Business Today",
+    "title": "GE Aerospace ships 4 more engines for Tejas jets",
+    "snippet": "",
+    "published_at": "2026-10-07T09:47:48+00:00"
+   }
+  ],
+  "filings": [],
+  "reply": null,
+  "output": {
+   "summary": "GE Aerospace has shipped four more F404 engines to Hindustan Aeronautics Limited for the Tejas Mk-1A fighter jets. This delivery supports the ongoing production program for the Tejas jets.",
+   "stocks": [
+    {
+     "symbol": "HAL.NS",
+     "relevance": "primary",
+     "sentiment": "positive",
+     "materiality": "low",
+     "event_type": "other",
+     "reason": "GE Aerospace shipped four more F404 engines to HAL for the Tejas-Mk1A program."
+    }
+   ]
+  },
+  "model": "gemini-3.5-flash-lite"
+ },
+ {
+  "story_id": 12,
+  "companies": [
+   [
+    "HAL.NS",
+    "Hindustan Aeronautics Limited (NSE: HAL); the news also names it as: HATSOFF, Tejas"
+   ]
+  ],
+  "articles": [
+   {
+    "source_name": "Defence.in",
+    "title": "HAL to Expand Annual AL-31FP Engine Output to 50 Units with New Rs 335 Cr Investment, Enhancing IAF's Su-30MKI Availability",
+    "snippet": "",
+    "published_at": "2026-10-07T14:45:16+00:00"
+   }
+  ],
+  "filings": [],
+  "reply": null,
+  "output": {
+   "summary": "Hindustan Aeronautics Limited is expanding its annual AL-31FP engine output to 50 units with a new Rs 335 crore investment. This expansion will enhance the availability of the Indian Air Force's Su-30MKI fleet.",
+   "stocks": [
+    {
+     "symbol": "HAL.NS",
+     "relevance": "primary",
+     "sentiment": "positive",
+     "materiality": "low",
+     "event_type": "other",
+     "reason": "HAL is investing Rs 335 crores to expand its annual AL-31FP engine output to 50 units."
+    }
+   ]
+  },
+  "model": "gemini-3.5-flash-lite"
+ },
+ {
+  "story_id": 14,
+  "companies": [
+   [
+    "HAL.NS",
+    "Hindustan Aeronautics Limited (NSE: HAL); the news also names it as: HATSOFF, Tejas"
+   ]
+  ],
+  "articles": [
+   {
+    "source_name": "The Economic Times",
+    "title": "LCA fighter engine supplies stabilise as GE ships four sets to HAL",
+    "snippet": "",
+    "published_at": "2026-10-07T18:11:20+00:00"
+   },
+   {
+    "source_name": "Raksha Anirveda",
+    "title": "GE Ships Four Engines to HAL, Yet Bigger Questions Remain",
+    "snippet": "",
+    "published_at": "2026-10-07T15:08:31+00:00"
+   }
+  ],
+  "filings": [],
+  "reply": null,
+  "output": {
+   "summary": "GE has shipped four LCA fighter engine sets to Hindustan Aeronautics Limited, helping stabilise supplies for the fighter program. This matters because engine availability is crucial for HAL to maintain its delivery timelines and production output.",
+   "stocks": [
+    {
+     "symbol": "HAL.NS",
+     "relevance": "primary",
+     "sentiment": "positive",
+     "materiality": "low",
+     "event_type": "other",
+     "reason": "GE shipped four engine sets to HAL, which helps stabilise supplies for LCA fighter engines."
+    }
+   ]
+  },
+  "model": "gemini-3.5-flash-lite"
+ },
+ {
+  "story_id": 16,
+  "companies": [
+   [
+    "HAL.NS",
+    "Hindustan Aeronautics Limited (NSE: HAL); the news also names it as: HATSOFF, Tejas"
+   ]
+  ],
+  "articles": [
+   {
+    "source_name": "Kalkine India",
+    "title": "HAL Board Change: Anindya Biswas Joins as Govt Nominee Director",
+    "snippet": "",
+    "published_at": "2026-10-07T10:09:00+00:00"
+   },
+   {
+    "source_name": "Indianmasterminds",
+    "title": "HAL Appoints DRDO’s Anindya Biswas as Government Nominee Director, Succeeds Dr K Rajalakshmi Menon",
+    "snippet": "",
+    "published_at": "2026-10-07T12:38:10+00:00"
+   },
+   {
+    "source_name": "PSU Connect",
+    "title": "HAL Appoints Anindya Biswas as Government Nominee Director; Rajalakshmi Menon Ceases",
+    "snippet": "",
+    "published_at": "2026-10-07T10:28:00+00:00"
+   }
+  ],
+  "filings": [],
+  "reply": null,
+  "output": {
+   "summary": "Hindustan Aeronautics Limited has appointed Anindya Biswas as its new Government Nominee Director, succeeding Dr. K. Rajalakshmi Menon. This board change is a routine governance update for the company.",
+   "stocks": [
+    {
+     "symbol": "HAL.NS",
+     "relevance": "primary",
+     "sentiment": "neutral",
+     "materiality": "low",
+     "event_type": "management",
+     "reason": "Anindya Biswas was appointed as Government Nominee Director."
+    }
+   ]
+  },
+  "model": "gemini-3.5-flash-lite"
+ },
+ {
+  "story_id": 22,
+  "companies": [
+   [
+    "APOLLO.NS",
+    "Apollo Micro Systems Limited (NSE: APOLLO)"
+   ]
+  ],
+  "articles": [
+   {
+    "source_name": "Business Upturn",
+    "title": "Defence sector stocks fall today, October 8: Apollo Micro Systems falls 4.24%, Krishna Defence declines 3.04%, Krishna Defence down 3%",
+    "snippet": "",
+    "published_at": "2026-10-08T04:54:15+00:00"
+   }
+  ],
+  "filings": [],
+  "reply": null,
+  "output": {
+   "summary": "Defence sector stocks fell on October 8, with Apollo Micro Systems declining 4.24%. This share price movement reflects broader market trends in the defence sector.",
+   "stocks": [
+    {
+     "symbol": "APOLLO.NS",
+     "relevance": "secondary",
+     "sentiment": "negative",
+     "materiality": "low",
+     "event_type": "other",
+     "reason": "Apollo Micro Systems shares fell 4.24% amidst a general decline in defence sector stocks."
+    }
+   ]
+  },
+  "model": "gemini-3.5-flash-lite"
+ },
+ {
+  "story_id": 23,
+  "companies": [
+   [
+    "HAL.NS",
+    "Hindustan Aeronautics Limited (NSE: HAL); the news also names it as: HATSOFF, Tejas"
+   ]
+  ],
+  "articles": [
+   {
+    "source_name": "The Financial Express",
+    "title": "HAL Koraput rolls out 2,000th aero engine, gets Rs 218-crore 2nd Shakti engine line",
+    "snippet": "",
+    "published_at": "2026-10-07T12:30:41+00:00"
+   },
+   {
+    "source_name": "Adda247",
+    "title": "India Unveils First Fleet Support Ship ‘Surya’, HAL Delivers 2,000th Aero-Engine",
+    "snippet": "",
+    "published_at": "2026-10-08T07:25:14+00:00"
+   }
+  ],
+  "filings": [],
+  "reply": null,
+  "output": {
+   "summary": "Hindustan Aeronautics Limited's Koraput division rolled out its 2,000th aero engine and received a Rs 218-crore second Shakti engine line. This milestone highlights ongoing manufacturing progress and strengthens production capacity for the company.",
+   "stocks": [
+    {
+     "symbol": "HAL.NS",
+     "relevance": "primary",
+     "sentiment": "positive",
+     "materiality": "medium",
+     "event_type": "other",
+     "reason": "HAL Koraput rolled out its 2,000th aero engine and received a Rs 218-crore second Shakti engine line."
+    }
+   ]
+  },
+  "model": "gemini-3.5-flash-lite"
+ },
+ {
+  "story_id": 25,
+  "companies": [
+   [
+    "AEQUS.NS",
+    "Aequs Limited (NSE: AEQUS)"
+   ]
+  ],
+  "articles": [
+   {
+    "source_name": "scanx.trade",
+    "title": "AmanSA Investments cuts stake in Aequs to 5.35% after selling 934,000 shares",
+    "snippet": "",
+    "published_at": "2026-10-08T04:18:20+00:00"
+   }
+  ],
+  "filings": [],
+  "reply": null,
+  "output": {
+   "summary": "AmanSA Investments reduced its stake in Aequs to 5.35% by selling 934,000 shares. This insider or major shareholder stake reduction alters the shareholding pattern.",
+   "stocks": [
+    {
+     "symbol": "AEQUS.NS",
+     "relevance": "primary",
+     "sentiment": "neutral",
+     "materiality": "low",
+     "event_type": "deal",
+     "reason": "AmanSA Investments reduced its stake in Aequs to 5.35% after selling 934,000 shares."
+    }
+   ]
+  },
+  "model": "gemini-3.5-flash-lite"
+ },
+ {
+  "story_id": 26,
+  "companies": [
+   [
+    "BDL.NS",
+    "Bharat Dynamics Limited (NSE: BDL)"
+   ]
+  ],
+  "articles": [
+   {
+    "source_name": "whispersinthecorridors.net",
+    "title": "Bharat Dynamics Limited appoints Jagannath Nayak as Govt Director",
+    "snippet": "",
+    "published_at": "2026-10-08T06:04:06+00:00"
+   },
+   {
+    "source_name": "scanx.trade",
+    "title": "Bharat Dynamics appoints Dr. Jagannath Nayak as government director",
+    "snippet": "",
+    "published_at": "2026-10-07T15:39:54+00:00"
+   },
+   {
+    "source_name": "Indianmasterminds",
+    "title": "BDL Appoints DRDO’s Dr Jagannath Nayak as Part-Time Official Director on Board",
+    "snippet": "",
+    "published_at": "2026-10-07T23:57:59+00:00"
+   },
+   {
+    "source_name": "PSU Connect",
+    "title": "BDL Appoints Dr. Jagannath Nayak as Government Nominee Director on Board",
+    "snippet": "",
+    "published_at": "2026-10-07T10:59:00+00:00"
+   },
+   {
+    "source_name": "Business Upturn",
+    "title": "Bharat Dynamics appoints Dr Jagannath Nayak as Part-Time Official Director",
+    "snippet": "",
+    "published_at": "2026-10-07T10:42:33+00:00"
+   }
+  ],
+  "filings": [],
+  "reply": null,
+  "output": {
+   "summary": "Bharat Dynamics Limited has appointed Dr. Jagannath Nayak as a government nominee and part-time official director on its board. This board appointment brings new leadership representation from DRDO to the company's governance.",
+   "stocks": [
+    {
+     "symbol": "BDL.NS",
+     "relevance": "primary",
+     "sentiment": "neutral",
+     "materiality": "low",
+     "event_type": "management",
+     "reason": "Bharat Dynamics Limited has appointed Dr. Jagannath Nayak as a government nominee director on its board."
+    }
+   ]
+  },
+  "model": "gemini-3.5-flash-lite"
+ },
+ {
+  "story_id": 27,
+  "companies": [
+   [
+    "BDL.NS",
+    "Bharat Dynamics Limited (NSE: BDL)"
+   ]
+  ],
+  "articles": [
+   {
+    "source_name": "Moneycontrol",
+    "title": "Bharat Dynamics: Akash and Astra ramp-up to drive earnings growth",
+    "snippet": "",
+    "published_at": "2026-10-08T03:59:37+00:00"
+   }
+  ],
+  "filings": [],
+  "reply": null,
+  "output": {
+   "summary": "Reports indicate that Bharat Dynamics is set for earnings growth driven by the ramp-up of Akash and Astra. This matters because it highlights expected financial improvement from key product lines.",
+   "stocks": [
+    {
+     "symbol": "BDL.NS",
+     "relevance": "primary",
+     "sentiment": "positive",
+     "materiality": "medium",
+     "event_type": "results",
+     "reason": "Reports state that Akash and Astra ramp-ups will drive earnings growth."
+    }
+   ]
+  },
+  "model": "gemini-3.5-flash-lite"
+ },
+ {
+  "story_id": 28,
+  "companies": [
+   [
+    "HAL.NS",
+    "Hindustan Aeronautics Limited (NSE: HAL); the news also names it as: HATSOFF, Tejas"
+   ]
+  ],
+  "articles": [
+   {
+    "source_name": "Meta-Defense",
+    "title": "Excluded from the Tejas, the Kaveri engine returns through Indian combat drones with the Tejas Mk2 in its sights",
+    "snippet": "",
+    "published_at": "2026-10-07T14:44:27+00:00"
+   }
+  ],
+  "filings": [],
+  "reply": null,
+  "output": {
+   "summary": "The Kaveri engine is returning through Indian combat drones and is aimed at the Tejas Mk2. This development affects the context of engine options for the Tejas programme.",
+   "stocks": [
+    {
+     "symbol": "HAL.NS",
+     "relevance": "primary",
+     "sentiment": "neutral",
+     "materiality": "low",
+     "event_type": "other",
+     "reason": "The report discusses the Kaveri engine returning through combat drones with the Tejas Mk2 in its sights."
+    }
+   ]
+  },
+  "model": "gemini-3.5-flash-lite"
+ },
+ {
+  "story_id": 29,
+  "companies": [
+   [
+    "HAL.NS",
+    "Hindustan Aeronautics Limited (NSE: HAL); the news also names it as: HATSOFF, Tejas"
+   ]
+  ],
+  "articles": [
+   {
+    "source_name": "Moneycontrol",
+    "title": "From Tejas to AMCA: 5 key IAF programmes on new Air Chief Ashutosh Dixit's agenda",
+    "snippet": "",
+    "published_at": "2026-10-08T03:10:35+00:00"
+   }
+  ],
+  "filings": [],
+  "reply": null,
+  "output": {
+   "summary": "Air Chief Ashutosh Dixit's agenda includes five key Indian Air Force programmes ranging from the Tejas to the AMCA. This programme overview highlights the ongoing projects relevant to Hindustan Aeronautics Limited.",
+   "stocks": [
+    {
+     "symbol": "HAL.NS",
+     "relevance": "secondary",
+     "sentiment": "neutral",
+     "materiality": "low",
+     "event_type": "other",
+     "reason": "The new Air Chief's agenda lists key IAF programmes like the Tejas, highlighting existing defence projects without announcing new orders."
+    }
+   ]
+  },
+  "model": "gemini-3.5-flash-lite"
+ },
+ {
+  "story_id": 33,
+  "companies": [
+   [
+    "ZENTEC.NS",
+    "Zen Technologies Limited (NSE: ZENTEC)"
+   ]
+  ],
+  "articles": [
+   {
+    "source_name": "TipRanks",
+    "title": "Zen Technologies Transfers 2,000 ESOP Shares Without Altering Capital Base",
+    "snippet": "",
+    "published_at": "2026-10-07T22:36:50+00:00"
+   }
+  ],
+  "filings": [],
+  "reply": null,
+  "output": {
+   "summary": "Zen Technologies transferred 2,000 ESOP shares without altering its capital base. This routine employee stock option transfer has no material impact on the company's financial structure.",
+   "stocks": [
+    {
+     "symbol": "ZENTEC.NS",
+     "relevance": "primary",
+     "sentiment": "neutral",
+     "materiality": "low",
+     "event_type": "management",
+     "reason": "Zen Technologies transferred 2,000 ESOP shares without altering its capital base, which is a routine administrative matter."
+    }
+   ]
+  },
+  "model": "gemini-3.5-flash-lite"
+ },
+ {
+  "story_id": 34,
+  "companies": [
+   [
+    "HAL.NS",
+    "Hindustan Aeronautics Limited (NSE: HAL); the news also names it as: HATSOFF, Tejas"
+   ]
+  ],
+  "articles": [
+   {
+    "source_name": "Yahoo Finance UK",
+    "title": "HAL Oct 2026 31.000 put (HAL261023P00031000) interactive stock chart",
+    "snippet": "",
+    "published_at": "2026-10-07T12:10:05+00:00"
+   }
+  ],
+  "filings": [],
+  "reply": null,
+  "output": {
+   "summary": "An interactive stock chart for a Hindustan Aeronautics Limited put option expiring in October 2026 was published. This is an automated market data listing and does not contain fundamental news affecting the company.",
+   "stocks": [
+    {
+     "symbol": "HAL.NS",
+     "relevance": "passing",
+     "sentiment": "neutral",
+     "materiality": "low",
+     "event_type": "other",
+     "reason": "The article only shows an interactive stock chart for a put option."
+    }
+   ]
+  },
+  "model": "gemini-3.5-flash-lite"
+ },
+ {
+  "story_id": 35,
+  "companies": [
+   [
+    "HAL.NS",
+    "Hindustan Aeronautics Limited (NSE: HAL); the news also names it as: HATSOFF, Tejas"
+   ]
+  ],
+  "articles": [
+   {
+    "source_name": "The Financial Express",
+    "title": "Defence capex up 37%: Kotak sees strong Q2 growth for Solar, BEL & HAL on Rs 1.6 tn AoNs",
+    "snippet": "",
+    "published_at": "2026-10-08T09:14:31+00:00"
+   }
+  ],
+  "filings": [],
+  "reply": null,
+  "output": {
+   "summary": "Kotak reported that a 37% increase in defence capital expenditure and Rs 1.6 trillion in Acceptance of Necessity approvals point to strong Q2 growth for companies like HAL. This broker preview highlights potential positive financial performance driven by sector tailwinds.",
+   "stocks": [
+    {
+     "symbol": "HAL.NS",
+     "relevance": "secondary",
+     "sentiment": "positive",
+     "materiality": "low",
+     "event_type": "results",
+     "reason": "Kotak sees strong Q2 growth for HAL driven by a 37% increase in defence capex."
+    }
+   ]
+  },
+  "model": "gemini-3.5-flash-lite"
+ },
+ {
+  "story_id": 37,
+  "companies": [
+   [
+    "HAL.NS",
+    "Hindustan Aeronautics Limited (NSE: HAL); the news also names it as: HATSOFF, Tejas"
+   ]
+  ],
+  "articles": [
+   {
+    "source_name": "Pragativadi",
+    "title": "Defence Minister Rajnath Singh Visits HAL Sunabeda, Lays Foundation for Shakti Engine Facility",
+    "snippet": "",
+    "published_at": "2026-10-08T08:19:20+00:00"
+   }
+  ],
+  "filings": [],
+  "reply": null,
+  "output": {
+   "summary": "Defence Minister Rajnath Singh visited Hindustan Aeronautics Limited (HAL) in Sunabeda and laid the foundation stone for the Shakti Engine Facility. This development supports the company's manufacturing and engine production capabilities.",
+   "stocks": [
+    {
+     "symbol": "HAL.NS",
+     "relevance": "primary",
+     "sentiment": "positive",
+     "materiality": "medium",
+     "event_type": "other",
+     "reason": "Defence Minister Rajnath Singh laid the foundation for a new Shakti Engine Facility at HAL Sunabeda."
+    }
+   ]
+  },
+  "model": "gemini-3.5-flash-lite"
+ },
+ {
+  "story_id": 39,
+  "companies": [
+   [
+    "BDL.NS",
+    "Bharat Dynamics Limited (NSE: BDL)"
+   ]
+  ],
+  "articles": [
+   {
+    "source_name": "Alice Blue",
+    "title": "BDL Missile Pipeline Boosts Bharat Dynamics share price target",
+    "snippet": "",
+    "published_at": "2026-10-08T07:13:47+00:00"
+   }
+  ],
+  "filings": [],
+  "reply": null,
+  "output": {
+   "summary": "Bharat Dynamics received a positive price target adjustment driven by its missile pipeline. This matters because it highlights growth expectations for the company's core product offerings.",
+   "stocks": [
+    {
+     "symbol": "BDL.NS",
+     "relevance": "primary",
+     "sentiment": "positive",
+     "materiality": "low",
+     "event_type": "rating_change",
+     "reason": "The company's share price target received a boost due to its missile pipeline."
+    }
+   ]
+  },
+  "model": "gemini-3.5-flash-lite"
+ },
+ {
+  "story_id": 41,
+  "companies": [
+   [
+    "HAL.NS",
+    "Hindustan Aeronautics Limited (NSE: HAL); the news also names it as: HATSOFF, Tejas"
+   ]
+  ],
+  "articles": [
+   {
+    "source_name": "India.com",
+    "title": "Air Force Day Special: From four aircraft to Rafale-Tejas, how the Indian Air Force has changed in 94 years",
+    "snippet": "",
+    "published_at": "2026-10-08T09:05:56+00:00"
+   }
+  ],
+  "filings": [],
+  "reply": null,
+  "output": {
+   "summary": "An article celebrated Air Force Day by highlighting the evolution of the Indian Air Force over 94 years, mentioning aircraft like the Tejas. The article is a general historical overview and does not contain new developments for the company.",
+   "stocks": [
+    {
+     "symbol": "HAL.NS",
+     "relevance": "passing",
+     "sentiment": "neutral",
+     "materiality": "low",
+     "event_type": "other",
+     "reason": "The article only mentions the Tejas aircraft in passing as part of an Air Force Day historical overview."
+    }
+   ]
+  },
+  "model": "gemini-3.5-flash-lite"
+ },
+ {
+  "story_id": 42,
+  "companies": [
+   [
+    "BDL.NS",
+    "Bharat Dynamics Limited (NSE: BDL)"
+   ]
+  ],
+  "articles": [],
+  "filings": [
+   {
+    "exchange": "NSE",
+    "subject": "Change in Director(s)",
+    "description": "Bharat Dynamics Limited has informed the Exchange regarding Change in Director(s) of the company.",
+    "filed_at": "2026-10-07T10:35:47+00:00"
+   }
+  ],
+  "reply": null,
+  "output": {
+   "summary": "Bharat Dynamics Limited announced a change in its directors. This routine board change has no immediate impact on the company's share price.",
+   "stocks": [
+    {
+     "symbol": "BDL.NS",
+     "relevance": "primary",
+     "sentiment": "neutral",
+     "materiality": "low",
+     "event_type": "management",
+     "reason": "Bharat Dynamics Limited informed the exchange regarding a change in its director(s)."
+    }
+   ]
+  },
+  "model": "gemini-3.5-flash-lite"
+ },
+ {
+  "story_id": 43,
+  "companies": [
+   [
+    "ZENTEC.NS",
+    "Zen Technologies Limited (NSE: ZENTEC)"
+   ]
+  ],
+  "articles": [],
+  "filings": [
+   {
+    "exchange": "NSE",
+    "subject": "ESOP/ESOS/ESPS",
+    "description": "Zen Technologies Limited has informed the Exchange regarding Exercise of 2000 Options.",
+    "filed_at": "2026-10-07T18:17:04+00:00"
+   }
+  ],
+  "reply": null,
+  "output": {
+   "summary": "Zen Technologies Limited informed the exchange regarding the exercise of 2,000 options. This routine employee stock option exercise has no material impact on the company's share price.",
+   "stocks": [
+    {
+     "symbol": "ZENTEC.NS",
+     "relevance": "primary",
+     "sentiment": "neutral",
+     "materiality": "low",
+     "event_type": "management",
+     "reason": "Zen Technologies Limited informed the exchange regarding the exercise of 2000 Options."
+    }
+   ]
+  },
+  "model": "gemini-3.5-flash-lite"
+ }
+]

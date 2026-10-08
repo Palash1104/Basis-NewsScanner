@@ -4,7 +4,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from app.config import RateLimitSettings
+from app.config import LaneSettings, RateLimitSettings
 from app.db import init_db, make_engine, make_session_factory
 from app.llm.ratelimit import (
     DailyLimitReached,
@@ -174,7 +174,7 @@ def test_losing_reservation_is_released_while_waiting(tmp_path: Path) -> None:
     limiter.acquire(MODEL, 10)
     limiter.acquire(MODEL, 10)  # waits once; its first reservation must not linger
     assert len(clock.sleeps) == 1
-    assert window.ahead(MODEL, 10**9, clock.now - 3600) == (2, 20.0, pytest.approx(1000.0))
+    assert window.ahead(MODEL, 10**9, clock.now - 3600) == (2, 20.0, pytest.approx(1000.0), 2)
 
 
 def test_estimate_is_conservative() -> None:
@@ -217,3 +217,85 @@ def test_status_reports_usage_budget_and_quota() -> None:
     assert status is not None
     assert (status.used, status.budget, status.limit, status.day) == (1, 350, 500, "2026-09-17")
     assert limiter.status("unknown-model") is None
+
+
+# ---------------------------------------------------------------- lanes (user, 2026-10-07)
+
+
+def _laned(
+    clock: FakeClock | None = None, window=None, store=None
+) -> tuple[RateLimiter, FakeClock]:
+    clock = clock or FakeClock()
+    limits = {
+        MODEL: RateLimitSettings(
+            requests_per_minute=15,
+            input_tokens_per_minute=1_000_000,
+            requests_per_day=10,
+            requests_per_day_budget=7,
+            lanes={
+                "main": LaneSettings(requests_per_day=4, requests_per_minute=3),
+                "watch": LaneSettings(requests_per_day=3),
+            },
+        )
+    }
+    limiter = RateLimiter(
+        limits,
+        store if store is not None else MemoryDailyUsageStore(),
+        PACIFIC,
+        require_limits=True,
+        clock=clock,
+        sleep=clock.sleep,
+        now=lambda: datetime(2026, 9, 17, 12, 0, tzinfo=UTC),
+        window=window,
+    )
+    return limiter, clock
+
+
+def test_each_lane_has_its_own_daily_budget() -> None:
+    limiter, clock = _laned()
+    for _ in range(3):
+        limiter.acquire(MODEL, 10, lane="watch")
+    with pytest.raises(DailyLimitReached, match="watch lane budget reached"):
+        limiter.acquire(MODEL, 10, lane="watch")
+    limiter.acquire(MODEL, 10, lane="main")  # the watchlist used its share, not the main one's
+    limiter.acquire(MODEL, 10, lane="watch", retry=True)  # retries aren't held to a lane
+    status = limiter.status(MODEL)
+    assert status is not None and status.lanes == {"main": (1, 4), "watch": (4, 3)}
+
+
+def test_the_main_lane_leaves_part_of_the_minute_to_the_watchlist() -> None:
+    limiter, clock = _laned()
+    for _ in range(3):
+        limiter.acquire(MODEL, 10, lane="main")
+    limiter.acquire(MODEL, 10, lane="watch")  # the watchlist's share is free: no wait
+    assert clock.sleeps == []
+    limiter.acquire(MODEL, 10, lane="main")  # the main lane's 3 a minute are used: it waits
+    assert len(clock.sleeps) == 1
+
+
+def test_lane_budgets_must_fit_the_daily_budget() -> None:
+    with pytest.raises(ValueError, match="add up to more than the daily budget"):
+        RateLimitSettings(
+            requests_per_minute=15,
+            input_tokens_per_minute=1000,
+            requests_per_day=500,
+            requests_per_day_budget=420,
+            lanes={
+                "main": LaneSettings(requests_per_day=350),
+                "watch": LaneSettings(requests_per_day=120),
+            },
+        )
+
+
+def test_lane_counts_are_shared_through_the_database(tmp_path: Path) -> None:
+    engine = make_engine(tmp_path / "usage.db")
+    init_db(engine)
+    store = SqlDailyUsageStore(make_session_factory(engine), "gemini")
+    window = SqlMinuteWindow(make_session_factory(engine), "gemini")
+    first, clock = _laned(store=store, window=window)
+    first.acquire(MODEL, 10, lane="watch")
+    second, _ = _laned(clock=clock, store=store, window=window)  # another process
+    assert store.lane_requests(first.quota_day(), MODEL, "watch") == 1
+    assert window.ahead(MODEL, 10**9, clock.now - 60, "watch")[3] == 1
+    second.acquire(MODEL, 10, lane="main")
+    assert window.ahead(MODEL, 10**9, clock.now - 60, "watch")[3] == 1

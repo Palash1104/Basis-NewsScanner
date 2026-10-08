@@ -23,6 +23,8 @@ MAX_HEADLINE_WORDS = 12
 _ABBREVIATION = re.compile(
     r"\b(?:[A-Z]\.){2,}"  # U.S., U.K., E.U.
     r"|\b(?:Mr|Mrs|Ms|Dr|Prof|St|Gen|Sen|Rep|Gov|Lt|Col|Capt|Sgt|Jr|Sr|Inc|Ltd|Co|Corp|No|vs|approx|est)\."
+    # Indian business writing: "Govt. Nominee Director", "Rs. 705.65", "Pvt. Ltd."
+    r"|\b(?:Govt|Pvt|Dept|Rs)\."
     r"|\b\d+\.\d+"  # decimals: 3.5%
 )
 _SENTENCE_END = re.compile(r"[.!?]+[\"'”’)\]]*(?=\s|$)")
@@ -275,3 +277,87 @@ class StoryRanking(BaseModel):
     story_ids: list[int] = Field(
         description="Every candidate story id, most significant first. Include them all."
     )
+
+
+# ---------------------------------------------------------------- the watchlist call
+
+
+WatchRelevance = Literal["primary", "secondary", "passing"]
+WatchSentiment = Literal["positive", "negative", "neutral"]
+WatchMateriality = Literal["high", "medium", "low"]
+# The event types the user listed (2026-10-07).
+WatchEventType = Literal[
+    "results",
+    "order_win",
+    "regulatory",
+    "management",
+    "rating_change",
+    "deal",
+    "legal",
+    "other",
+]
+MAX_REASON_WORDS = 30
+
+
+class StockAssessment(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    symbol: str = Field(description="The company's symbol exactly as given in <companies>.")
+    relevance: WatchRelevance = Field(
+        description="primary: the story is about this company. secondary: the company is "
+        "materially involved but not the main subject. passing: only named in passing or in "
+        "a list, or the story is about something else that shares the name."
+    )
+    sentiment: WatchSentiment = Field(
+        description="What this news means for this company's share price. neutral is a "
+        "normal answer."
+    )
+    materiality: WatchMateriality = Field(
+        description="high: likely to move the share price noticeably. low: routine. low is "
+        "a normal answer."
+    )
+    event_type: WatchEventType
+    reason: str = Field(
+        description="One short sentence, from the articles only, saying why: the fact that "
+        "decides the sentiment and materiality."
+    )
+
+    @field_validator("reason")
+    @classmethod
+    def _one_sentence(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("reason is empty")
+        if count_sentences(value) > 1:
+            raise ValueError("reason must be one sentence")
+        if count_words(value) > MAX_REASON_WORDS:
+            raise ValueError(f"reason must be at most {MAX_REASON_WORDS} words")
+        return value
+
+    @model_validator(mode="after")
+    def _passing_is_never_high(self) -> "StockAssessment":
+        if self.relevance == "passing" and self.materiality == "high":
+            raise ValueError("a passing mention can't be high materiality")
+        return self
+
+
+class WatchAnalysis(BaseModel):
+    """One story, assessed for every watchlist company it names."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    summary: str = Field(
+        description="2-3 short sentences in plain words. Sentence 1: what happened. Then: "
+        "why it matters for the company."
+    )
+    stocks: list[StockAssessment] = Field(
+        description="One entry for every company in <companies>, in the same order."
+    )
+
+    @field_validator("summary")
+    @classmethod
+    def _short_summary(cls, value: str) -> str:
+        value = value.strip()
+        if not 1 <= count_sentences(value) <= 3:
+            raise ValueError("summary must be 1 to 3 sentences")
+        return value

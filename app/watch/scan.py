@@ -30,6 +30,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.config import FeedConfig, Settings, WatchlistFile
+from app.llm.client import LLMClient
 from app.models import (
     FeedCheck,
     WatchArticle,
@@ -45,6 +46,7 @@ from app.net import make_client
 from app.pipeline.dedupe import normalize_source, normalize_title
 from app.pipeline.embed import Embedder, article_text
 from app.pipeline.fetch import FetchedArticle, SourceResolver
+from app.watch.analyse import analyse, read_replies
 from app.watch.catchup import Gap, SourceCoverage, find_gap, possible_gaps
 from app.watch.group import StoryGrouper
 from app.watch.match import Match, Matcher
@@ -75,7 +77,8 @@ from app.watch.sources import (
 
 log = logging.getLogger(__name__)
 
-JOBS = ("feeds", "google_news", "prices")
+# analyse comes after the news jobs, so what they just stored is called in the same tick.
+JOBS = ("feeds", "google_news", "analyse", "prices")
 RETRY_AFTER_FAILURE = timedelta(minutes=1)  # after a pass in which every source failed
 NSE_FEED_NAME = "NSE announcements"
 # Two sightings are one article when the outlet is the same and the titles this close: a
@@ -104,11 +107,14 @@ class JobResult:
     new_filings: int = 0
     stories_created: int = 0
     prices: int = 0
+    calls: int = 0  # watch_calls rows written (analyse)
     errors: list[dict[str, Any]] = field(default_factory=list)
 
     def line(self) -> str:
         if self.job == "prices":
             text = f"prices: {self.prices} symbols polled"
+        elif self.job == "analyse":
+            text = f"analyse: {self.entries} stories called, {self.calls} calls written"
         else:
             text = (
                 f"{self.job}: {self.entries} entries, {self.new_articles} new watchlist articles, "
@@ -130,6 +136,7 @@ class Watcher:
         transport: httpx.AsyncBaseTransport | None = None,
         clock: Callable[[], datetime] = utcnow,
         history: HistoryProvider | None = None,
+        llm: LLMClient | None = None,
     ) -> None:
         self.settings = settings
         self.session_factory = session_factory
@@ -149,6 +156,10 @@ class Watcher:
         self._vectors: dict[str, np.ndarray] = {}
         self.last_run: dict[str, datetime] = {}
         self.history = history
+        self.llm = llm
+        # (story, articles, filings) whose call came back invalid: not asked again as is.
+        self._bad_inputs: set[tuple[int, int, int]] = set()
+        self._calls_paused_until: datetime | None = None  # the watch lane's budget is spent
         # Set by `newsdesk watch --since`: catch up from here on the next feed scan.
         self.force_since: datetime | None = None
         # The feeds whose health is tracked: not the one-off catch-up searches.
@@ -169,6 +180,8 @@ class Watcher:
             return timedelta(minutes=minutes)
         if job == "prices":
             return timedelta(minutes=watch.prices_every_minutes) if market else None
+        if job == "analyse":
+            return timedelta(minutes=1) if self.llm is not None else None
         raise ValueError(job)
 
     def due(self, job: str, now: datetime) -> bool:
@@ -192,7 +205,8 @@ class Watcher:
             result = self.run_job(job, now)
             results.append(result)
             every = self.interval(job, now)
-            if job != "prices" and result.entries == 0 and result.errors and every:
+            news = job in ("feeds", "google_news")
+            if news and result.entries == 0 and result.errors and every:
                 # Nothing answered - no network yet, typically right after a wake. Try again
                 # in a minute rather than a whole interval later.
                 self.last_run[job] = now - every + RETRY_AFTER_FAILURE
@@ -205,6 +219,8 @@ class Watcher:
                 result = self.scan_feeds(now)
             elif job == "google_news":
                 result = self.scan_google_news(now)
+            elif job == "analyse":
+                result = self.analyse_stories(now)
             else:
                 result = self.poll_prices(now)
         except Exception as exc:  # the loop must outlive any one bad pass
@@ -212,6 +228,8 @@ class Watcher:
             result = JobResult(
                 job, errors=[{"stage": job, "error": f"{type(exc).__name__}: {exc}"}]
             )
+        if job == "analyse" and not result.entries and not result.errors:
+            return result  # checked every minute; only a pass that did something is recorded
         run.entries = result.entries
         run.new_articles = result.new_articles
         run.new_filings = result.new_filings
@@ -275,6 +293,37 @@ class Watcher:
     def scan_google_news(self, now: datetime) -> JobResult:
         reads, _ = asyncio.run(self._fetch(self.queries, include_nse=False, now=now))
         return self._process("google_news", reads, None, now)
+
+    def analyse_stories(self, now: datetime) -> JobResult:
+        """The watchlist call on every story that needs one (app/watch/analyse.py), after
+        reading any company reply that has arrived. Paused once the watch lane's daily
+        budget is spent, until the quota day turns."""
+        result = JobResult("analyse")
+        if self.llm is None or (self._calls_paused_until and now < self._calls_paused_until):
+            return result
+        for note in read_replies(self.session_factory, self.settings):
+            log.info("watch reply: %s", note)
+        outcome = analyse(
+            self.session_factory,
+            self.llm,
+            self.settings,
+            {stock.symbol: stock for stock in self.stocks},
+            now,
+            self._bad_inputs,
+        )
+        result.entries = len(outcome.called)
+        result.calls = outcome.calls_written
+        result.errors = [
+            {"stage": "analyse", "story_id": story_id, "error": error}
+            for story_id, error in outcome.failed
+        ]
+        if outcome.stopped:
+            result.errors.append({"stage": "analyse", "error": outcome.stopped})
+            if self.llm.limiter is not None:
+                self._calls_paused_until = self.llm.limiter.next_reset()
+        for note in outcome.notes:
+            log.info("watch call: %s", note)
+        return result
 
     def poll_prices(self, now: datetime) -> JobResult:
         result = JobResult("prices")
@@ -864,7 +913,20 @@ def build_watcher(
         embedder,
         snapshots,
         history=YahooHistory(),
+        llm=_watch_llm(settings, session_factory),
     )
+
+
+def _watch_llm(settings: Settings, session_factory: sessionmaker[Session]) -> LLMClient | None:
+    """The client for the watchlist call, or None (the scanner then stores and groups but
+    calls nothing) when it can't be built - no API key, say."""
+    from app.llm.client import LLMConfigError, make_llm_client
+
+    try:
+        return make_llm_client(settings.llm, session_factory, settings.tz)
+    except LLMConfigError as exc:
+        log.warning("watchlist calls off: %s", exc)
+        return None
 
 
 def run_forever(

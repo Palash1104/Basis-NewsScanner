@@ -38,6 +38,16 @@ _PROVIDER_MODEL_PREFIXES: dict[str, tuple[str, ...]] = {
 }
 
 
+class LaneSettings(_Strict):
+    """One caller's share of a model's quota, so the watchlist can never starve the main
+    digest, nor the digest the watchlist (user, 2026-10-07)."""
+
+    requests_per_day: int = Field(gt=0)  # this lane's new work per quota day
+    # At most this many of the model's per-minute requests: what is left is the other
+    # lanes', so an alert never queues behind a catch-up run's hundred calls.
+    requests_per_minute: int | None = Field(default=None, gt=0)
+
+
 class RateLimitSettings(_Strict):
     """A model's quota. For Gemini, copy these from https://aistudio.google.com/rate-limit."""
 
@@ -46,6 +56,9 @@ class RateLimitSettings(_Strict):
     requests_per_day: int = Field(gt=0)  # the hard quota
     # New work stops here; retries of requests already started may use the rest of the quota.
     requests_per_day_budget: int | None = Field(default=None, gt=0)
+    # Per-caller budgets inside the daily budget ("main", "watch"). A call names its lane;
+    # one with no lane configured is only held to the model's own limits.
+    lanes: dict[str, LaneSettings] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def _budget_within_quota(self) -> "RateLimitSettings":
@@ -53,6 +66,11 @@ class RateLimitSettings(_Strict):
             self.requests_per_day_budget > self.requests_per_day
         ):
             raise ValueError("requests_per_day_budget can't exceed requests_per_day")
+        if sum(lane.requests_per_day for lane in self.lanes.values()) > self.daily_budget:
+            raise ValueError("the lanes' requests_per_day add up to more than the daily budget")
+        for name, lane in self.lanes.items():
+            if lane.requests_per_minute and lane.requests_per_minute > self.requests_per_minute:
+                raise ValueError(f"lane {name}: requests_per_minute above the model's")
         return self
 
     @property
@@ -157,6 +175,10 @@ class PipelineSettings(_Strict):
     # (not just lookback_hours) and summarizes more, up to these bounds.
     catch_up_max_hours: int = Field(default=24, gt=0)
     catch_up_max_stories: int = Field(default=60, gt=0)
+    # Summary categories whose stories get no event extraction (and so no playbook calls).
+    # Every skipped story is logged in extraction_skips, for a monthly check that nothing
+    # market-moving went past (`newsdesk skipped-extractions`).
+    skip_extraction_categories: list[str] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def _reserved_fit_in_the_run(self) -> "PipelineSettings":

@@ -130,7 +130,9 @@ def echo_summary_responder(kwargs: dict[str, Any]) -> ProviderResponse:
     match = re.search(r'published="[^"]*">([^\n<]*)', kwargs["user"])
     title = match.group(1) if match else "Untitled story"
     headline = " ".join(title.split()[:12])
-    return provider_response(summary_json(headline=headline, regions=["Global"], category="Other"))
+    return provider_response(
+        summary_json(headline=headline, regions=["Global"], category="Geopolitics")
+    )
 
 
 def gemini_body(

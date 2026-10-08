@@ -33,7 +33,7 @@ from app.llm.client import (
 )
 from app.llm.prompts import EVENT_PROMPT_VERSION, EVENT_SYSTEM, event_user_prompt
 from app.llm.schemas import EventExtraction
-from app.models import Article, Event, Story
+from app.models import Article, Event, ExtractionSkip, Story
 from app.pipeline.countries import normalize_countries
 from app.pipeline.summarize import news_articles, select_articles
 
@@ -184,3 +184,33 @@ def pending_event_stories(session: Session, settings: Settings, now: datetime) -
             .order_by(Story.importance_score.desc())
         )
     )
+
+
+def skip_by_category(
+    session: Session, stories: Sequence[Story], settings: Settings, now: datetime
+) -> tuple[list[Story], list[Story]]:
+    """Split off the stories in `pipeline.skip_extraction_categories` (user, 2026-10-07):
+    they get no extraction, and each is logged in extraction_skips so a monthly look can
+    confirm nothing market-moving went past. Returns (to extract, skipped)."""
+    skip = set(settings.pipeline.skip_extraction_categories)
+    kept: list[Story] = []
+    skipped: list[Story] = []
+    for story in stories:
+        if story.category not in skip:
+            kept.append(story)
+            continue
+        story.event_pending = False
+        session.add(
+            ExtractionSkip(
+                story_id=story.id,
+                category=story.category or "",
+                headline=story.headline,
+                summary=story.summary,
+                skipped_at=now,
+            )
+        )
+        skipped.append(story)
+    if skipped:
+        log.info("event extraction skipped for %d stories by category", len(skipped))
+    session.commit()
+    return kept, skipped

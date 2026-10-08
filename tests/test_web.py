@@ -1441,7 +1441,7 @@ def _add_runs(database: Path) -> None:
                 day=NOW.astimezone(ZoneInfo("America/Los_Angeles")).date().isoformat(),
                 provider="gemini",
                 model="gemini-3.5-flash-lite",
-                requests=353,  # past the 350 budget, inside the 500 cap: retries may do that
+                requests=433,  # past the 420 budget, inside the 500 cap: retries may do that
             )
         )
         session.commit()
@@ -1491,7 +1491,7 @@ def test_usage_is_shown_per_quota_day_against_the_budget(
     body = _client(database, settings).get("/runs").text
     assert "LLM requests per quota day" in body
     assert "Pacific" in body
-    assert "353" in body and "past the budget, on retries" in body
+    assert "433" in body and "past the budget, on retries" in body
 
 
 def test_layer_b_decline_rate_is_reported(database: Path, settings: Settings) -> None:

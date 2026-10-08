@@ -386,9 +386,13 @@ class LLMClient:
         max_tokens: int,
         purpose: str,
         max_retries: int | None = None,
+        lane: str = "main",
     ) -> StructuredResult[T]:
         """Ask for JSON matching `schema`. If it fails validation, retry once with the rejected
         answer and the validation error included.
+
+        `lane` is whose budget the call spends ("main", the pipeline; "watch", the
+        watchlist): see `RateLimitSettings.lanes`.
 
         `max_retries` overrides `llm.max_retries` for the transient retries of this call only.
         A call with a safe fallback should keep it low: every attempt spends a request from the
@@ -409,6 +413,7 @@ class LLMClient:
                 purpose,
                 is_retry=attempt > 1,
                 max_retries=max_retries,
+                lane=lane,
             )
             input_tokens += response.input_tokens
             output_tokens += response.output_tokens
@@ -438,6 +443,7 @@ class LLMClient:
         purpose: str,
         is_retry: bool = False,
         max_retries: int | None = None,
+        lane: str = "main",
     ) -> ProviderResponse:
         """One logical request: rate-limited, with retries for transient errors. Only the first
         attempt of new work counts against the daily budget; retries may use the full quota."""
@@ -452,6 +458,7 @@ class LLMClient:
                         model,
                         estimate_input_tokens(system, prompt),
                         retry=is_retry or attempt > 1,
+                        lane=lane,
                     )
                 except DailyLimitReached as exc:
                     raise LLMQuotaError(f"{purpose}: {exc}") from None
