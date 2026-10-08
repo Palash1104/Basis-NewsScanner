@@ -38,6 +38,7 @@ from app.pipeline.prices import format_move
 from app.pipeline.scoring import track_record
 from app.presentation import ORDER_WORDS, ORIGIN_LABEL, story_age
 from app.schedule import pipeline_hours, start_of_news_day
+from app.watch.scoring import lead_times
 from app.web import palette, queries, watch_queries
 
 log = logging.getLogger(__name__)
@@ -469,10 +470,20 @@ def create_app(
             else ""
         )
         summary, tables = queries.track_tables(session, settings, int(chosen) if chosen else None)
+        listed: WatchlistFile = request.app.state.watchlist
+        assets: dict[str, AssetConfig] = request.app.state.assets
+        leads, lead_stories, lead_skipped = lead_times(session, settings, utcnow())
         context = base_context(request, session, active="track")
         context |= {
             "summary": summary,
             "tables": tables,
+            "watch_tables": watch_queries.watch_track_tables(
+                session, int(chosen) if chosen else None
+            ),
+            "benchmark_names": watch_queries.benchmark_names(listed, assets, settings),
+            "leads": leads,
+            "lead_stories": lead_stories,
+            "lead_skipped": lead_skipped,
             "horizon": chosen,
             "horizons": [("", "All")]
             + [(str(days), f"{days}d") for days in settings.scoring.horizons_trading_days],

@@ -133,6 +133,12 @@ from app.watch.power import keep_awake, on_ac_power, recent_resumes
 from app.watch.prices import YahooSnapshots, price_symbols
 from app.watch.report import wake_section, watch_report
 from app.watch.scan import Watcher, build_watcher, run_forever
+from app.watch.scoring import (
+    WatchScoreReport,
+    lead_times,
+    score_watch_calls,
+    watch_track_record,
+)
 from app.watch.wake import probe_network, run_wake
 
 log = logging.getLogger("newsdesk")
@@ -1151,6 +1157,7 @@ class ScoreRunReport:
     prices: PriceReport
     scores: ScoreReport
     unreferenced: int = 0
+    watch: WatchScoreReport | None = None  # the watchlist's calls (app/watch/scoring.py)
 
 
 def run_score(
@@ -1175,19 +1182,58 @@ def run_score(
         unreferenced = mark_unreferenced(session, settings, now)
         # 3. Judge the calls whose horizons are complete.
         scores = score_impacts(session, assets, prices, settings, now, rescore=rescore)
+        # 4. The watchlist's calls, against the Nifty and each group's index. A broken
+        # watchlist never costs the main scores.
+        try:
+            watch = score_watch_calls(
+                session, prices, load_watchlist_file(), settings, now, rescore=rescore
+            )
+        except Exception as exc:
+            log.warning("watchlist scoring skipped: %s", exc)
+            watch = WatchScoreReport(problems=[("watchlist", str(exc))])
 
-        errors = [
-            {"stage": "prices", "symbol": symbol, "error": reason}
-            for symbol, reason in priced.unusable
-        ] + [
-            {"stage": "score", "symbol": symbol, "error": reason}
-            for symbol, reason in scores.problems
-        ]
+        errors = (
+            [
+                {"stage": "prices", "symbol": symbol, "error": reason}
+                for symbol, reason in priced.unusable
+            ]
+            + [
+                {"stage": "score", "symbol": symbol, "error": reason}
+                for symbol, reason in scores.problems
+            ]
+            + [
+                {"stage": "watch score", "symbol": symbol, "error": reason}
+                for symbol, reason in watch.problems
+            ]
+        )
         run.finished_at = utcnow()
         run.stories_processed = scores.total_scored
         run.errors = errors
         session.commit()
-        return ScoreRunReport(run.id, priced, scores, unreferenced)
+        return ScoreRunReport(run.id, priced, scores, unreferenced, watch)
+
+
+def watch_track_lines(session: Session, settings: Settings) -> list[str]:
+    """The watchlist's track record, by materiality and event type, for each benchmark,
+    under the same gates as every other rate."""
+    lines: list[str] = []
+    gates = (settings.scoring.min_samples_to_show_rate, settings.scoring.min_stories_to_show_rate)
+    for group in ("materiality", "event_type"):
+        rows = watch_track_record(session, group)
+        if not rows:
+            continue
+        lines.append(f"watchlist track record by {group.replace('_', ' ')}:")
+        for row in rows:
+            rate = (
+                f"{row.rate:.0%}"
+                if row.shows_rate(*gates)
+                else f"n={row.judged}, {len(row.stories)} stories, too few"
+            )
+            lines.append(
+                f"  {row.key:<14} {row.horizon_days}d vs {row.benchmark:<22} "
+                f"{row.hits} hit / {row.misses} miss / {row.no_move} no move · {rate}"
+            )
+    return lines
 
 
 def _varies(session: Session, group: str) -> bool:
@@ -1257,8 +1303,19 @@ def _score(settings: Settings, session_factory: sessionmaker[Session], rescore: 
     )
     for symbol, reason in report.prices.unusable + report.scores.problems:
         typer.echo(f"  {symbol}: {reason}")
+    watch = report.watch
+    if watch is not None:
+        outcomes = ", ".join(f"{count} {name}" for name, count in sorted(watch.scored.items()))
+        typer.echo(
+            f"watchlist: scored {watch.total} (call, horizon, benchmark) rows "
+            f"({outcomes or 'none'}); {watch.not_due} not due yet, {watch.calls} calls"
+        )
+        for symbol, reason in watch.problems:
+            typer.echo(f"  {symbol}: {reason}")
     with session_factory() as session:
         for line in track_record_lines(session, settings):
+            typer.echo(line)
+        for line in watch_track_lines(session, settings):
             typer.echo(line)
 
 
@@ -1421,6 +1478,33 @@ def health(
     with session_factory() as session:
         for line in health_lines(session, settings, utcnow(), days):
             typer.echo(line)
+
+
+@app.command("lead-times")
+def lead_times_command(
+    days: Annotated[int, typer.Option("--days", min=1, help="How many days back.")] = 30,
+) -> None:
+    """Which source had each watchlist story first, by how much it beat the exchange filing,
+    and how far behind the first source everyone else was."""
+    settings, session_factory = _bootstrap()
+    with session_factory() as session:
+        rows, counted, skipped = lead_times(session, settings, utcnow(), days)
+
+    def minutes(value: float | None) -> str:
+        if value is None:
+            return "-"
+        return f"{value / 60:.0f} min" if value < 7200 else f"{value / 3600:.1f} h"
+
+    typer.echo(
+        f"{counted} watchlist stories in the last {days} days ({skipped} left out: first seen "
+        "in a pass that read a backlog, after a start or a gap)"
+    )
+    typer.echo(f"{'source':<32} {'carried':>7} {'first':>5}  lead over filing  lag behind first")
+    for row in rows:
+        typer.echo(
+            f"{row.source[:32]:<32} {row.stories:>7} {row.first:>5}  "
+            f"{minutes(row.median_lead):>16}  {minutes(row.median_lag):>16}"
+        )
 
 
 @app.command("skipped-extractions")

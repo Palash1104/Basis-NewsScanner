@@ -513,6 +513,28 @@ class WatchCall(Base):
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, index=True)
 
 
+class WatchScore(Base):
+    """How one watchlist call turned out at one horizon against one benchmark: the Nifty for
+    every stock, and also its group's index for a defence name, so a sector rally can't make
+    every positive call look right (user, 2026-10-08). Written once, like impact_scores."""
+
+    __tablename__ = "watch_scores"
+    __table_args__ = (UniqueConstraint("call_id", "horizon_days", "benchmark_symbol"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    call_id: Mapped[int] = mapped_column(ForeignKey("watch_calls.id"), index=True)
+    horizon_days: Mapped[int] = mapped_column(Integer)
+    benchmark_symbol: Mapped[str] = mapped_column(String(32))
+    reference_time: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    reference_price: Mapped[float | None] = mapped_column(Float)
+    asset_return: Mapped[float | None] = mapped_column(Float)
+    benchmark_return: Mapped[float | None] = mapped_column(Float)
+    excess_return: Mapped[float | None] = mapped_column(Float)
+    threshold: Mapped[float | None] = mapped_column(Float)
+    outcome: Mapped[str] = mapped_column(String(16))  # hit | miss | no_move | unscorable
+    scored_at: Mapped[datetime] = mapped_column(UTCDateTime)
+
+
 class WatchAlert(Base):
     """One Telegram message the watchlist sent, or tried to: its key is what makes each kind
     happen once - one alert per story, one follow-up, one price alert per stock per day, one

@@ -109,4 +109,99 @@
       <code>newsdesk score</code>, which runs at 03:30.
     </p>
   {% endif %}
+
+  {# The watchlist's own calls (step 6): each stock against the Nifty and, for a defence
+     name, the defence index as well, so a sector rally can't make every call look right. #}
+  <div class="section-label watch-track-head">
+    <span class="kicker">Watchlist</span><span class="line"></span>
+  </div>
+  {% if watch_tables %}
+    {% for table in watch_tables %}
+      <div class="section-label">
+        <span class="kicker">{{ table.title }}</span><span class="line"></span>
+      </div>
+      <table class="table track-table">
+        <thead>
+          <tr>
+            <th>{{ table.group | replace("_", " ") }}</th>
+            <th>Against</th>
+            <th>Horizon</th>
+            <th>Hit</th>
+            <th>Miss</th>
+            <th>No move</th>
+            <th>Unscorable</th>
+            <th>Stories</th>
+            <th>Rate</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in table.rows %}
+            <tr>
+              <td><b>{{ row.key }}</b></td>
+              <td>{{ benchmark_names.get(row.benchmark, row.benchmark) }}</td>
+              <td>{{ row.horizon_days }}d close</td>
+              <td>{{ row.hits }}</td>
+              <td>{{ row.misses }}</td>
+              <td>{{ row.no_move }}</td>
+              <td>{{ row.unscorable }}</td>
+              <td>{{ row.stories | length }}</td>
+              <td>
+                {% if row.shows_rate(summary.minimum, summary.min_stories) %}
+                  {% if row.stories | length < summary.early_below_stories %}
+                    <span class="muted">{{ "%.0f" | format(row.rate * 100) }}%</span>
+                    <span class="tag tag-neutral tag-early">early</span>
+                  {% else %}
+                    <b>{{ "%.0f" | format(row.rate * 100) }}%</b>
+                  {% endif %}
+                {% else %}
+                  <span class="muted">
+                    n={{ row.judged }}, {{ row.stories | length }}
+                    {{- " story" if row.stories | length == 1 else " stories" }}, too few
+                  </span>
+                {% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% endfor %}
+  {% else %}
+    <p class="feed-note">
+      No watchlist call judged yet. Each positive or negative call is scored a trading day
+      after BASIS first saw its story, against the Nifty and its group's index.
+    </p>
+  {% endif %}
+
+  <div class="section-label">
+    <span class="kicker">Watchlist · who had it first</span><span class="line"></span>
+  </div>
+  {% if leads %}
+    <table class="table track-table">
+      <thead>
+        <tr>
+          <th>Source</th><th>Carried</th><th>First</th>
+          <th>Median lead over the filing</th><th>Median lag behind the first</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in leads %}
+          <tr>
+            <td><b>{{ row.source }}</b></td>
+            <td>{{ row.stories }}</td>
+            <td>{{ row.first }}</td>
+            <td>{% if row.median_lead is not none %}{{ "%.0f" | format(row.median_lead / 60) }} min{% else %}<span class="muted">-</span>{% endif %}</td>
+            <td>{% if row.median_lag is not none %}{{ "%.0f" | format(row.median_lag / 60) }} min{% else %}<span class="muted">-</span>{% endif %}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    <p class="sub track-note">
+      {{ lead_stories }} watchlist stories in the last 30 days, by when BASIS first saw each
+      source's article and when the exchange published its filing. {{ lead_skipped }} more were
+      left out: they were first seen in a pass that read a backlog, after a start or a gap, so
+      who was first can't be told.
+    </p>
+  {% else %}
+    <p class="feed-note">No watchlist stories yet.</p>
+  {% endif %}
 </div>

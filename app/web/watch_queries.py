@@ -473,3 +473,47 @@ def watch_story(
         timeline=timeline,
         prices=prices,
     )
+
+
+# ---------------------------------------------------------------- the track record
+
+
+@dataclass(frozen=True)
+class WatchTable:
+    title: str
+    group: str
+    rows: list
+
+
+WATCH_GROUP_TITLES = (
+    ("materiality", "Watchlist calls · by materiality"),
+    ("event_type", "Watchlist calls · by event type"),
+    ("first_source", "Watchlist calls · by first source"),
+    ("lead", "Watchlist calls · by lead over the filing"),
+)
+
+
+def watch_track_tables(session: Session, horizon: int | None = None) -> list[WatchTable]:
+    """The watchlist's track record, one table per grouping; each row is one benchmark, so
+    the Nifty and the defence index sit side by side."""
+    from app.watch.scoring import watch_track_record
+
+    tables = []
+    for group, title in WATCH_GROUP_TITLES:
+        rows = watch_track_record(session, group, horizon)
+        if rows:
+            tables.append(WatchTable(title, group, rows))
+    return tables
+
+
+def benchmark_names(
+    watchlist: WatchlistFile, assets: dict[str, AssetConfig], settings: Settings
+) -> dict[str, str]:
+    benchmark = assets.get(settings.watch.benchmark)
+    names = {
+        settings.watch.benchmark: benchmark.display_name if benchmark else settings.watch.benchmark
+    }
+    for group in watchlist.groups.values():
+        if group.index:
+            names[group.index] = f"{group.name} index"
+    return names

@@ -305,6 +305,29 @@ review after each step:
     night before, most material first, with the low ones in an expandable block, then
     today's price and sector alerts. The digest now also sends when only the watchlist has
     something.
+- **Step 5 done (2026-10-08): `/watchlist`.** The details are under "Web UI" below.
+- **Step 6 done (2026-10-08): scoring and lead times** (`app/watch/scoring.py`, run by
+  `newsdesk score` at 03:30).
+  - **What is scored.** The first positive or negative call per story and stock: the call
+    as made, not a re-call. Neutral calls and passing mentions are not scored.
+  - **From when.** The first hourly bar at or after BASIS *first saw* the story, priced at
+    the bar before (Phase 3's rule).
+  - **Against what.** The Nifty, and the group index for a defence name. Each benchmark is
+    its own `watch_scores` row, so a sector rally shows as a hit against the Nifty and no
+    move against NIFTY_IND_DEFENCE.NS.
+  - **On what prices.** Daily closes built from hourly bars (the last bar of each IST
+    date), because Yahoo has no daily history for the defence index. Holidays have no
+    hourly bars, so there is no filler-bar problem.
+  - **The rule.** Phase 4's hit / miss / no-move rule (0.5 × daily vol × √N).
+  - **Where it shows.** The track record groups by materiality, event type, first source,
+    and lead over the filing, under the usual rate gates. `/track-record` has a Watchlist
+    section, and `newsdesk lead-times [--days 30]` prints the lead-time table.
+  - **Lead times.**
+    - Per source: how often it was first, its median lead over the filing, and its median
+      lag behind the first source.
+    - Stories first seen in a backlog pass (a start, a gap, a catch-up) are left out.
+  - **First live run.** 25 rows; the four Prime Focus raid stories were hits at 1d against
+    the Nifty.
 - **Scanner behaviour worth knowing:**
   - Only headlines naming a watchlist stock are stored, at any verdict.
   - One article seen through several feeds has one row and a sighting per feed. All the
@@ -350,6 +373,7 @@ uv run newsdesk watch [--once | --wake]       # the watchlist scanner (resident;
 uv run newsdesk watch-report [--days 3]       # scanner volumes, first sources, feed health -> data/watch_report.md
 uv run newsdesk wake-log [--days 1]           # did the market-hours wake fire, network, scan; per weekday morning
 uv run newsdesk skipped-extractions [--days 30]   # stories with no event extraction (by category), for the monthly check
+uv run newsdesk lead-times [--days 30]         # which source had each watchlist story first, lead over the filing
 uv run python scripts/watch_gate.py [--limit 20] [ids]   # the watchlist call, live, on stored stories -> data/watch_gate.md
 powershell -ExecutionPolicy Bypass -File scripts/install_tasks.ps1 [-Remove]   # Windows tasks
 ```
