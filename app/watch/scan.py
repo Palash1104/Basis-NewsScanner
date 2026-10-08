@@ -21,6 +21,7 @@ import logging
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -79,12 +80,14 @@ from app.watch.sources import (
     Announcement,
     FeedRead,
     Fetched,
+    SharedRead,
     Validators,
     conditional_get,
     fetch_nse_history,
     google_news_queries,
     google_news_window,
     parse_nse_announcements,
+    read_bse_announcements,
     read_feed,
     watched_announcements,
 )
@@ -182,6 +185,8 @@ class Watcher:
         self._typical: tuple[date, dict[str, Typical]] | None = None
         self._typical_failed_at: datetime | None = None
         self._feed_health_at: datetime | None = None
+        self._bse_read_at: datetime | None = None
+        self._bse_error: str | None = None
         # Set by `newsdesk watch --since`: catch up from here on the next feed scan.
         self.force_since: datetime | None = None
         # The feeds whose health is tracked: not the one-off catch-up searches.
@@ -282,10 +287,35 @@ class Watcher:
         history: dict[str, tuple[list[Announcement], str | None]] = {}
         if gap is not None:
             history = asyncio.run(self._nse_history(gap, now))
-        result = self._process("feeds", reads, nse, now, history)
+        shared = self._read_bse(gap, now)
+        result = self._process("feeds", reads, nse, now, history, shared)
         if gap is not None:
-            self._record_catch_up(gap, reads, searches, nse, history, result, now)
+            self._record_catch_up(gap, reads, searches, nse, history, result, now, shared)
         return result
+
+    def _read_bse(self, gap: Gap | None, now: datetime) -> SharedRead | None:
+        """New rows in the PEAD tool's shared file since the last read (with a minute's
+        overlap), or since the gap's start after a gap, or the story window on a first read."""
+        path = self.settings.watch.bse_announcements_db
+        isins = {stock.isin: stock.symbol for stock in self.stocks if stock.isin}
+        if not path or not isins:
+            return None
+        if gap is not None:
+            since = gap.start
+        elif self._bse_read_at is not None:
+            since = self._bse_read_at - timedelta(minutes=1)
+        else:
+            since = now - timedelta(hours=self.settings.watch.story_window_hours)
+        shared = read_bse_announcements(Path(path), isins, since)
+        if shared.error is None:
+            self._bse_read_at = now
+        if shared.error != self._bse_error:  # said once, not every pass
+            if shared.error:
+                log.warning("BSE filings unavailable: %s", shared.error)
+            else:
+                log.info("BSE filings: reading the PEAD tool's shared file")
+            self._bse_error = shared.error
+        return shared
 
     def find_gap(self, now: datetime) -> Gap | None:
         """What the scanner missed: everything since its last completed feed scan started."""
@@ -470,6 +500,7 @@ class Watcher:
         nse: Fetched | None,
         now: datetime,
         history: dict[str, tuple[list[Announcement], str | None]] | None = None,
+        shared: SharedRead | None = None,
     ) -> JobResult:
         result = JobResult(job)
         checks = [
@@ -521,6 +552,8 @@ class Watcher:
             announcements += [(symbol, item) for item in found]
             if error:
                 result.errors.append({"stage": "nse history", "symbol": symbol, "error": error})
+        if shared is not None:
+            announcements += shared.found
 
         with self.session_factory() as session:
             window = self._window_members(session, now)
@@ -537,7 +570,7 @@ class Watcher:
             new_filings = [
                 WatchFiling(
                     key=found.key,
-                    exchange="NSE",
+                    exchange=found.exchange,
                     symbol=symbol,
                     company=found.company,
                     subject=found.subject,
@@ -666,23 +699,26 @@ class Watcher:
         self, session: Session, announcements: Sequence[tuple[str, Announcement]]
     ) -> list[tuple[str, Announcement]]:
         """The announcements not stored yet. The same one arrives from the RSS and, in a
-        catch-up, from the API: it is the same filing when the company, the time and the
-        subject agree."""
+        catch-up, from the API: it is the same filing when the exchange, the company, the time
+        and the subject agree. A company's BSE copy of an NSE filing is kept as its own row."""
         if not announcements:
             return []
         symbols = {symbol for symbol, _ in announcements}
         earliest = min(found.filed_at for _, found in announcements)
         known = {
-            (symbol, filed_at, subject.casefold())
-            for symbol, filed_at, subject in session.execute(
-                select(WatchFiling.symbol, WatchFiling.filed_at, WatchFiling.subject).where(
-                    WatchFiling.symbol.in_(symbols), WatchFiling.filed_at >= earliest
-                )
+            (exchange, symbol, filed_at, subject.casefold())
+            for exchange, symbol, filed_at, subject in session.execute(
+                select(
+                    WatchFiling.exchange,
+                    WatchFiling.symbol,
+                    WatchFiling.filed_at,
+                    WatchFiling.subject,
+                ).where(WatchFiling.symbol.in_(symbols), WatchFiling.filed_at >= earliest)
             )
         }
-        fresh: dict[tuple[str, datetime, str], tuple[str, Announcement]] = {}
+        fresh: dict[tuple[str, str, datetime, str], tuple[str, Announcement]] = {}
         for symbol, found in announcements:
-            identity = (symbol, found.filed_at, found.subject.casefold())
+            identity = (found.exchange, symbol, found.filed_at, found.subject.casefold())
             if identity not in known:
                 fresh.setdefault(identity, (symbol, found))
         # Oldest first, so a story's seed is the earliest filing.
@@ -699,6 +735,7 @@ class Watcher:
         history: dict[str, tuple[list[Announcement], str | None]],
         result: JobResult,
         now: datetime,
+        shared: SharedRead | None = None,
     ) -> None:
         """What the catch-up reached, source by source, and what no source could: the
         "while you were away" summary is built from this row."""
@@ -756,6 +793,23 @@ class Watcher:
                 f"API failed for {', '.join(history_errors)}" if history_errors else "",
             )
         )
+        if shared is not None:
+            # The PEAD tool catches up on its own when it starts; BSE is covered only if it
+            # has written since the gap began.
+            alive = shared.newest_fetch is not None and shared.newest_fetch >= gap.start
+            note = shared.error or (
+                ""
+                if alive
+                else "the PEAD tool hasn't written since "
+                + (
+                    shared.newest_fetch.astimezone(self.settings.tz).strftime("%a %d %b %H:%M")
+                    if shared.newest_fetch
+                    else "it was set up"
+                )
+            )
+            sources.append(
+                SourceCoverage("bse", "BSE (via the PEAD tool)", gap.start if alive else None, note)
+            )
         sources.append(self._backfill_prices(gap, now))
 
         details = {

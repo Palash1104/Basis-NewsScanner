@@ -15,7 +15,10 @@ NOW = datetime(2026, 9, 16, 12, 0, tzinfo=UTC)
 
 @pytest.fixture
 def settings() -> Settings:
-    return load_settings()
+    loaded = load_settings()
+    # Tests never read the PEAD tool's real shared file; the BSE tests pass their own.
+    watch = loaded.watch.model_copy(update={"bse_announcements_db": None})
+    return loaded.model_copy(update={"watch": watch})
 
 
 @pytest.fixture

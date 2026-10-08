@@ -131,8 +131,8 @@ Open follow-ups (not Phase 1 criteria):
   2026-09-20). Every per-story loop commits before the next call, and connections set
   `PRAGMA busy_timeout=10000`.
 
-**Stock watchlist (in progress, plan approved 2026-10-07).** Build order, with a stop for
-review after each step:
+**Stock watchlist (all seven steps done 2026-10-08; plan approved 2026-10-07).** Build
+order (the user dropped the stops between steps 3 and 7 on 2026-10-08):
 1. list + alias review
 2. scan and storage, no LLM
 3. the combined call + fixture gate
@@ -328,6 +328,26 @@ review after each step:
     - Stories first seen in a backlog pass (a start, a gap, a catch-up) are left out.
   - **First live run.** 25 rows; the four Prime Focus raid stories were hits at 1d against
     the Nifty.
+- **Step 7 done (2026-10-08): BSE through the PEAD tool.**
+  - `pead_tool.py` (Documents/resultscanner, commit 750f728) appends every announcement
+    it reads to `announcements.db` beside it (`PEAD_ANNOUNCEMENTS_DB` overrides): table
+    `announcements`, keyed by its own id, `INSERT OR IGNORE`, WAL, never raises. Additive
+    only: backup in `archive/pead_tool.2026-10-08.before-basis.py`, its 423 checks pass.
+  - BASIS opens it read-only (`mode=ro`, `watch.bse_announcements_db`) on every feed pass
+    (`sources.read_bse_announcements`): BSE rows whose ISIN is a watchlist stock's
+    (`isin` in watchlist.yaml), taken by `fetched_at` since the last read with a minute's
+    overlap, so what the PEAD tool caught up on late still arrives. NSE rows are ignored:
+    BASIS reads NSE itself.
+  - Its times are naive IST: `exchange_time` is the exchange's clock and `fetched_at` is
+    the laptop's (India Standard Time). Change the reader if the laptop's zone changes.
+  - Filings are one per exchange: the identity is (exchange, symbol, time, subject), so a
+    BSE copy of an NSE filing is its own row. Follow-ups are once per story, so a
+    double filing can't send two. Alerts and the digest name the exchange.
+  - A catch-up counts BSE as covered only if the PEAD tool wrote after the gap began;
+    otherwise "BSE filings" is a possible gap, with when it last wrote. A missing or
+    unreadable file is logged once, not on every pass, and never fails a pass.
+  - Tests never read the real file: the `settings` fixture sets it to None.
+  - The PEAD tool is started by hand (`py pead_tool.py`); BSE flows only while it runs.
 - **Scanner behaviour worth knowing:**
   - Only headlines naming a watchlist stock are stored, at any verdict.
   - One article seen through several feeds has one row and a sighting per feed. All the

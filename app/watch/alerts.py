@@ -112,8 +112,11 @@ def story_state(story: WatchStory, settings: Settings) -> str:
     if asked := by_kind.get("clarification_sought"):
         return f"NSE asked the company to clarify at {_local(asked[0].filed_at, settings)}"
     if filed := by_kind.get("filing"):
-        verb = "filed with NSE" if kept_articles(story) else "an NSE filing"
-        return f"{verb}: {filed[0].subject} ({_local(filed[0].filed_at, settings)})"
+        first = filed[0]
+        verb = (
+            f"filed with {first.exchange}" if kept_articles(story) else f"a {first.exchange} filing"
+        )
+        return f"{verb}: {first.subject} ({_local(first.filed_at, settings)})"
     return "media report, not yet filed"
 
 
@@ -159,7 +162,9 @@ def _sources(story: WatchStory) -> str:
 def _first_seen_line(story: WatchStory, settings: Settings) -> str:
     articles = sorted(story.articles, key=lambda a: a.first_seen_at)
     if not articles:
-        return f"first seen {_local(story.first_seen_at, settings)} in NSE's filings"
+        exchanges = sorted({f.exchange for f in story.filings}) or ["the exchange"]
+        where = " and ".join(exchanges)
+        return f"first seen {_local(story.first_seen_at, settings)} in {where}'s filings"
     first = articles[0]
     via = (
         "Google News"
@@ -304,7 +309,10 @@ def followups(
                 if filing.link
                 else ""
             )
-            lines.append(f"{_local(filing.filed_at, settings, now)} · {_t(filing.subject)}{link}")
+            lines.append(
+                f"{_local(filing.filed_at, settings, now)} · {filing.exchange} · "
+                f"{_t(filing.subject)}{link}"
+            )
         if visible and recalled:
             lines += ["", f"<b>{_marks(visible, names)}</b>", _t(visible[0].reason)]
         out.append(

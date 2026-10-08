@@ -57,7 +57,7 @@ but skips summaries and records why. The digest only includes summarized stories
 | `uv run newsdesk score` | Judge every call whose horizon is complete and print the track record. Safe to re-run: scores are written once. |
 | `uv run newsdesk validate-tickers` | Check every symbol in `config/assets.yaml` has recent prices on Yahoo (writes `data/ticker_report.md`). |
 | `uv run newsdesk serve` | The web UI on http://127.0.0.1:8787 (`--port` to change it). It only reads the database, so it is safe to run while the pipeline is writing. |
-| `uv run newsdesk watch [--once]` | The watchlist scanner: the market feeds in `config/watch_feeds.yaml` and NSE's announcements every 10 minutes, Google News searches for every alias, and intraday prices in market hours. Stores every headline that names a watchlist stock, with its verdict, and groups them into stories. No LLM calls. `--once` does one pass and exits. |
+| `uv run newsdesk watch [--once] [--since TIME]` | The watchlist scanner: the market feeds in `config/watch_feeds.yaml` and NSE's announcements every 10 minutes, BSE's through the PEAD tool's shared file, Google News searches for every alias, and intraday prices in market hours. Stores every headline that names a watchlist stock, groups them into stories, calls each story with Flash-Lite (the watch lane, 120 a day) and sends the alerts. After the laptop was off or asleep it catches up from the last completed scan. `--once` does one pass and exits; `--since` forces a catch-up from that time. |
 | `uv run newsdesk watch-report [--days 3]` | What the scanner saw: articles and stories per stock per day, stories touching several stocks, which source was first, feed health, Yahoo's lag (writes `data/watch_report.md`). |
 | `uv run newsdesk wake-log [--days 1]` | Did the market-hours wake work? For each weekday morning: whether the wake timer fired, whether the network came up and whether a scan ran. A morning it didn't fire shows what Windows says woke the laptop instead. |
 | `uv run newsdesk lead-times [--days 30]` | For the watchlist: which source had each story first, its median lead over the exchange filing, and how far behind everyone else was. |
@@ -92,7 +92,7 @@ That creates the tasks under `\Newsdesk\`, with the times read from `settings.ya
 | `Newsdesk-digest` | `newsdesk digest --send` | 07:30 and 19:30 |
 | `Newsdesk-score` | `newsdesk score` | 03:30 |
 | `Newsdesk-watch` | `newsdesk watch` | at logon; runs until logoff |
-| `Newsdesk-watch-wake` | `newsdesk watch --wake` | weekdays 08:30-16:30, every 10 min, on AC power only |
+| `Newsdesk-watch-wake` | `newsdesk watch --wake` | only with `-WithWake`: weekdays 08:30-16:30, every 10 min, on AC power only |
 | `Newsdesk-web` | `newsdesk serve` | at logon, with `-WithWeb` |
 
 Add `-WithWeb` to also start the web UI a minute after you log in, so
@@ -108,13 +108,20 @@ a page nobody is looking at is not worth waking a laptop for. Its output goes to
 `data\logs\tasks\serve.log`, fresh each logon.
 
 The watchlist scanner runs like the web server: from logon until logoff, restarted if it
-dies, one copy only, output in `data\logs	asks\watch.log`. `Newsdesk-watch-wake` is the
-market-hours wake: it will not start on battery and stops if the plug is pulled, and each
-start records whether it ran and whether the network was up, which `watch-report` shows.
-Windows's own resume log is the evidence: on this laptop, closing the lid hibernates it,
-a Start-menu shutdown can't be woken at all, and no wake timer fired in the ten days
-before the task was installed. `newsdesk wake-log` reads that log beside each wake run,
-so a morning the timer didn't fire still says so.
+dies, one copy only, output in `data\logs\tasks\watch.log`. It does not wake the laptop:
+it works whenever the laptop is on, and when it starts or resumes after a gap it catches
+up from its last completed scan - the RSS feeds as far back as each one keeps, Google News
+searched over exactly the missed period, NSE's announcements by date, BSE through the PEAD
+tool, and Yahoo's 1-minute bars for "moved, no story yet". What was first reported more
+than an hour before BASIS saw it goes into one "while you were away" Telegram message,
+newest first, each with its original time; only fresh news gets its own alert. Any part of
+the gap no source could reach is listed in that message as "possible gap: X to Y".
+
+`Newsdesk-watch-wake`, the market-hours wake, is installed only with `-WithWake` (user,
+2026-10-08). On this laptop closing the lid hibernates it, a Start-menu shutdown can't be
+woken at all, and no wake timer fired in the ten days before the task was installed.
+`newsdesk wake-log` still reads Windows's resume log beside each wake run, for anyone
+trying it on other hardware.
 
 They run as the logged-on user with the project's own virtualenv, need no administrator
 rights, start again after a reboot and login with no terminal open, run as soon as possible
@@ -332,6 +339,11 @@ used to improve Google's products. On Anthropic, `claude-haiku-4-5` costs a few 
 - **Impacts are kept forever once written.** Re-analysing a story adds new calls but never
   edits old ones, so the track record reflects what was said at the time.
 - **Google News links** are Google redirect URLs, labelled with the real outlet's name.
+- **BSE filings arrive only while the PEAD tool runs.** BSE answers BASIS's own requests
+  with 403, so BASIS reads the BSE announcements that `pead_tool.py` (in
+  `Documents/resultscanner`) appends to its `announcements.db`, matched on ISIN and opened
+  read-only (`watch.bse_announcements_db`). When that tool isn't running, BSE-only filings
+  are missed until it next starts and catches up, and a catch-up says so as a possible gap.
 - **The digest holds at most 15 stories** (`delivery.max_stories_per_digest`). Summarized
   stories that don't make the cut aren't carried into the next digest unless they're
   summarized again.

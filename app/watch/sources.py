@@ -12,6 +12,7 @@ import time
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Literal
 from urllib.parse import quote_plus
 from zoneinfo import ZoneInfo
@@ -194,11 +195,15 @@ class Announcement:
     filed_at: datetime  # UTC
     kind: FilingKind
     quoted_headline: str | None
+    exchange: str = "NSE"
 
     @property
     def key(self) -> str:
         """The feed has no ids; the same announcement always hashes the same."""
-        raw = f"NSE|{self.company}|{self.filed_at.isoformat()}|{self.subject}|{self.description}"
+        raw = (
+            f"{self.exchange}|{self.company}|{self.filed_at.isoformat()}|{self.subject}|"
+            f"{self.description}"
+        )
         return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:40]
 
 
@@ -323,6 +328,72 @@ async def fetch_nse_history(
         return parse_nse_api(rows), None
     except Exception as exc:
         return [], f"{type(exc).__name__}: {exc}"
+
+
+# ---------------------------------------------------------------- BSE, via the PEAD tool
+
+
+@dataclass
+class SharedRead:
+    """What one read of the PEAD tool's shared file found."""
+
+    found: list[tuple[str, "Announcement"]]  # (watchlist symbol, announcement)
+    newest_fetch: datetime | None  # when the PEAD tool last wrote anything (UTC)
+    error: str | None = None
+
+
+def read_bse_announcements(path: Path, isins: dict[str, str], since: datetime) -> SharedRead:
+    """BSE announcements by watchlist companies from the PEAD tool's shared SQLite file
+    (user, 2026-10-07: BSE's API answers BASIS with 403, the PEAD tool reads it fine). The
+    file is opened read-only; rows are matched on ISIN (`isins`: ISIN -> symbol) and taken
+    by when the PEAD tool wrote them, so an announcement it caught up on late still arrives.
+    Its times are the exchange's own clock (IST)."""
+    import sqlite3
+
+    if not path.exists():
+        return SharedRead([], None, f"no shared file at {path} (the PEAD tool hasn't run)")
+    since_local = since.astimezone(NSE_TIMEZONE).replace(tzinfo=None).isoformat(timespec="seconds")
+    try:
+        conn = sqlite3.connect(f"file:{path.as_posix()}?mode=ro", uri=True, timeout=2)
+        try:
+            newest = conn.execute("SELECT MAX(fetched_at) FROM announcements").fetchone()[0]
+            marks = ",".join("?" * len(isins))
+            rows = conn.execute(
+                "SELECT id, company, isin, category, headline, attachment_url, exchange_time "
+                f"FROM announcements WHERE exchange = 'BSE' AND isin IN ({marks}) "
+                "AND fetched_at >= ? ORDER BY exchange_time",
+                [*isins, since_local],
+            ).fetchall()
+        finally:
+            conn.close()
+    except Exception as exc:
+        return SharedRead([], None, f"{type(exc).__name__}: {exc}")
+    found: list[tuple[str, Announcement]] = []
+    for _id, company, isin, category, headline, link, stamp in rows:
+        if not stamp:
+            continue
+        filed = datetime.fromisoformat(stamp).replace(tzinfo=NSE_TIMEZONE)
+        found.append(
+            (
+                isins[isin],
+                Announcement(
+                    company=company or "",
+                    subject=(category or "BSE announcement").strip(),
+                    description=html_to_text(headline or ""),
+                    link=link or "",
+                    filed_at=filed.astimezone(UTC),
+                    kind="filing",
+                    quoted_headline=None,
+                    exchange="BSE",
+                ),
+            )
+        )
+    newest_fetch = (
+        datetime.fromisoformat(newest).replace(tzinfo=NSE_TIMEZONE).astimezone(UTC)
+        if newest
+        else None
+    )
+    return SharedRead(found, newest_fetch)
 
 
 def watched_announcements(

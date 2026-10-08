@@ -1,6 +1,7 @@
 """Catching up after the laptop was off: the gap, the sources, and what none could reach."""
 
 import json
+import sqlite3
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
@@ -14,7 +15,12 @@ from app.db import init_db, make_engine, make_session_factory
 from app.models import WatchFiling, WatchPrice, WatchRun
 from app.watch.catchup import Gap, SourceCoverage, find_gap, possible_gaps
 from app.watch.prices import backfill_rows
-from app.watch.sources import google_news_window, parse_nse_api
+from app.watch.sources import (
+    Announcement,
+    google_news_window,
+    parse_nse_api,
+    read_bse_announcements,
+)
 from tests.test_watch_scan import NSE_URL, RSS, Clock, Web, make_watcher
 
 # Thursday 2026-10-08 06:00 UTC = 11:30 IST.
@@ -205,3 +211,130 @@ def test_rss_and_nse_mocks_still_answer(settings: Settings) -> None:
     """The shared Web mock serves RSS with the real content type (a guard for the above)."""
     response = Web()(httpx.Request("GET", NSE_URL))
     assert response.headers["content-type"] == RSS["Content-Type"]
+
+
+# ---------------------------------------------------------------- BSE, via the PEAD tool
+
+PEAD_SCHEMA = (
+    "CREATE TABLE announcements (id TEXT PRIMARY KEY, exchange TEXT, company TEXT, code TEXT, "
+    "isin TEXT, category TEXT, headline TEXT, attachment_url TEXT, exchange_time TEXT, "
+    "fetched_at TEXT)"
+)
+PFOCUS_ISIN = "INE367G01020"
+
+
+def pead_file(path: Path, rows: list[tuple[str, ...]]) -> Path:
+    """The PEAD tool's shared file as it writes it: IST times without a zone."""
+    conn = sqlite3.connect(path)
+    conn.execute(PEAD_SCHEMA)
+    conn.executemany("INSERT INTO announcements VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", rows)
+    conn.commit()
+    conn.close()
+    return path
+
+
+def bse_row(
+    id_: str, isin: str | None, exchange_time: str, fetched_at: str, exchange: str = "BSE"
+) -> tuple[str, ...]:
+    return (
+        id_,
+        exchange,
+        "Prime Focus Ltd",
+        "532748",
+        isin,
+        "Company Update",
+        "Prime Focus Ltd has informed the Exchange about an investor meet",
+        f"https://www.bseindia.com/xml-data/corpfiling/AttachLive/{id_}.pdf",
+        exchange_time,
+        fetched_at,
+    )
+
+
+def with_bse(settings: Settings, path: Path) -> Settings:
+    watch = settings.watch.model_copy(update={"bse_announcements_db": str(path)})
+    return settings.model_copy(update={"watch": watch})
+
+
+def test_bse_rows_are_read_by_isin_from_the_shared_file(tmp_path: Path) -> None:
+    path = pead_file(
+        tmp_path / "announcements.db",
+        [
+            bse_row("a", PFOCUS_ISIN, "2026-10-08T10:05:00", "2026-10-08T10:06:10"),
+            bse_row("b", "INE000000000", "2026-10-08T10:07:00", "2026-10-08T10:08:00"),
+            bse_row("c", PFOCUS_ISIN, "2026-10-08T10:09:00", "2026-10-08T10:10:00", "NSE"),
+            bse_row("d", PFOCUS_ISIN, "2026-10-07T15:00:00", "2026-10-07T15:01:00"),
+            bse_row("e", None, "2026-10-08T10:11:00", "2026-10-08T10:12:00"),
+        ],
+    )
+    since = datetime(2026, 10, 8, 4, 0, tzinfo=UTC)  # 09:30 IST
+    shared = read_bse_announcements(path, {PFOCUS_ISIN: "PFOCUS.NS"}, since)
+    assert shared.error is None
+    # Only the watchlist company's BSE row written since then: not another company, not
+    # the NSE copy (BASIS reads NSE itself), not an older one, not one without an ISIN.
+    assert [(symbol, a.exchange) for symbol, a in shared.found] == [("PFOCUS.NS", "BSE")]
+    found = shared.found[0][1]
+    assert found.filed_at == datetime(2026, 10, 8, 4, 35, tzinfo=UTC)  # 10:05 IST
+    assert found.subject == "Company Update" and found.kind == "filing"
+    assert found.link.endswith("/a.pdf")
+    assert shared.newest_fetch == datetime(2026, 10, 8, 4, 42, tzinfo=UTC)
+    # NSE and BSE copies hash apart.
+    assert found.key != Announcement(**{**found.__dict__, "exchange": "NSE"}).key
+
+
+def test_a_missing_or_broken_shared_file_is_an_error_not_a_crash(tmp_path: Path) -> None:
+    since = datetime(2026, 10, 8, 4, 0, tzinfo=UTC)
+    missing = read_bse_announcements(tmp_path / "nope.db", {PFOCUS_ISIN: "PFOCUS.NS"}, since)
+    assert missing.found == [] and missing.error and "hasn't run" in missing.error
+    broken = tmp_path / "broken.db"
+    broken.write_bytes(b"not a database at all, just bytes" * 10)
+    bad = read_bse_announcements(broken, {PFOCUS_ISIN: "PFOCUS.NS"}, since)
+    assert bad.found == [] and bad.error
+
+
+def test_the_shared_file_is_opened_read_only(tmp_path: Path) -> None:
+    path = pead_file(tmp_path / "announcements.db", [])
+    before = path.stat().st_mtime_ns
+    read_bse_announcements(path, {PFOCUS_ISIN: "PFOCUS.NS"}, NOW - timedelta(days=1))
+    assert path.stat().st_mtime_ns == before
+    assert not (tmp_path / "announcements.db-journal").exists()
+
+
+def test_a_feed_pass_stores_bse_filings_once(
+    settings: Settings, db: sessionmaker[Session], watchlist: WatchlistFile, tmp_path: Path
+) -> None:
+    path = pead_file(
+        tmp_path / "announcements.db",
+        [bse_row("a", PFOCUS_ISIN, "2026-10-08T10:05:00", "2026-10-08T10:06:10")],
+    )
+    clock = Clock(NOW)
+    watcher = make_watcher(with_bse(settings, path), db, watchlist, CatchUpWeb(), clock)
+    watcher.run_job("feeds", NOW)
+    watcher.run_job("feeds", NOW + EVERY)  # the same row again: the minute's overlap
+    with db() as session:
+        filings = session.scalars(select(WatchFiling).where(WatchFiling.exchange == "BSE")).all()
+        assert [(f.symbol, f.subject) for f in filings] == [("PFOCUS.NS", "Company Update")]
+        assert filings[0].story_id is not None
+
+
+def test_a_catch_up_flags_bse_when_the_pead_tool_was_not_running(
+    settings: Settings, db: sessionmaker[Session], watchlist: WatchlistFile, tmp_path: Path
+) -> None:
+    # The PEAD tool last wrote at 09:00 IST on the 7th, well before the gap began.
+    path = pead_file(
+        tmp_path / "announcements.db",
+        [bse_row("a", PFOCUS_ISIN, "2026-10-07T08:59:00", "2026-10-07T09:00:00")],
+    )
+    watcher = make_watcher(with_bse(settings, path), db, watchlist, CatchUpWeb(), Clock(NOW))
+    watcher.history = FakeHistory()
+    with db() as session:
+        session.add(
+            WatchRun(job="feeds", started_at=NOW - timedelta(hours=10), entries=900, errors=[])
+        )
+        session.commit()
+    watcher.run_job("feeds", NOW)
+    with db() as session:
+        run = session.scalars(select(WatchRun).where(WatchRun.job == "catchup")).one()
+        details = run.details or {}
+    gaps = details["possible_gaps"]
+    assert [g["what"] for g in gaps] == ["BSE filings"]
+    assert "hasn't written since Wed 07 Oct 09:00" in gaps[0]["why"]

@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any, Literal
 
-SourceKind = Literal["news", "filings", "prices"]
+SourceKind = Literal["news", "filings", "bse", "prices"]
 
 
 @dataclass(frozen=True)
@@ -72,9 +72,10 @@ def possible_gaps(gap: Gap, sources: Sequence[SourceCoverage]) -> list[dict[str,
     labels = {
         "news": "news",
         "filings": "NSE filings",
+        "bse": "BSE filings",
         "prices": "price moves",
     }
-    for kind in ("news", "filings", "prices"):
+    for kind in ("news", "filings", "bse", "prices"):
         of_kind = [s for s in sources if s.kind == kind]
         if not of_kind:
             continue

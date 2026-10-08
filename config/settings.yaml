@@ -238,6 +238,10 @@ watch:
   # A catch-up item first reported longer ago than this goes into one "while you were away"
   # summary; fresher ones are alerted as they would have been anyway.
   away_after_minutes: 60
+  # BSE announcements arrive through the PEAD tool (Documents/resultscanner/pead_tool.py),
+  # which appends every one it reads to this SQLite file; BASIS only reads it (user,
+  # 2026-10-07). BSE is covered only while that tool runs.
+  bse_announcements_db: "C:/Users/tralp/Documents/resultscanner/announcements.db"
   benchmark: "^NSEI"
   # Feed health, as the warning would judge it (reported only at this step).
   feed_failing_after: 3 # failed checks in a row
