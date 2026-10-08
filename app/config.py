@@ -297,6 +297,56 @@ class PathSettings(_Strict):
     lock_dir: str = "data/locks"
 
 
+_HHMM = re.compile(r"([01]\d|2[0-3]):[0-5]\d")
+
+
+class WatchSettings(_Strict):
+    """The watchlist scanner (`newsdesk watch`), a resident process separate from the
+    3-hourly pipeline. Step 2 of the watchlist build: it fetches and stores, and calls no LLM."""
+
+    feeds_every_minutes: int = Field(default=10, gt=0)  # watch feeds and the NSE feed
+    # Google News reaches outlets whose own RSS is closed (Zee Business, Moneycontrol, NDTV
+    # Profit). Every 20 minutes in market hours, hourly otherwise.
+    google_news_every_minutes: int = Field(default=20, gt=0)
+    google_news_quiet_every_minutes: int = Field(default=60, gt=0)
+    google_news_terms_per_query: int = Field(default=5, gt=0)
+    google_news_edition: str = "hl=en-IN&gl=IN&ceid=IN:en"
+    prices_every_minutes: int = Field(default=5, gt=0)  # in NSE market hours only
+    market_open: str = "09:15"  # NSE, in settings.timezone, Monday to Friday
+    market_close: str = "15:30"
+    # When the laptop may be woken for the scan, weekdays, on AC power only (user,
+    # 2026-10-07). The Windows task carries this window; see scripts/install_tasks.ps1.
+    wake_start: str = "08:30"
+    wake_end: str = "16:30"
+    # Verified 2026-10-07: one file holds the whole day's announcements from every company,
+    # and it answers If-Modified-Since with 304.
+    nse_announcements_url: str = (
+        "https://nsearchives.nseindia.com/content/RSS/Online_announcements.xml"
+    )
+    story_window_hours: int = Field(default=72, gt=0)  # how long a story takes new articles
+    benchmark: str = "^NSEI"  # polled with the watch stocks, for the price-move alert later
+    # Feed health: a feed is failing after this many failed checks in a row, and stale when
+    # it has brought nothing new for this many hours inside the daytime window.
+    feed_failing_after: int = Field(default=3, gt=0)
+    feed_stale_hours: float = Field(default=6, gt=0)
+    feed_stale_window: tuple[str, str] = ("08:00", "22:00")
+
+    @field_validator("market_open", "market_close", "wake_start", "wake_end")
+    @classmethod
+    def _check_time(cls, value: str) -> str:
+        if not _HHMM.fullmatch(value):
+            raise ValueError(f"must be HH:MM, got {value!r}")
+        return value
+
+    @field_validator("feed_stale_window")
+    @classmethod
+    def _check_window(cls, value: tuple[str, str]) -> tuple[str, str]:
+        for item in value:
+            if not _HHMM.fullmatch(item):
+                raise ValueError(f"must be HH:MM, got {item!r}")
+        return value
+
+
 class WebSettings(_Strict):
     """The web UI's own tunables. The watchlist is a starting point, not a store: the page's
     "Edit watchlist" keeps a per-browser choice, because the web app never writes."""
@@ -317,6 +367,7 @@ class Settings(_Strict):
     scoring: ScoringSettings
     delivery: DeliverySettings
     schedule: ScheduleSettings
+    watch: WatchSettings = Field(default_factory=WatchSettings)
     web: WebSettings = Field(default_factory=WebSettings)
     paths: PathSettings = Field(default_factory=PathSettings)
 
@@ -450,6 +501,9 @@ class WatchItem(_Strict):
     # Headline words that make a weak-alias match not company business: an air exercise
     # flying Tejas is IAF news, not HAL's. Strong-alias headlines are never affected.
     noise: list[str] = Field(default_factory=list)
+    # Peers that move together (a key of `groups`): the price-move alert checks the group
+    # before blaming one stock, and scoring adds the group's index as a second benchmark.
+    group: str | None = None
 
     @model_validator(mode="after")
     def _check(self) -> "WatchItem":
@@ -458,6 +512,8 @@ class WatchItem(_Strict):
                 raise ValueError(f"{self.symbol}: a stock needs a name")
             if not self.aliases.strong:
                 raise ValueError(f"{self.symbol}: a stock needs at least one strong alias")
+        elif self.group:
+            raise ValueError(f"{self.symbol}: only stocks belong to a peer group")
         elif any(
             (
                 self.aliases.strong,
@@ -479,33 +535,57 @@ class WatchItem(_Strict):
         return self
 
 
+class WatchGroup(_Strict):
+    """Watchlist stocks that move together, e.g. defence."""
+
+    name: str
+    index: str | None = None  # the group's sector index on Yahoo, verified live
+
+
 class WatchlistFile(_Strict):
+    groups: dict[str, WatchGroup] = Field(default_factory=dict)
     watchlist: list[WatchItem]
 
     @model_validator(mode="after")
-    def _check_unique_symbols(self) -> "WatchlistFile":
+    def _check(self) -> "WatchlistFile":
         symbols = [item.symbol for item in self.watchlist]
         duplicates = {symbol for symbol in symbols if symbols.count(symbol) > 1}
         if duplicates:
             raise ValueError(f"duplicate watchlist symbols: {sorted(duplicates)}")
+        unknown = sorted(
+            {item.group for item in self.watchlist if item.group and item.group not in self.groups}
+        )
+        if unknown:
+            raise ValueError(f"watchlist groups not defined under `groups`: {unknown}")
         return self
+
+    @property
+    def stocks(self) -> list[WatchItem]:
+        return [item for item in self.watchlist if item.type == "stock"]
+
+
+def load_watchlist_file(
+    path: Path | None = None, assets: Sequence[AssetConfig] | None = None
+) -> WatchlistFile:
+    """config/watchlist.yaml, checked against the asset universe: a commodity must be one
+    BASIS already prices and runs the playbook on, or its card would have nothing to show."""
+    watchlist = WatchlistFile.model_validate(_read_yaml(path or CONFIG_DIR / "watchlist.yaml"))
+    known = {asset.symbol for asset in (assets if assets is not None else load_assets())}
+    unknown = [
+        item.symbol
+        for item in watchlist.watchlist
+        if item.type == "commodity" and item.symbol not in known
+    ]
+    if unknown:
+        raise ValueError(f"watchlist commodities not in config/assets.yaml: {unknown}")
+    return watchlist
 
 
 def load_watchlist(
     path: Path | None = None, assets: Sequence[AssetConfig] | None = None
 ) -> list[WatchItem]:
-    """The watchlist, checked against the asset universe: a commodity must be one BASIS
-    already prices and runs the playbook on, or its card would have nothing to show."""
-    items = WatchlistFile.model_validate(
-        _read_yaml(path or CONFIG_DIR / "watchlist.yaml")
-    ).watchlist
-    known = {asset.symbol for asset in (assets if assets is not None else load_assets())}
-    unknown = [
-        item.symbol for item in items if item.type == "commodity" and item.symbol not in known
-    ]
-    if unknown:
-        raise ValueError(f"watchlist commodities not in config/assets.yaml: {unknown}")
-    return items
+    """The watchlist's entries, stocks and commodities."""
+    return load_watchlist_file(path, assets).watchlist
 
 
 def _read_yaml(path: Path) -> object:

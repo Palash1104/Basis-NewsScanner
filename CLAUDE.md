@@ -165,6 +165,49 @@ review after each step:
     well beyond its peers.
   - Score defence stocks against a Nifty India Defence index as well as the Nifty (if
     Yahoo has one, verified live), and show both in the track record.
+- **The defence index:** it is `NIFTY_IND_DEFENCE.NS` (verified 2026-10-08). Its previous
+  close of 9,215.35 matched NSE's NIFTY INDIA DEFENCE exactly. Yahoo has no daily bars for
+  it except today's; hourly bars go back to November 2024 (471 sessions), so step 6 has to
+  build session closes from those. It is `groups.defence.index` in watchlist.yaml, and 7 of
+  the 8 stocks are `group: defence` (Prime Focus is not).
+- **Step 2 running since 2026-10-08:**
+  - `newsdesk watch`, run by the `Newsdesk-watch` task at logon.
+  - The `Newsdesk-watch-wake` task is weekdays only, 08:30-16:30, every 10 min, AC power
+    only.
+  - Tables: `watch_articles`, `watch_matches`, `watch_sightings`, `watch_stories`,
+    `watch_filings`, `watch_prices` and `watch_runs`, plus `feed_checks`, which both the
+    scanner and the pipeline write.
+  - `newsdesk watch-report` writes `data/watch_report.md`.
+  - No LLM calls yet. The quota lanes (main 300 / watch 120 / retry 80) and skipping
+    extraction for low-yield categories come with step 3, the first step that calls the
+    LLM.
+  - **Wake caveat:**
+    - This laptop uses Modern Standby (S0 Low Power Idle), with networking off in standby.
+    - Wake timers are enabled on AC and DC, yet none of roughly 30 overnight `WakeToRun`
+      pipeline slots fired between 2026-09-28 and 2026-10-08. Every resume was from the
+      power button or the lid ("Wake Source: Unknown").
+    - The wake task records each run (`watch_runs.job = 'wake'`: on AC, whether a pass
+      ran, network up or down). The report shows whether it ever worked.
+- **Scanner behaviour worth knowing:**
+  - Only headlines naming a watchlist stock are stored, at any verdict.
+  - One article seen through several feeds has one row and a sighting per feed. All the
+    Google News searches count as one channel.
+  - A Google News link and the outlet's own link are the same article when the outlet
+    matches and `token_sort_ratio` is at least 90. When the outlet's feed brings a snippet
+    Google News lacked, the matches are re-judged with it.
+  - Stories group across stocks: the pipeline's thresholds, plus an item may only join a
+    story that shares one of its stocks (`app/watch/group.py`).
+  - NSE "News Verification" notices join the media story they quote, matched word for word.
+  - Lead time uses `first_seen_at`, never `published_at`.
+  - In the first-source table, a pass that follows a gap (start-up, or a wake) read a
+    backlog. It is left out.
+  - Google News searches are never reported stale: a quiet day for a stock is not a feed
+    fault.
+- **First live pass (2026-10-08):**
+  - 109 watchlist headlines, and Yahoo lag of 1-14 s on all 10 symbols.
+  - One false keep: "Hindustan Aeronautics Limited SC", HAL's football club, now excluded.
+  - The ET company feed (2143429.cms) carries two weeks of curated items and updates
+    slowly: its newest entry was 11.6 h old at noon.
 
 ## Commands
 
@@ -186,6 +229,8 @@ uv run newsdesk score [--rescore]              # judge due calls, print the trac
 uv run python scripts/impact_gate.py [--model summary|reasoning] [--story ID...]
 uv run newsdesk health [--days 7]              # scheduler slots, LLM budgets, layer B, rules at n>=5
 uv run python scripts/watch_alias_review.py [--refresh]   # every watchlist keep/mention/drop -> data/watch_alias_review.md
+uv run newsdesk watch [--once | --wake]       # the watchlist scanner (resident; no LLM calls)
+uv run newsdesk watch-report [--days 3]       # scanner volumes, first sources, feed health -> data/watch_report.md
 powershell -ExecutionPolicy Bypass -File scripts/install_tasks.ps1 [-Remove]   # Windows tasks
 ```
 
@@ -197,6 +242,10 @@ powershell -ExecutionPolicy Bypass -File scripts/install_tasks.ps1 [-Remove]   #
 - `config/watchlist.yaml` the one watchlist (stocks with aliases; commodities by symbol) ·
   `config/watch_feeds.yaml` market feeds for the watchlist scan (header lists those left out)
 - `app/watch/match.py` which watchlist stocks a headline is about: keep / mention / drop
+- `app/watch/scan.py` the scanner (`Watcher`: feeds, google_news and prices jobs, storing,
+  grouping) · `sources.py` conditional GETs, Google News queries, NSE announcements ·
+  `group.py` the cross-stock story grouper · `prices.py` intraday polls, market hours ·
+  `power.py` AC or battery · `report.py` `newsdesk watch-report`
 - `app/assets.py` ticker validation (yfinance), stored checks, the unvalidated-symbol warning,
   `benchmark_for` (by exchange)
 - `app/config.py` pydantic models for config, `.env` loading

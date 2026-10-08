@@ -57,6 +57,8 @@ but skips summaries and records why. The digest only includes summarized stories
 | `uv run newsdesk score` | Judge every call whose horizon is complete and print the track record. Safe to re-run: scores are written once. |
 | `uv run newsdesk validate-tickers` | Check every symbol in `config/assets.yaml` has recent prices on Yahoo (writes `data/ticker_report.md`). |
 | `uv run newsdesk serve` | The web UI on http://127.0.0.1:8787 (`--port` to change it). It only reads the database, so it is safe to run while the pipeline is writing. |
+| `uv run newsdesk watch [--once]` | The watchlist scanner: the market feeds in `config/watch_feeds.yaml` and NSE's announcements every 10 minutes, Google News searches for every alias, and intraday prices in market hours. Stores every headline that names a watchlist stock, with its verdict, and groups them into stories. No LLM calls. `--once` does one pass and exits. |
+| `uv run newsdesk watch-report [--days 3]` | What the scanner saw: articles and stories per stock per day, stories touching several stocks, which source was first, feed health, Yahoo's lag (writes `data/watch_report.md`). |
 | `uv run newsdesk health [--days 7]` | Whether the scheduler kept its slots, what the LLM layers used against their budgets, and which rules have enough judged calls to mean anything. Reads the database only, so it is safe to run while the scheduler is running. |
 | `uv run python scripts/embedding_report.py [--refresh]` | Compare embedding grouping thresholds on real samples and the regression fixtures (writes `data/embedding_report.md`). |
 | `uv run python scripts/regroup.py [--dry-run]` | Regroup every stored article with embeddings (no LLM calls). Changed stories that had a summary become `needs_resummary`. |
@@ -86,6 +88,8 @@ That creates the tasks under `\Newsdesk\`, with the times read from `settings.ya
 | `Newsdesk-pipeline` | `newsdesk run` | 01:00, 04:00, 07:00 … 22:00 |
 | `Newsdesk-digest` | `newsdesk digest --send` | 07:30 and 19:30 |
 | `Newsdesk-score` | `newsdesk score` | 03:30 |
+| `Newsdesk-watch` | `newsdesk watch` | at logon; runs until logoff |
+| `Newsdesk-watch-wake` | `newsdesk watch --wake` | weekdays 08:30-16:30, every 10 min, on AC power only |
 | `Newsdesk-web` | `newsdesk serve` | at logon, with `-WithWeb` |
 
 Add `-WithWeb` to also start the web UI a minute after you log in, so
@@ -99,6 +103,13 @@ That task has no time limit (it runs until you log off), restarts itself if it d
 ever runs one copy. It does not wake the machine, and it does not catch up a missed start:
 a page nobody is looking at is not worth waking a laptop for. Its output goes to
 `data\logs\tasks\serve.log`, fresh each logon.
+
+The watchlist scanner runs like the web server: from logon until logoff, restarted if it
+dies, one copy only, output in `data\logs	asks\watch.log`. `Newsdesk-watch-wake` is the
+market-hours wake: it will not start on battery and stops if the plug is pulled, and each
+start records whether it ran and whether the network was up, which `watch-report` shows.
+On this laptop (Modern Standby, networking off in standby) no wake timer fired in the ten
+days before it was installed, so whether it works is something the report has to show.
 
 They run as the logged-on user with the project's own virtualenv, need no administrator
 rights, start again after a reboot and login with no terminal open, run as soon as possible

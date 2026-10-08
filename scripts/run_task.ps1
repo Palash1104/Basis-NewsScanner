@@ -20,7 +20,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
-    [ValidateSet("run", "digest", "score", "serve")]
+    [ValidateSet("run", "digest", "score", "serve", "watch", "watch-wake")]
     [string]$Job
 )
 
@@ -44,6 +44,8 @@ $arguments = switch ($Job) {
     "digest" { @("digest", "--send") }
     "score" { @("score") }
     "serve" { @("serve") }
+    "watch" { @("watch") }
+    "watch-wake" { @("watch", "--wake") }
 }
 
 if (-not (Test-Path $exe)) {
@@ -82,10 +84,10 @@ function Send-FailureNotice {
     }
 }
 
-# The web server runs until logoff, so its output has to stream into the log as it happens
-# rather than being collected at exit like the batch jobs below. Start-Process redirection
-# truncates, which is what we want here: one file per logon, not one per request forever.
-if ($Job -eq "serve") {
+# The web server and the watchlist scanner run until logoff, so their output has to stream
+# into the log as it happens rather than being collected at exit like the batch jobs below.
+# Start-Process redirection truncates, which is what we want here: one file per logon.
+if ($Job -eq "serve" -or $Job -eq "watch") {
     $process = Start-Process -FilePath $exe -ArgumentList $arguments -WorkingDirectory $root `
         -NoNewWindow -Wait -PassThru -RedirectStandardOutput $log -RedirectStandardError "$log.err"
     if ($process.ExitCode -ne 0) {

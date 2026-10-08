@@ -1,4 +1,5 @@
-"""SQLAlchemy tables. Phase 1: articles, stories, runs."""
+"""SQLAlchemy tables: the pipeline's (articles, stories, runs...), feed checks, and the
+watchlist scanner's watch_* tables."""
 
 from datetime import UTC, datetime
 from typing import Any
@@ -317,3 +318,170 @@ class TickerCheck(Base):
     instrument_type: Mapped[str | None] = mapped_column(String(16))
     error: Mapped[str | None] = mapped_column(Text)
     flags: Mapped[list[str]] = mapped_column(JSON, default=list)  # review items, not failures
+
+
+class FeedCheck(Base):
+    """One fetch of one feed, by the pipeline or the watchlist scanner, so feed health can
+    be judged from history: failing (errors in a row) or stale (nothing new for hours). Not
+    in SPEC section 6."""
+
+    __tablename__ = "feed_checks"
+    __table_args__ = (Index("ix_feed_checks_url_time", "feed_url", "checked_at"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    kind: Mapped[str] = mapped_column(String(16))  # pipeline | watch
+    feed_name: Mapped[str] = mapped_column(String(120))
+    feed_url: Mapped[str] = mapped_column(Text)
+    checked_at: Mapped[datetime] = mapped_column(UTCDateTime, index=True)
+    status: Mapped[str] = mapped_column(String(16))  # ok | not_modified | error
+    http_status: Mapped[int | None] = mapped_column(Integer)
+    entries: Mapped[int] = mapped_column(Integer, default=0)
+    # Entries this feed had not carried before, per the scanner's memory of it. Null when
+    # unknown: the pipeline doesn't track it, and the scanner's first check after a start
+    # has nothing to compare with.
+    new_entries: Mapped[int | None] = mapped_column(Integer)
+    newest_entry_at: Mapped[datetime | None] = mapped_column(UTCDateTime)  # publisher's time
+    error: Mapped[str | None] = mapped_column(Text)
+    elapsed_ms: Mapped[int] = mapped_column(Integer, default=0)
+
+
+# ---------------------------------------------------------------- watchlist scanner
+#
+# Written only by `newsdesk watch`, never by the pipeline, which keeps its own articles and
+# stories. Step 2 of the watchlist stores what it sees and calls no LLM.
+
+
+class WatchStory(Base):
+    """Articles and filings about the same event, touching one or more watchlist stocks."""
+
+    __tablename__ = "watch_stories"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    first_seen_at: Mapped[datetime] = mapped_column(UTCDateTime, index=True)  # by BASIS
+    headline: Mapped[str] = mapped_column(Text)  # its first member's
+
+    articles: Mapped[list["WatchArticle"]] = relationship(
+        back_populates="story", order_by="WatchArticle.first_seen_at"
+    )
+    filings: Mapped[list["WatchFiling"]] = relationship(
+        back_populates="story", order_by="WatchFiling.first_seen_at"
+    )
+
+
+class WatchArticle(Base):
+    """A headline that names a watchlist stock (any verdict). Headlines naming none are not
+    kept: the scanner sees about a thousand a day."""
+
+    __tablename__ = "watch_articles"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    url: Mapped[str] = mapped_column(Text, unique=True)  # normalized, from the first sighting
+    source_name: Mapped[str] = mapped_column(String(120), index=True)
+    title: Mapped[str] = mapped_column(Text)
+    snippet: Mapped[str] = mapped_column(Text, default="")
+    published_at: Mapped[datetime] = mapped_column(UTCDateTime)  # the publisher's claim
+    # When BASIS first saw it. Lead time is measured from this, never from published_at:
+    # CNBC-TV18 stamps the last update (13:46 on a story live since 10:23).
+    first_seen_at: Mapped[datetime] = mapped_column(UTCDateTime, index=True)
+    story_id: Mapped[int | None] = mapped_column(ForeignKey("watch_stories.id"), index=True)
+
+    story: Mapped[WatchStory | None] = relationship(back_populates="articles")
+    matches: Mapped[list["WatchMatch"]] = relationship(
+        back_populates="article", cascade="all, delete-orphan"
+    )
+    sightings: Mapped[list["WatchSighting"]] = relationship(
+        back_populates="article", order_by="WatchSighting.seen_at", cascade="all, delete-orphan"
+    )
+
+
+class WatchSighting(Base):
+    """Each feed an article was seen in, and when: which channel sees a story first."""
+
+    __tablename__ = "watch_sightings"
+    __table_args__ = (UniqueConstraint("article_id", "feed_url"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    article_id: Mapped[int] = mapped_column(ForeignKey("watch_articles.id"), index=True)
+    feed_name: Mapped[str] = mapped_column(String(120))
+    feed_url: Mapped[str] = mapped_column(Text)
+    via: Mapped[str] = mapped_column(String(16))  # rss | google_news
+    seen_at: Mapped[datetime] = mapped_column(UTCDateTime)
+
+    article: Mapped[WatchArticle] = relationship(back_populates="sightings")
+
+
+class WatchMatch(Base):
+    """The matcher's verdict on one article for one stock (app/watch/match.py)."""
+
+    __tablename__ = "watch_matches"
+    __table_args__ = (UniqueConstraint("article_id", "symbol"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    article_id: Mapped[int] = mapped_column(ForeignKey("watch_articles.id"), index=True)
+    symbol: Mapped[str] = mapped_column(String(32), index=True)
+    verdict: Mapped[str] = mapped_column(String(8))  # keep | mention | drop
+    reason: Mapped[str] = mapped_column(Text)
+    alias: Mapped[str | None] = mapped_column(String(120))
+
+    article: Mapped[WatchArticle] = relationship(back_populates="matches")
+
+
+class WatchFiling(Base):
+    """An exchange announcement by a watchlist company."""
+
+    __tablename__ = "watch_filings"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    key: Mapped[str] = mapped_column(String(64), unique=True)  # the feed has no id: a hash
+    exchange: Mapped[str] = mapped_column(String(8))  # NSE (BSE comes in step 7)
+    symbol: Mapped[str] = mapped_column(String(32), index=True)
+    company: Mapped[str] = mapped_column(String(200))
+    subject: Mapped[str] = mapped_column(String(200))
+    description: Mapped[str] = mapped_column(Text)
+    link: Mapped[str] = mapped_column(Text, default="")
+    filed_at: Mapped[datetime] = mapped_column(UTCDateTime, index=True)  # the exchange's time
+    first_seen_at: Mapped[datetime] = mapped_column(UTCDateTime)
+    # filing | clarification_sought (NSE asked about a media report, reply awaited) |
+    # company_reply (the company's answer to it)
+    kind: Mapped[str] = mapped_column(String(24))
+    # The media headline NSE asked about, word for word, which ties it to that story.
+    quoted_headline: Mapped[str | None] = mapped_column(Text)
+    story_id: Mapped[int | None] = mapped_column(ForeignKey("watch_stories.id"), index=True)
+
+    story: Mapped[WatchStory | None] = relationship(back_populates="filings")
+
+
+class WatchPrice(Base):
+    """One intraday price poll of a watchlist stock or benchmark, in market hours. Kept to
+    measure Yahoo's lag and each stock's typical intraday move before any alert uses it."""
+
+    __tablename__ = "watch_prices"
+    __table_args__ = (UniqueConstraint("symbol", "polled_at"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    symbol: Mapped[str] = mapped_column(String(32), index=True)
+    polled_at: Mapped[datetime] = mapped_column(UTCDateTime, index=True)
+    price: Mapped[float | None] = mapped_column(Float)
+    previous_close: Mapped[float | None] = mapped_column(Float)
+    last_trade_at: Mapped[datetime | None] = mapped_column(UTCDateTime)  # Yahoo's own stamp
+    newest_bar_at: Mapped[datetime | None] = mapped_column(UTCDateTime)  # newest 1m bar start
+    day_open: Mapped[float | None] = mapped_column(Float)
+    day_high: Mapped[float | None] = mapped_column(Float)
+    day_low: Mapped[float | None] = mapped_column(Float)
+    error: Mapped[str | None] = mapped_column(Text)
+
+
+class WatchRun(Base):
+    """One pass of one scanner job, so coverage (and the laptop's sleep) shows in the report."""
+
+    __tablename__ = "watch_runs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    job: Mapped[str] = mapped_column(String(16), index=True)  # feeds | google_news | prices | wake
+    started_at: Mapped[datetime] = mapped_column(UTCDateTime, index=True)
+    finished_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    on_ac: Mapped[bool | None] = mapped_column()  # None where the platform can't tell
+    entries: Mapped[int] = mapped_column(Integer, default=0)
+    new_articles: Mapped[int] = mapped_column(Integer, default=0)
+    new_filings: Mapped[int] = mapped_column(Integer, default=0)
+    errors: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)

@@ -5,7 +5,7 @@
 ' (user, 2026-09-23). WScript.Shell.Run with a window style of 0 creates the process with its
 ' window hidden from the start, so nothing is ever drawn.
 '
-' Usage: wscript.exe //nologo run_hidden.vbs <run|digest|score|serve>
+' Usage: wscript.exe //nologo run_hidden.vbs <run|digest|score|serve|watch|watch-wake>
 ' It waits for the job and passes its exit code back, so Task Scheduler's LastTaskResult
 ' still means what it always did.
 

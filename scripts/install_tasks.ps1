@@ -9,6 +9,8 @@
       Newsdesk-pipeline   newsdesk run           at every pipeline hour
       Newsdesk-digest     newsdesk digest --send at each digest time
       Newsdesk-score      newsdesk score         daily
+      Newsdesk-watch      newsdesk watch         at logon: the watchlist scanner, resident
+      Newsdesk-watch-wake newsdesk watch --wake  weekdays in market hours, AC power only
       Newsdesk-web        newsdesk serve         at logon, with -WithWeb
 
     The times come from `newsdesk schedule-times`, which reads settings.yaml, so they cannot
@@ -108,6 +110,51 @@ Register-NewsdeskTask -Name "Newsdesk-digest" -Job "digest" -Triggers $digestTri
     -Description "Send the Telegram digest of stories summarized since the last one."
 Register-NewsdeskTask -Name "Newsdesk-score" -Job "score" -Triggers $scoreTrigger `
     -Description "Judge every impact whose horizon is complete and update the track record."
+
+# The watchlist scanner is resident, like the web server: it runs until logoff, restarts if
+# it dies, and only ever once. It is not itself a wake task.
+$residentSettings = New-ScheduledTaskSettingsSet `
+    -AllowStartIfOnBatteries `
+    -DontStopIfGoingOnBatteries `
+    -MultipleInstances IgnoreNew `
+    -ExecutionTimeLimit ([TimeSpan]::Zero) `
+    -RestartCount 3 `
+    -RestartInterval (New-TimeSpan -Minutes 1)
+$logonTrigger = New-ScheduledTaskTrigger -AtLogOn -User "$env:USERDOMAIN\$env:USERNAME"
+$logonTrigger.Delay = "PT1M"
+$action = New-ScheduledTaskAction -Execute "wscript.exe" `
+    -Argument "//nologo `"$launcher`" watch" -WorkingDirectory $root
+Register-ScheduledTask -TaskPath $taskPath -TaskName "Newsdesk-watch" -Action $action `
+    -Trigger $logonTrigger -Settings $residentSettings -Principal $principal `
+    -Description "The watchlist scanner: watch feeds, NSE filings, Google News and prices. No LLM calls." -Force | Out-Null
+Write-Output "  Newsdesk-watch (at logon)"
+
+# The market-hours wake (user, 2026-10-07): weekdays, every few minutes across the window,
+# and only on AC power - it will not start on battery, and stops if the plug is pulled. Each
+# start records what it found (`newsdesk watch --wake`) and does one pass if the resident
+# scanner isn't running. No StartWhenAvailable: a wake that didn't happen must not be run
+# later and logged as if it had.
+$wake = $times.watch_wake
+$wakeStart = $wake.start.Split(":")
+$wakeEnd = $wake.end.Split(":")
+$wakeSpan = (New-TimeSpan -Hours ([int]$wakeEnd[0]) -Minutes ([int]$wakeEnd[1])) - `
+    (New-TimeSpan -Hours ([int]$wakeStart[0]) -Minutes ([int]$wakeStart[1]))
+$wakeTrigger = New-ScheduledTaskTrigger -Weekly -DaysOfWeek Monday, Tuesday, Wednesday, Thursday, Friday `
+    -At (Get-Date -Hour ([int]$wakeStart[0]) -Minute ([int]$wakeStart[1]) -Second 0)
+$wakeTrigger.Repetition = (New-ScheduledTaskTrigger -Once -At (Get-Date) `
+    -RepetitionInterval (New-TimeSpan -Minutes $wake.every_minutes) -RepetitionDuration $wakeSpan).Repetition
+$wakeSettings = New-ScheduledTaskSettingsSet `
+    -WakeToRun `
+    -MultipleInstances IgnoreNew `
+    -ExecutionTimeLimit (New-TimeSpan -Minutes 10)
+$wakeSettings.DisallowStartIfOnBatteries = $true
+$wakeSettings.StopIfGoingOnBatteries = $true
+$action = New-ScheduledTaskAction -Execute "wscript.exe" `
+    -Argument "//nologo `"$launcher`" watch-wake" -WorkingDirectory $root
+Register-ScheduledTask -TaskPath $taskPath -TaskName "Newsdesk-watch-wake" -Action $action `
+    -Trigger $wakeTrigger -Settings $wakeSettings -Principal $principal `
+    -Description "Wake the laptop in market hours (weekdays, AC power only) for a watchlist scan." -Force | Out-Null
+Write-Output "  Newsdesk-watch-wake (weekdays $($wake.start)-$($wake.end), every $($wake.every_minutes) min, AC only)"
 
 if ($WithWeb) {
     # The server runs until logoff: no time limit, restart it if it dies, and only ever one.

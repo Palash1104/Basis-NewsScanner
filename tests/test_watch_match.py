@@ -168,6 +168,8 @@ def test_one_name_in_a_list_is_a_mention(matcher: Matcher, title: str, symbol: s
             "stand?",
             "BDL",
         ),
+        # Was wrong (first live pass): the company's football club.
+        ("Hindustan Aeronautics Limited SC", "HAL"),
         # Was wrong (third round): Lebanon's central bank, with "deal" as its market word.
         ("IMF deal: Paris pushes, Beirut acts, BDL still resists", "BDL"),
         # Was wrong (second round): job adverts passed on the "director" market word.

@@ -20,6 +20,17 @@
 # Every alias was checked against real headlines; `scripts/watch_alias_review.py` re-runs that
 # check and writes every keep and drop to data/watch_alias_review.md. Run it after any edit.
 
+# Peer groups: stocks that move together. The price-move alert checks the group before
+# blaming one stock, and scoring judges a group's stocks against its index as well as the
+# Nifty, so a sector rally doesn't make every positive call look right (user, 2026-10-08).
+groups:
+  defence:
+    name: Defence
+    # Verified 2026-10-08: Yahoo's INDEX "NIFTY IND DEFENCE"; its previous close (9,215.35)
+    # matched NSE's own figure for NIFTY INDIA DEFENCE exactly. Yahoo has no daily bars for
+    # it, only today's: hourly bars go back to Nov 2024, so session closes come from those.
+    index: NIFTY_IND_DEFENCE.NS
+
 watchlist:
   - type: stock
     symbol: PFOCUS.NS
@@ -39,6 +50,7 @@ watchlist:
 
   - type: stock
     symbol: APOLLO.NS
+    group: defence
     name: Apollo Micro Systems
     nse_symbol: APOLLO
     nse_name: Apollo Micro Systems Limited
@@ -50,6 +62,7 @@ watchlist:
 
   - type: stock
     symbol: HAL.NS
+    group: defence
     name: HAL
     nse_symbol: HAL
     nse_name: Hindustan Aeronautics Limited
@@ -63,7 +76,9 @@ watchlist:
     vocab: [aircraft, jet, fighter, LCA, IAF, Air Force, helicopter, Dhruv, Prachand, LCH, LUH,
             HTT-40, HTT 40, Su-30MKI, Sukhoi, engine, aero-engine, F404, F414, AL-31FP, Shakti,
             trainer, training, Mk1A, Mk2, AMCA, Koraput, aerospace, defence, Rajnath]
-    exclude: [Tejas Networks, Tejas Express]
+    # HAL SC is the company's football club: "Hindustan Aeronautics Limited SC" (Transfermarkt)
+    # was the scanner's first live pass's one false keep, 2026-10-08.
+    exclude: [Tejas Networks, Tejas Express, Hindustan Aeronautics Limited SC, HAL SC]
     # Air exercises and flypasts fly Tejas often - 25 headlines in 30 days, "Japan air chief
     # flies Tejas" among them - and none is HAL's business.
     noise: [sortie, exercise, Veer Guardian, Tarang Shakti, formation, air show, airshow,
@@ -71,6 +86,7 @@ watchlist:
 
   - type: stock
     symbol: BDL.NS
+    group: defence
     name: Bharat Dynamics
     nse_symbol: BDL
     nse_name: Bharat Dynamics Limited
@@ -86,6 +102,7 @@ watchlist:
 
   - type: stock
     symbol: AEQUS.NS
+    group: defence
     name: Aequs
     nse_symbol: AEQUS
     nse_name: Aequs Limited
@@ -97,6 +114,7 @@ watchlist:
 
   - type: stock
     symbol: DATAPATTNS.NS
+    group: defence
     name: Data Patterns
     nse_symbol: DATAPATTNS
     nse_name: Data Patterns (India) Limited
@@ -109,6 +127,7 @@ watchlist:
 
   - type: stock
     symbol: ZENTEC.NS
+    group: defence
     name: Zen Technologies
     nse_symbol: ZENTEC
     nse_name: Zen Technologies Limited
@@ -120,6 +139,7 @@ watchlist:
 
   - type: stock
     symbol: ASTRAMICRO.NS
+    group: defence
     name: Astra Microwave
     nse_symbol: ASTRAMICRO
     nse_name: Astra Microwave Products Limited

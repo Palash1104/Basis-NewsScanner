@@ -44,6 +44,7 @@ from app.config import (
     load_env,
     load_feeds,
     load_settings,
+    load_watchlist_file,
 )
 from app.db import init_db, make_engine, make_session_factory
 from app.delivery.format import digest_item, format_digest, telegram_length
@@ -59,7 +60,7 @@ from app.llm.client import (
 )
 from app.llm.prompts import IMPACT_PROMPT_VERSION
 from app.locks import job_lock
-from app.models import Article, RuleDisagreementRow, Run, Story, utcnow
+from app.models import Article, FeedCheck, RuleDisagreementRow, Run, Story, utcnow
 from app.net import make_client
 from app.pipeline.classify import non_news_reason
 from app.pipeline.cluster import GroupingResult, assign_to_stories
@@ -114,6 +115,10 @@ from app.schedule import (
     settings_for_run,
     start_of_news_day,
 )
+from app.watch.power import on_ac_power
+from app.watch.prices import YahooSnapshots
+from app.watch.report import watch_report
+from app.watch.scan import build_watcher, record_wake, run_forever
 
 log = logging.getLogger("newsdesk")
 
@@ -200,6 +205,26 @@ async def _fetch(
         return await fetch_all(feeds, settings, resolver=resolver, client=client)
 
 
+def feed_checks(results: Sequence[FeedResult], now: datetime) -> list[FeedCheck]:
+    """One row per feed fetched, so feed health can be judged over time: a feed failing
+    run after run, or bringing nothing new for hours, shows in `newsdesk watch-report`."""
+    return [
+        FeedCheck(
+            kind="pipeline",
+            feed_name=result.feed.name,
+            feed_url=result.feed.url,
+            checked_at=now,
+            status="ok" if result.ok else "error",
+            http_status=result.status_code,
+            entries=len(result.articles),
+            newest_entry_at=max((a.published_at for a in result.articles), default=None),
+            error=result.error,
+            elapsed_ms=int(result.elapsed_seconds * 1000),
+        )
+        for result in results
+    ]
+
+
 def _existing_articles(session: Session, urls: set[str], since: datetime) -> list[Article]:
     """Stored articles the dedupe step must see: recent ones, plus any sharing a candidate URL."""
     found: dict[int, Article] = {
@@ -264,6 +289,7 @@ def run_pipeline(
                             "error": result.error,
                         }
                     )
+            session.add_all(feed_checks(results, now))
             fetched = [article for result in results for article in result.articles]
             recent = filter_recent(fetched, settings.pipeline.lookback_hours, now)
             report.articles_fetched = len(fetched)
@@ -1248,13 +1274,26 @@ def schedule_times() -> None:
                 ),
                 "digest_times": list(settings.delivery.digest_times),
                 "score_time": settings.schedule.score_time,
+                # The watchlist scanner's market-hours wake: weekdays, every N minutes.
+                "watch_wake": {
+                    "start": settings.watch.wake_start,
+                    "end": settings.watch.wake_end,
+                    "every_minutes": settings.watch.feeds_every_minutes,
+                },
             },
             indent=2,
         )
     )
 
 
-JOB_NAMES = {"run": "pipeline", "digest": "digest", "score": "scoring", "serve": "web server"}
+JOB_NAMES = {
+    "run": "pipeline",
+    "digest": "digest",
+    "score": "scoring",
+    "serve": "web server",
+    "watch": "watchlist scanner",
+    "watch-wake": "watchlist wake",
+}
 FAILURE_TAIL_LINES = 6
 FAILURE_TAIL_CHARS = 600
 
@@ -1328,6 +1367,76 @@ def health(
     with session_factory() as session:
         for line in health_lines(session, settings, utcnow(), days):
             typer.echo(line)
+
+
+# ---------------------------------------------------------------- watchlist scanner
+
+
+@app.command()
+def watch(
+    once: Annotated[bool, typer.Option("--once", help="One pass of every job, then exit.")] = False,
+    wake: Annotated[
+        bool,
+        typer.Option(
+            "--wake",
+            help="For the market-hours wake task: record the wake, and do one pass unless the "
+            "resident scanner is already running.",
+        ),
+    ] = False,
+) -> None:
+    """The watchlist scanner: watch feeds and NSE filings every 10 minutes, Google News
+    searches, and intraday prices in market hours. Stores what names a watchlist stock and
+    groups it into stories. Makes no LLM calls."""
+    settings, session_factory = _bootstrap()
+    started = utcnow()
+    on_ac = on_ac_power()
+    with job_lock(_lock_dir(settings), "watch") as acquired:
+        if not acquired:
+            if wake:
+                record_wake(
+                    session_factory, started, on_ac, None, "the resident scanner is running"
+                )
+            typer.echo("the watchlist scanner is already running; nothing to do")
+            return
+        embedder: Embedder | None = None
+        if settings.grouping.method == "embedding":
+            embedder, unavailable = load_embedder(settings.grouping.embedding_model)
+            if unavailable:
+                typer.echo(f"embedding model unavailable, so no grouping: {unavailable}")
+        watcher = build_watcher(settings, session_factory, embedder, YahooSnapshots())
+        if once or wake:
+            results = watcher.tick(force=True)
+            for result in results:
+                typer.echo(result.line())
+            if wake:
+                record_wake(session_factory, started, on_ac, results)
+            return
+        typer.echo(
+            f"watching {len(watcher.stocks)} stocks: {len(watcher.feeds)} feeds + NSE every "
+            f"{settings.watch.feeds_every_minutes} min, {len(watcher.queries)} Google News "
+            "searches, prices in market hours. Ctrl+C stops it."
+        )
+        try:
+            run_forever(watcher, time.sleep)
+        except KeyboardInterrupt:
+            typer.echo("stopped")
+
+
+@app.command("watch-report")
+def watch_report_command(
+    days: Annotated[
+        int, typer.Option("--days", min=1, help="How many days back to report on.")
+    ] = 3,
+) -> None:
+    """What the watchlist scanner has seen: volumes per stock, multi-stock stories, first
+    sources, feed health, Yahoo's lag. Writes data/watch_report.md."""
+    settings, session_factory = _bootstrap()
+    with session_factory() as session:
+        text = watch_report(session, settings, load_watchlist_file(), utcnow(), days)
+    path = settings.resolve_path("data/watch_report.md")
+    path.write_text(text, encoding="utf-8")
+    typer.echo(text)
+    typer.echo(f"written to {path}")
 
 
 # ---------------------------------------------------------------- tickers

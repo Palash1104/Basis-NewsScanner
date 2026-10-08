@@ -204,6 +204,29 @@ delivery:
   # the evening digest and midnight. Null carries everything summarized since the last digest.
   day_starts_at: "22:00"
 
+watch:
+  # The watchlist scanner, `newsdesk watch` (step 2: it fetches and stores, no LLM calls).
+  # Stocks, aliases and peer groups are in config/watchlist.yaml; its feeds in
+  # config/watch_feeds.yaml.
+  feeds_every_minutes: 10 # the watch feeds and NSE's announcements, conditional GETs
+  google_news_every_minutes: 20 # in market hours
+  google_news_quiet_every_minutes: 60 # otherwise
+  google_news_terms_per_query: 5 # aliases OR-ed into one search (verified 2026-10-07)
+  prices_every_minutes: 5 # NSE market hours only
+  market_open: "09:15"
+  market_close: "15:30"
+  # Weekdays in this window, on AC power only, the laptop is woken every
+  # feeds_every_minutes for a scan (user, 2026-10-07). Re-run scripts/install_tasks.ps1
+  # after changing it.
+  wake_start: "08:30"
+  wake_end: "16:30"
+  story_window_hours: 72
+  benchmark: "^NSEI"
+  # Feed health, as the warning would judge it (reported only at this step).
+  feed_failing_after: 3 # failed checks in a row
+  feed_stale_hours: 6 # newest entry older than this...
+  feed_stale_window: ["08:00", "22:00"] # ...at a check inside these hours (IST)
+
 web:
   # The rail's watchlist: assets kept on the page whether or not a story called them. Symbols
   # must be in config/assets.yaml; anything else is dropped with a warning. This is only the
