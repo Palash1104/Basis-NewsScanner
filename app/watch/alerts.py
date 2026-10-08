@@ -14,6 +14,8 @@ What reaches Telegram, and when:
              the gap no source covered. Fresher items are alerted as usual. Filings that
              reach BASIS late outside a catch-up (the PEAD tool backfilling BSE after it was
              started) get one too, from their `late` run, and never an alert of their own.
+             A late filing on a story already alerted is shown as an update to it:
+             "Update: <the story> (alerted 10:23)", with the filing under it.
   feed       a feed failing (errors in a row) or gone stale (nothing new for much longer
              than is usual for it, in the daytime)
 
@@ -575,6 +577,7 @@ def away_summaries(
         if missing := late_story_ids - {s.id for s in stories}:
             stories += _load_stories(session, ids=sorted(missing))
         calls = current_calls(session, [s.id for s in stories])
+        alerted = news_alert_times(session, [s.id for s in stories], run.started_at)
         unfinished = [s for s in stories if trigger_for(s, list(calls.get(s.id, {}).values()))]
         finished_at = run.finished_at or run.started_at
         if unfinished and now - finished_at < AWAY_WAIT:
@@ -587,6 +590,20 @@ def away_summaries(
                 for f in story.filings
                 if f.first_seen_at == run.started_at and f.filed_at < cutoff
             ]
+            if late and story.id in alerted:
+                # The reader has this story already: the filing is an update to it.
+                when = max(f.filed_at for f in late)
+                text = update_item(
+                    story,
+                    late,
+                    calls.get(story.id, {}),
+                    alerted[story.id],
+                    names,
+                    settings,
+                    gap_end,
+                )
+                items.append((when, text))
+                continue
             if story.first_seen_at == run.started_at and (gap_start <= reported < cutoff or late):
                 when = reported
             elif late:  # a story BASIS already had: the item is the late filing
@@ -643,6 +660,63 @@ def away_summaries(
         ]
         out.append(Outgoing("away", f"away:{run.id}", tuple(split(header, body, footer))))
     return out, empty
+
+
+def news_alert_times(
+    session: Session, story_ids: Sequence[int], before: datetime
+) -> dict[int, datetime]:
+    """When each of these stories had its instant alert sent, if it had one by `before`."""
+    if not story_ids:
+        return {}
+    return {
+        story_id: sent_at
+        for story_id, sent_at in session.execute(
+            select(WatchAlert.story_id, WatchAlert.sent_at).where(
+                WatchAlert.kind == "news",
+                WatchAlert.story_id.in_(list(story_ids)),
+                WatchAlert.sent_at.is_not(None),
+                WatchAlert.sent_at <= before,
+            )
+        )
+        if story_id is not None and sent_at is not None
+    }
+
+
+UPDATE_DESCRIPTION_CHARS = 200
+
+
+def update_item(
+    story: WatchStory,
+    late: Sequence[WatchFiling],
+    calls: Mapping[str, WatchCall],
+    alerted_at: datetime,
+    names: Mapping[str, str],
+    settings: Settings,
+    ref: datetime,
+) -> str:
+    """A late filing on a story already alerted, as an update to that story (user,
+    2026-10-08): the story as the alert named it, when it was alerted, each late filing at
+    its own time, and the story's call again if the filing changed it."""
+    first_late_seen = min(f.first_seen_at for f in late)
+    lines = [
+        f"• <b>{_local(max(f.filed_at for f in late), settings, ref)}</b> · "
+        f"Update: {_t(story.headline)} (alerted {_local(alerted_at, settings, ref)})"
+    ]
+    for filing in sorted(late, key=lambda f: f.filed_at):
+        description = filing.description.strip()
+        if len(description) > UPDATE_DESCRIPTION_CHARS:
+            description = description[: UPDATE_DESCRIPTION_CHARS - 1].rstrip() + "…"
+        link = (
+            f' · <a href="{escape(filing.link, quote=True)}">the filing</a>' if filing.link else ""
+        )
+        lines.append(
+            f"  {_local(filing.filed_at, settings, ref)} · {filing.exchange} · "
+            f"{_t(filing.subject)}: {_t(description)}{link}"
+        )
+    recalled = [c for c in shown(calls, list(names)) if c.created_at >= first_late_seen]
+    if recalled:
+        lines.append(f"  <i>{_marks(recalled, names)} · {_t(recalled[0].reason)}</i>")
+    return "\n".join(lines)
 
 
 def split(header: Sequence[str], body: Sequence[str], footer: Sequence[str]) -> list[str]:

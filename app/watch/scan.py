@@ -97,6 +97,8 @@ from app.watch.sources import (
 log = logging.getLogger(__name__)
 # watch_cursors row for the PEAD tool's shared file: the last seq processed.
 BSE_CURSOR = "pead_announcements"
+# A filing that quotes a headline at least this long, word for word, joins its story.
+QUOTE_MIN_WORDS = 6
 
 # analyse comes after the news jobs, so what they just stored is called in the same tick;
 # alerts come last, so a call or a price made this tick is alerted this tick.
@@ -1022,7 +1024,7 @@ class Watcher:
         captioned Prime Focus shares tank 8%..."), which ties the filing to that story
         exactly, however differently the two are worded otherwise."""
         if not filing.quoted_headline:
-            return None
+            return self._story_named_in(session, filing, now)
         quoted = normalize_title(filing.quoted_headline)
         since = now - timedelta(hours=self.settings.watch.story_window_hours)
         threshold = self.settings.dedupe.syndication_title_similarity
@@ -1050,6 +1052,30 @@ class Watcher:
             .order_by(WatchFiling.filed_at)
         )
         return earlier.story if earlier is not None else None
+
+    def _story_named_in(
+        self, session: Session, filing: WatchFiling, now: datetime
+    ) -> WatchStory | None:
+        """A filing whose own text carries a watchlist headline word for word - a BSE reply
+        to a news item, say, whose wording BASIS has no parser for - joins that headline's
+        story, so a reply lands on the story it answers (user, 2026-10-08). Only headlines of
+        QUOTE_MIN_WORDS words or more count: a short one could turn up by chance."""
+        text = f" {normalize_title(filing.description)} "
+        since = now - timedelta(hours=self.settings.watch.story_window_hours)
+        for article in session.scalars(
+            select(WatchArticle)
+            .join(WatchMatch)
+            .where(
+                WatchMatch.symbol == filing.symbol,
+                WatchArticle.first_seen_at >= since,
+                WatchArticle.story_id.is_not(None),
+            )
+            .order_by(WatchArticle.first_seen_at)
+        ):
+            title = normalize_title(article.title)
+            if len(title.split()) >= QUOTE_MIN_WORDS and f" {title} " in text:
+                return article.story
+        return None
 
 
 WATCH_FEEDS = "watch_feeds.yaml"

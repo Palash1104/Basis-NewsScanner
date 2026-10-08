@@ -14,6 +14,7 @@ from app.config import Settings, WatchlistFile, load_watchlist_file
 from app.db import init_db, make_engine, make_session_factory
 from app.models import (
     WatchAlert,
+    WatchArticle,
     WatchCall,
     WatchCursor,
     WatchFiling,
@@ -21,7 +22,7 @@ from app.models import (
     WatchRun,
     WatchStory,
 )
-from app.watch.alerts import followups
+from app.watch.alerts import Outgoing, deliver, followups
 from app.watch.catchup import Gap, SourceCoverage, find_gap, possible_gaps
 from app.watch.prices import backfill_rows
 from app.watch.scan import BSE_CURSOR
@@ -34,7 +35,7 @@ from app.watch.sources import (
     parse_nse_api,
     read_bse_announcements,
 )
-from tests.test_watch_scan import NSE_URL, RSS, Clock, Web, make_watcher
+from tests.test_watch_scan import NSE_URL, PF_RAID, RSS, Clock, Web, make_watcher
 
 # Thursday 2026-10-08 06:00 UTC = 11:30 IST.
 NOW = datetime(2026, 10, 8, 6, 0, tzinfo=UTC)
@@ -261,6 +262,7 @@ def bse_row(
     exchange: str = "BSE",
     category: str = "Company Update",
     company: str = "Prime Focus Ltd",
+    headline: str | None = None,
 ) -> tuple[str, ...]:
     return (
         id_,
@@ -269,7 +271,7 @@ def bse_row(
         "532748",
         isin,
         category,
-        f"{company} has informed the Exchange about {id_}",
+        headline or f"{company} has informed the Exchange about {id_}",
         f"https://www.bseindia.com/xml-data/corpfiling/AttachLive/{id_}.pdf",
         exchange_time,
         fetched_at,
@@ -530,3 +532,142 @@ def test_a_late_filing_on_an_alerted_story_is_no_follow_up(
         )
         session.commit()
         assert followups(session, settings, {"PFOCUS.NS": "Prime Focus"}, now) == []
+
+
+def regulation_30_reply(headline: str) -> str:
+    return (
+        "Prime Focus Ltd - 532748 - Disclosure under Regulation 30 of SEBI (Listing "
+        "Obligations and Disclosure Requirements) Regulations, 2015. With reference to the "
+        f"email received from the Exchange today regarding the article {headline}, we wish "
+        "to inform that proceedings were initiated by the authorities at certain premises "
+        "and the management has been extending full cooperation to the officials. The "
+        "management believes the matter will not have any material bearing on operations, "
+        "financial position, liquidity or continuity of business, and will keep "
+        "stakeholders informed of further developments as required under applicable law."
+    )
+
+
+def high_call(story_id: int, reason: str, at: datetime, filings: int = 0) -> WatchCall:
+    return WatchCall(
+        story_id=story_id,
+        symbol="PFOCUS.NS",
+        relevance="primary",
+        sentiment="negative",
+        materiality="high",
+        event_type="regulatory",
+        reason=reason,
+        summary="Tax searches at Prime Focus. It matters.",
+        article_count=1,
+        filing_count=filings,
+        read_reply=False,
+        trigger="new",
+        model="m",
+        prompt_version="watch-v1",
+        created_at=at,
+    )
+
+
+def test_a_late_reply_to_an_alerted_story_is_an_update_to_it_in_the_summary(
+    settings: Settings, db: sessionmaker[Session], watchlist: WatchlistFile, tmp_path: Path
+) -> None:
+    """The raid story was alerted at 10:40. The PEAD tool, started later, backfills a BSE
+    reply filed at 08:00 that quotes the headline. The reply joins that story, and the
+    summary shows it as an update to it - "Update: <the story> (alerted 10:40)" with the
+    filing under it - not as a filing of its own, and no follow-up is sent for it."""
+
+    def ist(hour: int, minute: int) -> datetime:
+        return datetime(2026, 10, 8, hour, minute, tzinfo=IST).astimezone(UTC)
+
+    path = pead_write(tmp_path / "announcements.db", [])
+    watcher = make_watcher(with_bse(settings, path), db, watchlist, Web(), Clock(ist(10, 31)))
+    sent: list[str] = []
+    watcher.sender = sent.extend
+    watcher.run_job("feeds", ist(10, 31))
+    with db() as session:
+        raid = session.scalars(
+            select(WatchArticle).where(WatchArticle.url.endswith("pf-raid"))
+        ).one()
+        story_id = raid.story_id
+        assert story_id is not None
+        session.add(high_call(story_id, "Tax searches at its Mumbai offices.", ist(10, 32)))
+        session.commit()
+    news = Outgoing("news", f"news:{story_id}", ("x",), story_id, ("PFOCUS.NS",))
+    deliver(db, [news], lambda messages: None, ist(10, 40))  # the instant alert
+    watcher.run_job("feeds", ist(10, 41))
+    watcher.run_job("feeds", ist(10, 51))
+
+    reply = regulation_30_reply(PF_RAID[0])
+    pead_write(
+        path,
+        [
+            bse_row(
+                "reply",
+                PFOCUS_ISIN,
+                "2026-10-08T08:00:00",
+                "2026-10-08T10:55:00+05:30",
+                headline=reply,
+            )
+        ],
+    )
+    watcher.run_job("feeds", ist(11, 1))
+    with db() as session:
+        filing = session.scalars(select(WatchFiling).where(WatchFiling.exchange == "BSE")).one()
+        assert filing.story_id == story_id  # it quotes the headline: the story it answers
+        filings = len(session.get(WatchStory, story_id).filings)
+        session.add(
+            high_call(
+                story_id, "The company confirmed the search; work goes on.", ist(11, 2), filings
+            )
+        )
+        session.commit()
+
+    watcher.run_job("alerts", ist(11, 12))
+    summaries = [m for m in sent if m.startswith("<b>BASIS · while you were away</b>")]
+    assert len(summaries) == 1
+    body = summaries[0]
+    assert f"• <b>08:00</b> · Update: {PF_RAID[0]} (alerted 10:40)" in body
+    assert "  08:00 · BSE · Company Update: Prime Focus Ltd - 532748 - Disclosure" in body
+    assert "the company confirmed the search; work goes on." in body.lower()
+    assert body.count("• ") == 1  # one item: the update, not the filing again
+    assert not [m for m in sent if m.startswith("<b>BASIS · watchlist update</b>")]
+
+
+def test_a_filing_quoting_a_headline_word_for_word_joins_its_story(
+    settings: Settings, db: sessionmaker[Session], watchlist: WatchlistFile, tmp_path: Path
+) -> None:
+    path = pead_write(tmp_path / "announcements.db", [])
+    watcher = make_watcher(with_bse(settings, path), db, watchlist, Web(), Clock(NOW))
+    watcher.run_job("feeds", NOW)
+    pead_write(
+        path,
+        [
+            # Names the raid headline in full: joins the raid story.
+            bse_row(
+                "q",
+                PFOCUS_ISIN,
+                "2026-10-08T11:31:00",
+                "2026-10-08T11:32:00+05:30",
+                headline=regulation_30_reply(PF_RAID[0]),
+            ),
+            # Only part of it: left to the grouper.
+            bse_row(
+                "p",
+                PFOCUS_ISIN,
+                "2026-10-08T11:33:00",
+                "2026-10-08T11:34:00+05:30",
+                category="Board Meeting",
+                headline="Prime Focus Ltd - Board meeting on Mumbai offices",
+            ),
+        ],
+    )
+    watcher.run_job("feeds", NOW + EVERY)
+    with db() as session:
+        raid = session.scalars(
+            select(WatchArticle).where(WatchArticle.url.endswith("pf-raid"))
+        ).one()
+        by_subject = {
+            f.subject: f.story_id
+            for f in session.scalars(select(WatchFiling).where(WatchFiling.exchange == "BSE"))
+        }
+    assert by_subject["Company Update"] == raid.story_id
+    assert by_subject["Board Meeting"] != raid.story_id

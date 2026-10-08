@@ -333,10 +333,18 @@ order (the user dropped the stops between steps 3 and 7 on 2026-10-08):
     announcement it reads to `announcements.db` beside it (`PEAD_ANNOUNCEMENTS_DB`
     overrides): table `announcements`, `seq INTEGER PRIMARY KEY AUTOINCREMENT` (write
     order, never reused or renumbered), `id` unique, `INSERT OR IGNORE`, WAL. Additive
-    only: backup in `archive/pead_tool.2026-10-08.before-basis.py`; 427 checks pass.
+    only: backup in `archive/pead_tool.2026-10-08.before-basis.py`; 428 checks pass.
+    - **It writes after the poll's alerts** (user, 2026-10-08). `poll_exchanges` leaves the
+      poll's new announcements in `state.unpublished`, and `run_cycle` writes them once
+      `handle_clear` has sent the result alerts and the finished checks are applied. It
+      writes before the poll marks are saved, so a crash re-reads them on the next start.
+      A check result that finishes during the write waits only for the write itself
+      (milliseconds); it used to run before every alert of the poll.
     - It never raises: building the rows is inside its guard too, and a filing that can't
       be turned into a row is skipped on its own, so it costs neither the poll nor the
       other rows.
+    - The local copy runs `pead-scanner-fixes`; `main` doesn't have the sharing code
+      (checked 2026-10-08: no other copy, task or process runs the tool).
     - `exchange_time` is the exchange's clock (IST, no zone); `fetched_at` carries its UTC
       offset.
   - **BASIS reads by `seq`, never by exchange time** (user, 2026-10-08). The last seq it
@@ -361,6 +369,10 @@ order (the user dropped the stops between steps 3 and 7 on 2026-10-08):
     - Its stories are kept out of instant alerts like a catch-up's backlog, and a late
       filing never triggers a follow-up. A late filing on a story BASIS already had is in
       the summary at the filing's time.
+    - **On a story already alerted it is an update** (`alerts.update_item`, user,
+      2026-10-08): one item, "Update: <the story's headline> (alerted 10:23)", with each
+      late filing under it at its own time (exchange, subject, description to 200
+      characters, link). The story's call follows if it was made again after the filing.
     - A late run replays no price moves: the live check was running.
     - The very first pass of a new install records none: nobody was away.
   - No BSE gap reporting (user, 2026-10-08): the PEAD tool catches up from when it was shut
@@ -382,6 +394,11 @@ order (the user dropped the stops between steps 3 and 7 on 2026-10-08):
   - Stories group across stocks: the pipeline's thresholds, plus an item may only join a
     story that shares one of its stocks (`app/watch/group.py`).
   - NSE "News Verification" notices join the media story they quote, matched word for word.
+  - Any other filing joins a story when its own text carries one of the story's headlines
+    word for word, of at least `QUOTE_MIN_WORDS` (6) words (`scan._story_named_in`), so a
+    BSE reply quoting the news it answers lands on that story. The BSE clarifications seen
+    so far were about volume moves; BASIS has no parser for BSE's news wording, and doesn't
+    need one. Anything else is left to the grouper.
   - Lead time uses `first_seen_at`, never `published_at`.
   - In the first-source table, a pass that follows a gap (start-up, or a wake) read a
     backlog. It is left out.
