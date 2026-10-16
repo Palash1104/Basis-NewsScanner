@@ -485,3 +485,19 @@ def test_a_story_summarized_as_it_broke_is_not_dated(settings: Settings) -> None
 
 def test_the_age_is_left_out_when_no_time_is_given(settings: Settings) -> None:
     assert digest_item(_aged(first_seen_hours=40, summarized_hours=1)).age is None
+
+
+def test_a_trimmed_watchlist_section_never_leaves_its_folded_block_open() -> None:
+    """The watchlist's LOW items are one expandable quote over several lines: a cut inside
+    it must still close it, or Telegram rejects the whole message (user, 2026-10-16)."""
+    from app.delivery.format import _fit_block
+
+    low = "\n".join(f"● <b>HAL</b>: low item number {n}" for n in range(30))
+    section = (
+        "<b>WATCHLIST</b> · 31 stories today\n<b>LOW</b> · 30\n"
+        f"<blockquote expandable>{low}</blockquote>"
+    )
+    for limit in (120, 300, 600):
+        text = _fit_block(section, limit)
+        assert text.count("<blockquote") == text.count("</blockquote>"), limit
+        assert text.endswith("<i>… more on the watchlist page</i>")

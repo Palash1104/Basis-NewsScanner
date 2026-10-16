@@ -2,9 +2,10 @@
 {% block title %}BASIS · Watchlist{% endblock %}
 
 {% block content %}
-{# The design's watchlist screen (design/NOTES.md 2.4). Its "Add a commodity" button and its
-   Exposure panel have no data behind them: the list lives in config/watchlist.yaml, and the
-   side column shows what the watchlist actually sent to Telegram instead. #}
+{# The design's watchlist screen (design/NOTES.md 2.4). Its "Add a commodity" button is "Add a
+   stock" here (user, 2026-10-16): it opens the editor below the head, which writes
+   config/watchlist.yaml. The design's Exposure panel has no data behind it, so the side column
+   shows what the watchlist actually sent to Telegram instead. #}
 <div class="screen-head">
   <div>
     <h1>Watchlist</h1>
@@ -15,8 +16,47 @@
       last {{ news_days }} days
     </p>
   </div>
-  <p class="watch-page-note">The list is config/watchlist.yaml.<br />Prices as of {{ prices_as_of }}.</p>
+  <div class="watch-head-side">
+    <p class="watch-page-note">The list is config/watchlist.yaml.<br />Prices as of {{ prices_as_of }}.</p>
+    {% if version %}<a class="btn btn-primary" href="#watch-add">Add a stock</a>{% endif %}
+  </div>
 </div>
+
+{# Opened by the button (CSS :target), or after an edit, which comes back here with a message. #}
+<section id="watch-add" class="watch-add{% if added or removed or error or unreadable %} open{% endif %}"
+  aria-label="Add a stock">
+  <div class="watch-add-head">
+    <h6 class="watch-section">Add a stock</h6>
+    <a class="btn btn-ghost" href="#">Close</a>
+  </div>
+  {% if added %}
+    <p class="watch-flash">Added {{ added }}. The scanner picks it up within a minute; its first
+      news comes with the next Google News search.</p>
+  {% endif %}
+  {% if removed %}<p class="watch-flash">Removed {{ removed }}.</p>{% endif %}
+  {% if error %}<p class="watch-flash watch-flash-error">Not changed: {{ error }}</p>{% endif %}
+  {% if unreadable %}
+    <p class="watch-note">config/watchlist.yaml doesn't load ({{ unreadable }}), so the page
+      won't change it. Fix it by hand; the page picks it up as soon as it loads.</p>
+  {% elif companies_age_days is none %}
+    <p class="watch-note">NSE's list of companies hasn't been downloaded yet. The watchlist
+      scanner fetches it when it starts, or run <code>uv run newsdesk companies --refresh</code>.</p>
+  {% else %}
+    <div class="field watch-search">
+      <label for="watch-search">Company name or NSE symbol</label>
+      <input id="watch-search" class="input" type="search" name="q" autocomplete="off"
+        placeholder="e.g. Mazagon Dock, or MAZDOCK"
+        hx-get="/watchlist/companies" hx-trigger="input changed delay:200ms, search"
+        hx-target="#watch-suggestions" />
+    </div>
+    <div id="watch-suggestions" class="watch-suggestions" aria-live="polite"></div>
+    <p id="watch-preview-wait" class="watch-note htmx-indicator">Checking Yahoo and Google News…</p>
+    <div id="watch-preview"></div>
+    <p class="cell-note">From NSE's list of listed companies, downloaded
+      {{ "today" if companies_age_days == 0 else companies_age_days ~ " days ago" }}. Companies
+      listed only on BSE aren't offered.</p>
+  {% endif %}
+</section>
 
 <div class="watch-cards">
   {% for card in cards %}
@@ -45,6 +85,15 @@
       <div class="watch-card-driver">
         {% if card.driver %}{{ card.driver_mark }} {{ card.driver }}{% else %}No calls in the last week.{% endif %}
       </div>
+      {% if version %}
+        <form method="post" action="/watchlist/remove" class="watch-card-remove"
+          onsubmit='return confirm({{ ("Remove " ~ card.name ~ " from the watchlist?") | tojson }})'>
+          <input type="hidden" name="token" value="{{ token }}" />
+          <input type="hidden" name="version" value="{{ version }}" />
+          <input type="hidden" name="symbol" value="{{ card.symbol }}" />
+          <button class="btn btn-ghost" type="submit">Remove</button>
+        </form>
+      {% endif %}
     </div>
   {% endfor %}
 </div>

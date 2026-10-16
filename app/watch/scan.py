@@ -18,7 +18,7 @@ model - happens before the write begins, so the pipeline is never kept waiting.
 
 import asyncio
 import logging
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -54,7 +54,6 @@ from app.watch.alerts import (
     away_summaries,
     deliver,
     detect_now,
-    feed_warnings,
     followups,
     group_layout,
     mark_summarised,
@@ -64,6 +63,12 @@ from app.watch.alerts import (
 )
 from app.watch.analyse import analyse, read_replies
 from app.watch.catchup import Gap, SourceCoverage, find_gap, possible_gaps
+from app.watch.companies import LIST_FILE as COMPANY_LIST_FILE
+from app.watch.companies import REFRESH_EVERY as COMPANY_LIST_EVERY
+from app.watch.companies import RETRY_AFTER as COMPANY_LIST_RETRY
+from app.watch.companies import list_age
+from app.watch.companies import refresh as refresh_company_list
+from app.watch.events import Amount, amounts, amounts_conflict, is_order_news
 from app.watch.group import StoryGrouper
 from app.watch.match import Match, Matcher
 from app.watch.moves import Typical, typical_moves
@@ -103,13 +108,57 @@ QUOTE_MIN_WORDS = 6
 # analyse comes after the news jobs, so what they just stored is called in the same tick;
 # alerts come last, so a call or a price made this tick is alerted this tick.
 JOBS = ("feeds", "google_news", "analyse", "prices", "alerts")
-FEED_HEALTH_EVERY = timedelta(minutes=10)
 TYPICAL_RETRY = timedelta(hours=1)  # after failing to fetch the bars thresholds come from
 RETRY_AFTER_FAILURE = timedelta(minutes=1)  # after a pass in which every source failed
 NSE_FEED_NAME = "NSE announcements"
 # Two sightings are one article when the outlet is the same and the titles this close: a
 # CNBC-TV18 story reached through its own RSS and through Google News.
 SAME_ARTICLE_WINDOW = timedelta(hours=48)
+
+
+@dataclass(frozen=True)
+class _Member:
+    """An article or filing already in a story, still inside the story window."""
+
+    seen: datetime  # when BASIS first saw it
+    story_id: int
+    symbols: frozenset[str]
+    text: str  # what is embedded: headline and snippet
+    kind: str  # article | filing
+    headline: str  # what amounts and order words are read from
+    published: datetime  # the publisher's time, or the exchange's for a filing
+
+
+@dataclass
+class _OrderStories:
+    """Stories about an order or contract, to place order news that similarity can't."""
+
+    within: timedelta
+    _stories: dict[int, tuple[set[str], list[datetime], set[Amount]]] = field(default_factory=dict)
+
+    def add(
+        self, story_id: int, symbols: Iterable[str], when: datetime, stated: Iterable[Amount]
+    ) -> None:
+        held = self._stories.setdefault(story_id, (set(), [], set()))
+        held[0].update(symbols)
+        held[1].append(when)
+        held[2].update(stated)
+
+    def find(self, symbols: Iterable[str], when: datetime, stated: Iterable[Amount]) -> int | None:
+        """The order story for one of these stocks reported closest to `when`, within the
+        window, whose amounts don't disagree; on a tie, the one with more items."""
+        wanted, stated = set(symbols), set(stated)
+        best: tuple[float, int, int] | None = None
+        for story_id, (held_symbols, times, held_amounts) in self._stories.items():
+            if not held_symbols & wanted or amounts_conflict(held_amounts, stated):
+                continue
+            distance = min(abs((when - at).total_seconds()) for at in times)
+            if distance > self.within.total_seconds():
+                continue
+            rank = (distance, -len(times), story_id)
+            if best is None or rank < best:
+                best = rank
+        return best[2] if best is not None else None
 
 
 @dataclass
@@ -164,14 +213,21 @@ class Watcher:
         history: HistoryProvider | None = None,
         llm: LLMClient | None = None,
         sender: Sender | None = None,
+        watchlist_path: Path | None = None,
+        companies_path: Path | None = None,
     ) -> None:
         self.settings = settings
         self.session_factory = session_factory
-        self.watchlist = watchlist
-        self.stocks = watchlist.stocks
-        self.matcher = Matcher(self.stocks)
         self.feeds = list(feeds)
-        self.queries = google_news_queries(self.stocks, settings)
+        self._use_watchlist(watchlist)
+        # config/watchlist.yaml, re-read when it changes (an edit on the BASIS page, or by
+        # hand), so adding a stock needs no restart. None in tests.
+        self.watchlist_path = watchlist_path
+        self._watchlist_mtime = _mtime(watchlist_path) if watchlist_path else None
+        # NSE's company list for the page's "Add a stock" (app/watch/companies.py), kept
+        # fresh here because the web app never makes requests of its own. None in tests.
+        self.companies_path = companies_path
+        self._companies_tried_at: datetime | None = None
         self.resolver = resolver
         self.embedder = embedder
         self.snapshots = snapshots
@@ -190,12 +246,67 @@ class Watcher:
         self.sender = sender
         self._typical: tuple[date, dict[str, Typical]] | None = None
         self._typical_failed_at: datetime | None = None
-        self._feed_health_at: datetime | None = None
         self._bse_error: str | None = None
         # Set by `newsdesk watch --since`: catch up from here on the next feed scan.
         self.force_since: datetime | None = None
+
+    def _use_watchlist(self, watchlist: WatchlistFile) -> None:
+        """Everything that depends on the list of stocks."""
+        self.watchlist = watchlist
+        self.stocks = watchlist.stocks
+        self.matcher = Matcher(self.stocks)
+        self.queries = google_news_queries(self.stocks, self.settings)
         # The feeds whose health is tracked: not the one-off catch-up searches.
         self._checked = {feed.url for feed in [*self.feeds, *self.queries]}
+        self._typical = None  # typical moves cover the old list's stocks
+
+    def refresh_watchlist(self) -> bool:
+        """Re-read config/watchlist.yaml if it changed since it was last read. A file that
+        doesn't load keeps the list in use, and says so once per change. True when the
+        list was replaced."""
+        if self.watchlist_path is None:
+            return False
+        mtime = _mtime(self.watchlist_path)
+        if mtime is None or mtime == self._watchlist_mtime:
+            return False
+        self._watchlist_mtime = mtime
+        from app.config import load_watchlist_file
+
+        try:
+            fresh = load_watchlist_file(self.watchlist_path)
+        except Exception as exc:
+            log.warning(
+                "watchlist.yaml changed but doesn't load; still using the old list: %s", exc
+            )
+            return False
+        before = [s.symbol for s in self.stocks]
+        self._use_watchlist(fresh)
+        after = [s.symbol for s in self.stocks]
+        log.info(
+            "watchlist reloaded: %d stocks (added %s, removed %s)",
+            len(after),
+            sorted(set(after) - set(before)) or "none",
+            sorted(set(before) - set(after)) or "none",
+        )
+        return True
+
+    def refresh_companies(self, now: datetime) -> str | None:
+        """Download NSE's company list when it is missing or a week old, at most every few
+        hours if it fails. Returns what happened, or None when nothing was due."""
+        if self.companies_path is None:
+            return None
+        age = list_age(self.companies_path, now)
+        if age is not None and age < COMPANY_LIST_EVERY:
+            return None
+        tried = self._companies_tried_at
+        if tried is not None and now - tried < COMPANY_LIST_RETRY:
+            return None
+        self._companies_tried_at = now
+        line = refresh_company_list(
+            self.companies_path, self.settings.http.user_agent, self.settings.http.timeout_seconds
+        )
+        log.info(line)
+        return line
 
     # ------------------------------------------------------------ scheduling
 
@@ -227,6 +338,8 @@ class Watcher:
         """Run every job that is due (all of them with `force`, prices still only in market
         hours). One job failing never stops the others."""
         results = []
+        self.refresh_watchlist()
+        self.refresh_companies(self.clock())
         for job in JOBS:
             now = self.clock()
             if job == "prices" and not in_market_hours(now, self.settings):
@@ -421,9 +534,7 @@ class Watcher:
                 outgoing += move_alerts(events, session, names, self.settings)
             summaries, empty = away_summaries(session, self.watchlist, typical, self.settings, now)
             outgoing += summaries
-            if self._feed_health_at is None or now - self._feed_health_at >= FEED_HEALTH_EVERY:
-                self._feed_health_at = now
-                outgoing += feed_warnings(session, self.settings, now)
+            # Feed health is not sent to Telegram (user, 2026-10-16): it is on /runs.
         if empty:
             mark_summarised(self.session_factory, empty, "nothing to report")
         unique = list({item.key: item for item in outgoing}.values())
@@ -563,7 +674,7 @@ class Watcher:
             fresh_filings = self._unseen_filings(session, announcements)
             # Everything slow happens before the first write: embed what this pass needs.
             self._warm(
-                [text for _, _, _, text, _ in window]
+                [member.text for member in window]
                 + [c.text for c in candidates]
                 + [_filing_text(found) for _, found in fresh_filings]
             )
@@ -619,7 +730,7 @@ class Watcher:
             new_entries = 0
         return FeedCheck(
             kind="watch",
-            feed_name=feed.name,
+            feed_name=feed.label,
             feed_url=feed.url,
             checked_at=now,
             status=fetched.status,
@@ -914,26 +1025,24 @@ class Watcher:
 
     # ------------------------------------------------------------ grouping
 
-    def _window_members(
-        self, session: Session, now: datetime
-    ) -> list[tuple[datetime, int, set[str], str, str]]:
-        """Every grouped article and filing still inside the story window, oldest first:
-        (first seen, story id, stocks, text, kind)."""
+    def _window_members(self, session: Session, now: datetime) -> list[_Member]:
+        """Every grouped article and filing still inside the story window, oldest first."""
         since = now - timedelta(hours=self.settings.watch.story_window_hours)
-        members: list[tuple[datetime, int, set[str], str, str]] = []
+        members: list[_Member] = []
         for article in session.scalars(
             select(WatchArticle).where(
                 WatchArticle.story_id.is_not(None), WatchArticle.first_seen_at >= since
             )
         ):
-            symbols = {m.symbol for m in article.matches}
             members.append(
-                (
-                    article.first_seen_at,
-                    article.story_id,  # type: ignore[arg-type]
-                    symbols,
-                    article_text(article.title, article.snippet),
-                    "article",
+                _Member(
+                    seen=article.first_seen_at,
+                    story_id=article.story_id,  # type: ignore[arg-type]
+                    symbols=frozenset(m.symbol for m in article.matches),
+                    text=article_text(article.title, article.snippet),
+                    kind="article",
+                    headline=article.title,
+                    published=min(article.published_at, article.first_seen_at),
                 )
             )
         for filing in session.scalars(
@@ -942,15 +1051,17 @@ class Watcher:
             )
         ):
             members.append(
-                (
-                    filing.first_seen_at,
-                    filing.story_id,
-                    {filing.symbol},
-                    _stored_filing_text(filing),
-                    "filing",
-                )  # type: ignore[arg-type]
+                _Member(
+                    seen=filing.first_seen_at,
+                    story_id=filing.story_id,  # type: ignore[arg-type]
+                    symbols=frozenset({filing.symbol}),
+                    text=_stored_filing_text(filing),
+                    kind="filing",
+                    headline=filing.subject,
+                    published=filing.filed_at,
+                )
             )
-        members.sort(key=lambda member: member[0])
+        members.sort(key=lambda member: member.seen)
         return members
 
     def _warm(self, texts: Sequence[str]) -> None:
@@ -967,29 +1078,47 @@ class Watcher:
     def _group(
         self,
         session: Session,
-        window: list[tuple[datetime, int, set[str], str, str]],
+        window: list[_Member],
         articles: Sequence[WatchArticle],
         filings: Sequence[WatchFiling],
         now: datetime,
     ) -> int:
-        """Place each new article and filing in a story; returns how many stories it made."""
+        """Place each new article and filing in a story; returns how many stories it made.
+
+        Embedding similarity decides, as in the pipeline, with two additions
+        (app/watch/events.py): items stating different money amounts never share a story,
+        and order news about one stock within `order_attach_hours` of an order story joins
+        the one reported closest to it, before similarity is asked (an NSE order filing's
+        text is the same for every order)."""
         grouper: StoryGrouper[int] = StoryGrouper(
             self.settings.grouping.embedding_threshold,
             self.settings.grouping.seed_threshold,
             timedelta(hours=self.settings.watch.story_window_hours),
         )
-        if self.embedder is not None:
-            for seen, story_id, symbols, text, _ in window:
-                grouper.add(story_id, self._vectors[text], symbols, seen)
+        orders = _OrderStories(timedelta(hours=self.settings.watch.order_attach_hours))
+        for member in window:
+            stated = amounts(member.headline)
+            if self.embedder is not None:
+                grouper.add(
+                    member.story_id, self._vectors[member.text], member.symbols, member.seen, stated
+                )
+            if is_order_news(member.headline):
+                orders.add(member.story_id, member.symbols, member.published, stated)
         created = 0
 
-        def place(text: str, symbols: set[str], headline: str, seen: datetime) -> WatchStory:
+        def place(
+            text: str, symbols: set[str], headline: str, seen: datetime, published: datetime
+        ) -> WatchStory:
             nonlocal created
-            story_id = (
-                grouper.match(self._vectors[text], symbols, seen)
-                if self.embedder is not None
-                else None
-            )
+            stated = amounts(headline)
+            order = is_order_news(headline)
+            # Order news goes to the stock's order story reported closest to it first: the
+            # words of two reports of one order differ more than the model allows for
+            # ("Expands order book" / "Bags Rs 1,307 crore Navy contract"), and an NSE order
+            # filing has no words of its own at all.
+            story_id = orders.find(symbols, published, stated) if order else None
+            if story_id is None and self.embedder is not None:
+                story_id = grouper.match(self._vectors[text], symbols, seen, stated)
             story = session.get(WatchStory, story_id) if story_id is not None else None
             if story is None:
                 story = WatchStory(first_seen_at=seen, headline=headline)
@@ -997,13 +1126,24 @@ class Watcher:
                 session.flush()
                 created += 1
             if self.embedder is not None:
-                grouper.add(story.id, self._vectors[text], symbols, seen)
+                grouper.add(story.id, self._vectors[text], symbols, seen, stated)
+            if order:
+                orders.add(story.id, symbols, published, stated)
             return story
 
-        for article in articles:
+        # Oldest first by the publisher's time: a catch-up reads hours of news in one pass, and
+        # the specific report ("Bags Rs 1,307 crore Navy contract") usually comes before the
+        # vague one ("Expands order book") that should join it.
+        for article in sorted(
+            articles, key=lambda a: (min(a.published_at, a.first_seen_at), a.first_seen_at)
+        ):
             text = article_text(article.title, article.snippet)
             article.story = place(
-                text, {m.symbol for m in article.matches}, article.title, article.first_seen_at
+                text,
+                {m.symbol for m in article.matches},
+                article.title,
+                article.first_seen_at,
+                min(article.published_at, article.first_seen_at),
             )
         for filing in filings:
             story = self._quoted_story(session, filing, now)
@@ -1013,6 +1153,7 @@ class Watcher:
                     {filing.symbol},
                     f"{filing.company}: {filing.subject}",
                     filing.first_seen_at,
+                    filing.filed_at,
                 )
             filing.story = story
         return created
@@ -1106,6 +1247,8 @@ def build_watcher(
         history=YahooHistory(),
         llm=_watch_llm(settings, session_factory),
         sender=_telegram(settings),
+        watchlist_path=CONFIG_DIR / "watchlist.yaml",
+        companies_path=settings.resolve_path(COMPANY_LIST_FILE),
     )
 
 
@@ -1153,6 +1296,13 @@ def run_forever(
         except Exception:  # anything tick itself didn't catch: log it and keep going
             log.exception("watch tick failed")
         sleep(TICK_SECONDS)
+
+
+def _mtime(path: Path | None) -> float | None:
+    try:
+        return path.stat().st_mtime if path is not None else None
+    except OSError:
+        return None
 
 
 def _match_row(match: Match) -> WatchMatch:

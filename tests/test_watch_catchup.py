@@ -472,7 +472,7 @@ def test_filings_the_pead_tool_backfills_after_a_catch_up_go_into_a_summary_not_
         session.commit()
 
     watcher.run_job("alerts", ist(8, 9, 52))
-    alerts = [m for m in sent if m.startswith("<b>BASIS · watchlist alert</b>")]
+    alerts = [m for m in sent if m.startswith("<b>BASIS · watchlist alert")]
     summaries = [m for m in sent if m.startswith("<b>BASIS · while you were away</b>")]
     # Only the fresh filing gets an alert of its own.
     assert len(alerts) == 1 and "Astra Microwave" in alerts[0]
@@ -482,7 +482,7 @@ def test_filings_the_pead_tool_backfills_after_a_catch_up_go_into_a_summary_not_
     assert "Bharat Dynamics" in summary and "Zen Technologies" in summary
     assert "Astra Microwave" not in summary
     # Newest first, each at its original time.
-    assert summary.index("<b>02:00</b>") < summary.index("<b>Wed 07 Oct 21:30</b>")
+    assert summary.index("BSE filing 02:00") < summary.index("BSE filing Wed 07 Oct 21:30")
     with db() as session:
         kinds = sorted(a.kind for a in session.scalars(select(WatchAlert)))
         # One summary for the 09:00 catch-up, one for the late filings: one news alert.
@@ -625,10 +625,15 @@ def test_a_late_reply_to_an_alerted_story_is_an_update_to_it_in_the_summary(
     summaries = [m for m in sent if m.startswith("<b>BASIS · while you were away</b>")]
     assert len(summaries) == 1
     body = summaries[0]
-    assert f"• <b>08:00</b> · Update: {PF_RAID[0]} (alerted 10:40)" in body
-    assert "  08:00 · BSE · Company Update: Prime Focus Ltd - 532748 - Disclosure" in body
+    # The story as the alert named it (its name leading, the headline after it), when it
+    # was alerted, then the late filing at its own time and the call made on it.
+    assert "▼ <b>Prime Focus</b>: Update: <a href=" in body
+    assert ">Shares tank 8% after Income Tax raids at Mumbai offices: Exclusive</a>" in body
+    assert "(alerted 10:40)" in body
+    assert "08:00 · BSE · Company Update: Prime Focus Ltd - 532748 - Disclosure" in body
     assert "the company confirmed the search; work goes on." in body.lower()
-    assert body.count("• ") == 1  # one item: the update, not the filing again
+    # One item: the update, not the filing again as its own.
+    assert body.count("(alerted 10:40)") == 1 and body.count("Company Update:") == 1
     assert not [m for m in sent if m.startswith("<b>BASIS · watchlist update</b>")]
 
 

@@ -346,6 +346,9 @@ class WatchSettings(_Strict):
         "https://nsearchives.nseindia.com/content/RSS/Online_announcements.xml"
     )
     story_window_hours: int = Field(default=72, gt=0)  # how long a story takes new articles
+    # Order news for one stock within this many hours of an order story is that story: NSE's
+    # order filings carry no details to match on (user, 2026-10-16). See app/watch/events.py.
+    order_attach_hours: float = Field(default=6, gt=0)
     catch_up_max_days: int = Field(default=7, gt=0, le=29)  # Yahoo keeps 30 days of 1m bars
     away_after_minutes: int = Field(default=60, gt=0)
     # The PEAD tool's shared file of every BSE and NSE announcement it reads (BSE comes to
@@ -415,10 +418,19 @@ class FeedConfig(_Strict):
     enabled: bool = True
     # Other spellings of the outlet name, e.g. how Google News labels it.
     aliases: list[str] = Field(default_factory=list)
+    # Which of an outlet's feeds this is ("economy", "world"), so feeds sharing a `name` can
+    # be told apart wherever a person reads about one feed: feed health on /runs, the
+    # scanner's report. `name` stays the outlet - it is what counts sources once.
+    section: str | None = None
 
     @property
     def is_google_news(self) -> bool:
         return urlsplit(self.url).hostname == "news.google.com"
+
+    @property
+    def label(self) -> str:
+        """The outlet, and the section when it has one: "CNBC · economy"."""
+        return f"{self.name} · {self.section}" if self.section else self.name
 
 
 class FeedsFile(_Strict):
@@ -587,7 +599,13 @@ def load_watchlist_file(
 ) -> WatchlistFile:
     """config/watchlist.yaml, checked against the asset universe: a commodity must be one
     BASIS already prices and runs the playbook on, or its card would have nothing to show."""
-    watchlist = WatchlistFile.model_validate(_read_yaml(path or CONFIG_DIR / "watchlist.yaml"))
+    return watchlist_from_data(_read_yaml(path or CONFIG_DIR / "watchlist.yaml"), assets)
+
+
+def watchlist_from_data(data: object, assets: Sequence[AssetConfig] | None = None) -> WatchlistFile:
+    """A parsed watchlist.yaml, validated exactly as `load_watchlist_file` does: how an edit
+    from the BASIS page is checked before it is written (app/watch/watchlist_edit.py)."""
+    watchlist = WatchlistFile.model_validate(data)
     known = {asset.symbol for asset in (assets if assets is not None else load_assets())}
     unknown = [
         item.symbol

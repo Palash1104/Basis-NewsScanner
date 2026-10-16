@@ -6,17 +6,30 @@ stay with `newsdesk run`; restart the server after one.
 
 Nothing in a request touches the network either: prices come from `price_cache`, never from
 yfinance, so a page can't race the pipeline's price step or spend its rate limit.
+
+Two exceptions, both on /watchlist and both the user's own action (2026-10-16):
+
+* "Preview" for a stock about to be added asks Yahoo for its ticker and Google News for its
+  headlines (app/watch/preview.py), so its aliases can be judged before it is added.
+* "Add to watchlist" and "Remove" write config/watchlist.yaml (app/watch/watchlist_edit.py) -
+  never the database. They are the only POST routes, and each checks that the request came
+  from this app's own page: the Host is localhost, the Origin (or Referer) is this app, and
+  the form carries a token only this app's pages hold. Another website open in the same
+  browser can't change the watchlist by posting to localhost.
 """
 
 import logging
+import secrets
 from collections.abc import Awaitable, Callable, Iterator
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from html import escape as html_escape
 from pathlib import Path
 from typing import Annotated
+from urllib.parse import parse_qs, quote
 
 from fastapi import Depends, FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse, Response
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import select
@@ -25,19 +38,25 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app import health
 from app.config import (
+    CONFIG_DIR,
     AssetConfig,
     Settings,
+    WatchAliases,
     WatchlistFile,
     load_assets,
     load_settings,
     load_watchlist_file,
 )
 from app.db import make_read_only_engine, make_read_only_session_factory
+from app.feed_health import feed_health
 from app.models import Impact, Run, utcnow
 from app.pipeline.prices import format_move
 from app.pipeline.scoring import track_record
 from app.presentation import ORDER_WORDS, ORIGIN_LABEL, story_age
 from app.schedule import pipeline_hours, start_of_news_day
+from app.watch import companies as company_list
+from app.watch import watchlist_edit
+from app.watch.preview import preview as preview_headlines
 from app.watch.scoring import lead_times
 from app.web import palette, queries, watch_queries
 
@@ -238,7 +257,7 @@ def _rail_watchlist(
 ) -> dict[str, object]:
     """The rail's watchlist: config/watchlist.yaml, stocks and commodities, rendered on the
     server. The list a browser used to keep in localStorage is gone (user, 2026-10-07)."""
-    watchlist: WatchlistFile = request.app.state.watchlist
+    watchlist = current_watchlist(request)
     assets: dict[str, AssetConfig] = request.app.state.assets
     return {
         "rail_watch": watch_queries.watch_cards(session, watchlist, assets, settings, now),
@@ -250,13 +269,70 @@ def _rail_watchlist(
     }
 
 
-def _load_watchlist() -> WatchlistFile:
+def _load_watchlist(path: Path | None = None) -> WatchlistFile:
     """The watchlist, or an empty one: a broken watchlist.yaml must not take the pages down."""
     try:
-        return load_watchlist_file()
+        return load_watchlist_file(path)
     except Exception as exc:
         log.warning("watchlist.yaml could not be loaded: %s", exc)
         return WatchlistFile(watchlist=[])
+
+
+def _file_mtime(path: Path) -> float | None:
+    try:
+        return path.stat().st_mtime
+    except OSError:
+        return None
+
+
+def current_watchlist(request: Request) -> WatchlistFile:
+    """config/watchlist.yaml as it is now: re-read whenever it changed, so an edit made on
+    the page (or by hand) shows on the next request without restarting the server."""
+    state = request.app.state
+    mtime = _file_mtime(state.watchlist_path)
+    if mtime != state.watchlist_mtime:
+        state.watchlist = _load_watchlist(state.watchlist_path)
+        state.watchlist_mtime = mtime
+    return state.watchlist
+
+
+LOCAL_HOSTS = frozenset({"127.0.0.1", "localhost", "[::1]", "::1"})
+
+
+def _host_name(host: str) -> str:
+    if host.startswith("["):
+        return host.split("]", 1)[0] + "]"
+    return host.rsplit(":", 1)[0]
+
+
+def write_refused(request: Request, form: dict[str, str]) -> str | None:
+    """Why a write request must be refused, or None when it came from this app's own page:
+    the Host is one of ours (a site can't rebind its name to 127.0.0.1 and pass), the Origin
+    - or the Referer, when a browser sends no Origin - is this app, the browser doesn't call
+    it cross-site, and the form carries this app's token."""
+    state = request.app.state
+    host = request.headers.get("host", "")
+    if _host_name(host) not in state.allowed_hosts:
+        return "not a local request"
+    expected = f"{request.url.scheme}://{host}"
+    origin = request.headers.get("origin")
+    if origin is not None:
+        if origin != expected:
+            return "sent from another site"
+    elif not request.headers.get("referer", "").startswith(f"{expected}/"):
+        return "not sent from this app's page"
+    if request.headers.get("sec-fetch-site") not in (None, "same-origin"):
+        return "sent from another site"
+    if not secrets.compare_digest(form.get("token", ""), state.write_token):
+        return "the page's token is missing or out of date; reload the page"
+    return None
+
+
+async def read_form(request: Request) -> dict[str, str]:
+    """An urlencoded form, read by hand: FastAPI's Form() needs python-multipart, and a
+    plain HTML form is all these two routes take."""
+    body = (await request.body()).decode("utf-8", errors="replace")
+    return {key: values[-1] for key, values in parse_qs(body, keep_blank_values=True).items()}
 
 
 def _rate_gates(settings: Settings) -> dict[str, int]:
@@ -287,7 +363,14 @@ def _next_digest(settings: Settings, now: datetime) -> str:
 
 
 def create_app(
-    settings: Settings | None = None, session_factory: sessionmaker[Session] | None = None
+    settings: Settings | None = None,
+    session_factory: sessionmaker[Session] | None = None,
+    watchlist_path: Path | None = None,
+    companies_path: Path | None = None,
+    backup_dir: Path | None = None,
+    allowed_hosts: frozenset[str] = LOCAL_HOSTS,
+    preview_transport: object | None = None,
+    ticker_fetch: Callable | None = None,
 ) -> FastAPI:
     """Build the app. `init_db` is never called: the web UI does not migrate anything."""
     settings = settings or load_settings()
@@ -299,7 +382,17 @@ def create_app(
     web.state.settings = settings
     web.state.session_factory = session_factory
     web.state.assets = {asset.symbol: asset for asset in load_assets()}
-    web.state.watchlist = _load_watchlist()
+    web.state.watchlist_path = watchlist_path or CONFIG_DIR / "watchlist.yaml"
+    web.state.watchlist = _load_watchlist(web.state.watchlist_path)
+    web.state.watchlist_mtime = _file_mtime(web.state.watchlist_path)
+    web.state.companies_path = companies_path or settings.resolve_path(company_list.LIST_FILE)
+    web.state.backup_dir = backup_dir or watchlist_edit.BACKUP_DIR
+    web.state.allowed_hosts = allowed_hosts
+    # Tests stand in for Google News and Yahoo here; None means the real ones.
+    web.state.preview_transport = preview_transport
+    web.state.ticker_fetch = ticker_fetch
+    # A new token each time the server starts: a page from an older run has to be reloaded.
+    web.state.write_token = secrets.token_urlsafe(32)
     web.mount("/static", StaticFiles(directory=WEB_DIR / "static"), name="static")
     templates = Jinja2Templates(directory=WEB_DIR / "templates")
     templates.env.filters["ist"] = lambda value: _in_zone(value, settings)
@@ -387,20 +480,23 @@ def create_app(
         return templates.TemplateResponse(request, name, context)
 
     @web.get("/watchlist", response_class=HTMLResponse)
-    def watchlist(request: Request, session: ReadSession) -> HTMLResponse:
+    def watchlist(
+        request: Request, session: ReadSession, added: str = "", removed: str = "", error: str = ""
+    ) -> HTMLResponse:
         """The design's watchlist screen: a card per entry, then the week's news touching
-        the list, and what the watchlist sent to Telegram."""
+        the list, and what the watchlist sent to Telegram. Its "Add a stock" button opens
+        the editor (user, 2026-10-16); each stock card can be removed."""
         now = utcnow()
         assets: dict[str, AssetConfig] = request.app.state.assets
-        listed: WatchlistFile = request.app.state.watchlist
-        news = watch_queries.watch_news(session, listed, assets, settings, now)
+        watched = current_watchlist(request)
+        news = watch_queries.watch_news(session, watched, assets, settings, now)
         context = base_context(request, session, active="watchlist", now=now)
         context |= {
-            "cards": watch_queries.watch_cards(session, listed, assets, settings, now),
+            "cards": watch_queries.watch_cards(session, watched, assets, settings, now),
             "news": news,
             "alerts": watch_queries.recent_alerts(session, now),
-            "stocks": len(listed.stocks),
-            "commodities": len(listed.watchlist) - len(listed.stocks),
+            "stocks": len(watched.stocks),
+            "commodities": len(watched.watchlist) - len(watched.stocks),
             "news_days": watch_queries.NEWS_DAYS,
             "card_points": lambda item: queries.sparkline_points(
                 item, CARD_SPARK_WIDTH, CARD_SPARK_HEIGHT, CARD_SPARK_PAD
@@ -410,7 +506,163 @@ def create_app(
             ),
             "prices_as_of": _stamp(last_pipeline_finish(session), settings),
         }
+        context |= _editor_context(request, now) | {
+            "added": added,
+            "removed": removed,
+            "error": error,
+        }
         return templates.TemplateResponse(request, "watchlist.html", context)
+
+    def _editor_context(request: Request, now: datetime) -> dict[str, object]:
+        """What the editor needs: the token, the version of the file the page shows, the
+        peer groups, and whether NSE's company list has been downloaded yet."""
+        state = request.app.state
+        try:
+            version: str | None = watchlist_edit.read(state.watchlist_path).version
+            unreadable = None
+        except Exception as exc:  # a broken file is shown, never edited
+            version, unreadable = None, f"{type(exc).__name__}: {exc}"
+        age = company_list.list_age(state.companies_path, now)
+        return {
+            "token": state.write_token,
+            "version": version,
+            "unreadable": unreadable,
+            "groups": current_watchlist(request).groups,
+            "companies_age_days": None if age is None else age.days,
+        }
+
+    @web.get("/watchlist/companies", response_class=HTMLResponse)
+    def watch_companies(request: Request, q: str = "") -> HTMLResponse:
+        """Type-ahead for "Add a stock": NSE-listed companies whose name or symbol matches,
+        from the list the scanner keeps (no request is made here)."""
+        found = company_list.load_companies(request.app.state.companies_path)
+        on_list = {item.symbol for item in current_watchlist(request).watchlist}
+        context = {
+            "request": request,
+            "query": q,
+            "ready": bool(found),
+            "matches": company_list.search(found, q) if found else [],
+            "on_list": on_list,
+        }
+        return templates.TemplateResponse(request, "_watch_companies.html", context)
+
+    @web.get("/watchlist/preview", response_class=HTMLResponse)
+    def watch_preview(
+        request: Request,
+        session: ReadSession,
+        symbol: str,
+        name: str = "",
+        strong: str | None = None,
+        weak: str | None = None,
+        group: str = "",
+    ) -> HTMLResponse:
+        """A draft entry for one company, its Yahoo check, and what its aliases would keep
+        and drop among real headlines - before it is added."""
+        now = utcnow()
+        found = company_list.find(
+            company_list.load_companies(request.app.state.companies_path), symbol
+        )
+        if found is None:
+            raise HTTPException(status_code=404, detail=f"{symbol} is not in NSE's list")
+        watched = current_watchlist(request)
+        draft = company_list.draft(found, group if group in watched.groups else None)
+        if strong is not None or weak is not None or name:
+            aliases = WatchAliases(
+                strong=company_list.parse_aliases(strong or ""),
+                weak=company_list.parse_aliases(weak or ""),
+            )
+            draft = draft.model_copy(
+                update={"name": name.strip() or draft.name, "aliases": aliases}
+            )
+        problem = None if draft.aliases.strong else "a stock needs at least one strong name"
+        result = preview_headlines(
+            draft,
+            session,
+            settings,
+            now,
+            live=problem is None,
+            transport=request.app.state.preview_transport,
+            fetch=request.app.state.ticker_fetch,
+        )
+        context = base_context(request, session, active="watchlist", now=now) | {
+            "company": found,
+            "draft": draft,
+            "problem": problem,
+            "result": result,
+            "on_list": any(item.symbol == draft.symbol for item in watched.watchlist),
+        }
+        context |= _editor_context(request, now)
+        return templates.TemplateResponse(request, "_watch_preview.html", context)
+
+    def _back(**message: str) -> RedirectResponse:
+        key, value = next(iter(message.items()))
+        return RedirectResponse(f"/watchlist?{key}={quote(value)}#watch-add", status_code=303)
+
+    @web.post("/watchlist/add")
+    async def watch_add(request: Request) -> Response:
+        """Add a stock to config/watchlist.yaml, as previewed. Only from this app's page."""
+        form = await read_form(request)
+        if why := write_refused(request, form):
+            raise HTTPException(status_code=403, detail=why)
+        state = request.app.state
+        found = company_list.find(
+            company_list.load_companies(state.companies_path), form.get("symbol", "")
+        )
+        if found is None:
+            return _back(error="that company is not in NSE's list")
+        watched = current_watchlist(request)
+        group = form.get("group", "")
+        item = company_list.draft(found, group if group in watched.groups else None)
+        item = item.model_copy(
+            update={
+                "name": form.get("name", "").strip() or item.name,
+                "aliases": WatchAliases(
+                    strong=company_list.parse_aliases(form.get("strong", "")),
+                    weak=company_list.parse_aliases(form.get("weak", "")),
+                ),
+            }
+        )
+        try:
+            item = type(item).model_validate(item.model_dump())
+            watchlist_edit.add_stock(
+                state.watchlist_path,
+                item,
+                form.get("version", ""),
+                utcnow(),
+                assets=list(state.assets.values()),
+                backup_dir=state.backup_dir,
+            )
+        except watchlist_edit.EditRefused as exc:
+            return _back(error=str(exc))
+        except ValueError as exc:
+            return _back(error=f"not added: {exc}")
+        log.info("watchlist: added %s from the page", item.symbol)
+        return _back(added=item.name or item.symbol)
+
+    @web.post("/watchlist/remove")
+    async def watch_remove(request: Request) -> Response:
+        """Take an entry off config/watchlist.yaml. Only from this app's page."""
+        form = await read_form(request)
+        if why := write_refused(request, form):
+            raise HTTPException(status_code=403, detail=why)
+        state = request.app.state
+        symbol = form.get("symbol", "")
+        names = {
+            item.symbol: item.name or item.symbol for item in current_watchlist(request).watchlist
+        }
+        try:
+            watchlist_edit.remove_entry(
+                state.watchlist_path,
+                symbol,
+                form.get("version", ""),
+                utcnow(),
+                assets=list(state.assets.values()),
+                backup_dir=state.backup_dir,
+            )
+        except watchlist_edit.EditRefused as exc:
+            return _back(error=str(exc))
+        log.info("watchlist: removed %s from the page", symbol)
+        return _back(removed=names.get(symbol, symbol))
 
     @web.get("/watchlist/story/{story_id}", response_class=HTMLResponse)
     def watch_story(request: Request, session: ReadSession, story_id: int) -> HTMLResponse:
@@ -418,11 +670,11 @@ def create_app(
         and when the exchange came in, and each company's price since it broke."""
         now = utcnow()
         assets: dict[str, AssetConfig] = request.app.state.assets
-        listed: WatchlistFile = request.app.state.watchlist
-        view = watch_queries.watch_story(session, story_id, listed, assets, settings, now)
+        watched = current_watchlist(request)
+        view = watch_queries.watch_story(session, story_id, watched, assets, settings, now)
         if view is None:
             raise HTTPException(status_code=404, detail=f"no watchlist story {story_id}")
-        names = {item.symbol: item.name or item.symbol for item in listed.watchlist}
+        names = {item.symbol: item.name or item.symbol for item in watched.watchlist}
         context = base_context(request, session, active="watchlist", now=now)
         context |= {
             "view": view,
@@ -470,7 +722,7 @@ def create_app(
             else ""
         )
         summary, tables = queries.track_tables(session, settings, int(chosen) if chosen else None)
-        listed: WatchlistFile = request.app.state.watchlist
+        watched = current_watchlist(request)
         assets: dict[str, AssetConfig] = request.app.state.assets
         leads, lead_stories, lead_skipped = lead_times(session, settings, utcnow())
         context = base_context(request, session, active="track")
@@ -480,7 +732,7 @@ def create_app(
             "watch_tables": watch_queries.watch_track_tables(
                 session, int(chosen) if chosen else None
             ),
-            "benchmark_names": watch_queries.benchmark_names(listed, assets, settings),
+            "benchmark_names": watch_queries.benchmark_names(watched, assets, settings),
             "leads": leads,
             "lead_stories": lead_stories,
             "lead_skipped": lead_skipped,
@@ -530,10 +782,20 @@ def create_app(
         """Recent runs, errors and token usage (SPEC 11), from the same functions
         `newsdesk health` prints."""
         window = days if days in RUN_WINDOWS else health.DEFAULT_DAYS
-        view = queries.runs_view(session, settings, utcnow(), window)
+        now = utcnow()
+        view = queries.runs_view(session, settings, now, window)
+        # Feed health lives here, not in Telegram (user, 2026-10-16). The Google News
+        # searches are one per batch of stocks, so they are summed up in one line.
+        statuses = feed_health(session, settings, now)
+        searches = [s for s in statuses if "/rss/search" in s.url]
         context = base_context(request, session, active="runs")
         context |= {
             "view": view,
+            "feeds": [s for s in statuses if "/rss/search" not in s.url],
+            "searches": searches,
+            "searches_failing": [s for s in searches if s.state == "failing"],
+            "feed_problems": [s for s in statuses if s.problem],
+            "settings": settings,
             "windows": [(value, f"{value}d") for value in RUN_WINDOWS],
             "slot_hours": ", ".join(
                 f"{hour:02d}:00"
@@ -549,7 +811,12 @@ def create_app(
     def not_found(request: Request, exc: StarletteHTTPException) -> HTMLResponse:
         """A typed-in URL that doesn't exist gets a page, not a JSON blob."""
         if exc.status_code != 404:
-            raise exc
+            # A refused write (403) or a wrong method says so in plain words, with its code.
+            return HTMLResponse(
+                f"<p>{html_escape(str(exc.detail))}</p>",
+                status_code=exc.status_code,
+                headers=getattr(exc, "headers", None),
+            )
         with session_factory() as session:  # type: ignore[misc]
             context = base_context(request, session, active="today")
         context |= {"detail_text": str(exc.detail)}

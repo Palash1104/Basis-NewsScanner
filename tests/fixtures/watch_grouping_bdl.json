@@ -1,0 +1,134 @@
+{
+ "_note": "Real Bharat Dynamics items from the catch-up of Thu 2026-10-15 19:07 IST (watch_runs 575). BASIS grouped them as three stories: 135 (the vague 'order book' headline and NSE's three order filings), 137 (the Rs 56.8 crore tender AND the unrelated Rs 810 crore SAT-SAAW contract) and 139 (the Rs 1,307 crore torpedo order). 'event' is what each item is really about: there are three events.",
+ "articles": [
+  {
+   "source": "Sahi",
+   "title": "Bharat Dynamics Expands Defense Order Book Following Recent Ministry Contracts",
+   "published_at": "2026-10-15T09:41:43.000000+00:00",
+   "first_seen_at": "2026-10-15T13:37:02.331021+00:00",
+   "event": "torpedo order",
+   "stored_story": 135
+  },
+  {
+   "source": "News On AIR",
+   "title": "Defence Ministry signs over ₹810 crore contract with BDL for 160 SAT-SAAW systems",
+   "published_at": "2026-10-14T19:05:36.000000+00:00",
+   "first_seen_at": "2026-10-15T13:37:02.331021+00:00",
+   "event": "810 contract",
+   "stored_story": 137
+  },
+  {
+   "source": "www.nationpathindia.com",
+   "title": "BDL’s ₹56.8 Crore Missile-Sight Tender Raises Defence Procurement Questions",
+   "published_at": "2026-10-15T08:24:52.000000+00:00",
+   "first_seen_at": "2026-10-15T13:37:02.331021+00:00",
+   "event": "56.8 tender",
+   "stored_story": 137
+  },
+  {
+   "source": "The Siasat Daily",
+   "title": "Hyderabad defence firm gets Rs 56.8Cr BDL single tender",
+   "published_at": "2026-10-15T16:13:11.000000+00:00",
+   "first_seen_at": "2026-10-15T16:37:27.115971+00:00",
+   "event": "56.8 tender",
+   "stored_story": 137
+  },
+  {
+   "source": "Indian PSU",
+   "title": "Locked Office, No Production Facility: Former BDL CMD’s Family Firm Emerges as Sole Bidder for ₹56.8 Crore Missile Tender from the Same PSU",
+   "published_at": "2026-10-15T22:00:29.000000+00:00",
+   "first_seen_at": "2026-10-16T11:15:57.658911+00:00",
+   "event": "56.8 tender",
+   "stored_story": 137
+  },
+  {
+   "source": "Kalkine India",
+   "title": "Bharat Dynamics BDL Rs 1307 Crore Navy Torpedo Order 2026",
+   "published_at": "2026-10-15T09:26:00.000000+00:00",
+   "first_seen_at": "2026-10-15T15:37:23.979586+00:00",
+   "event": "torpedo order",
+   "stored_story": 139
+  },
+  {
+   "source": "Business Upturn",
+   "title": "Bharat Dynamics secures heavyweight torpedo contract worth Rs 1,307 crore from Indian Navy",
+   "published_at": "2026-10-15T09:29:21.000000+00:00",
+   "first_seen_at": "2026-10-15T13:37:02.331021+00:00",
+   "event": "torpedo order",
+   "stored_story": 139
+  },
+  {
+   "source": "PSU Connect",
+   "title": "Bharat Dynamics Bags ₹1,307 Crore Order from Indian Navy for Heavyweight Torpedoes",
+   "published_at": "2026-10-15T10:09:00.000000+00:00",
+   "first_seen_at": "2026-10-15T13:37:02.331021+00:00",
+   "event": "torpedo order",
+   "stored_story": 139
+  },
+  {
+   "source": "PSU Watch",
+   "title": "BDL bags Rs 1,307 crore Indian Navy contract for heavyweight torpedoes",
+   "published_at": "2026-10-15T10:09:34.000000+00:00",
+   "first_seen_at": "2026-10-15T15:37:23.979586+00:00",
+   "event": "torpedo order",
+   "stored_story": 139
+  },
+  {
+   "source": "Indianmasterminds",
+   "title": "Bharat Dynamics Bags ₹1,307 Crore Indian Navy Contract for Supply of Heavyweight Torpedoes",
+   "published_at": "2026-10-15T11:26:27.000000+00:00",
+   "first_seen_at": "2026-10-15T13:37:02.331021+00:00",
+   "event": "torpedo order",
+   "stored_story": 139
+  },
+  {
+   "source": "EquityBulls",
+   "title": "Bharat Dynamics Secures ₹1,307 Crore Defense Contract from Indian Navy for Heavyweight Torpedoes",
+   "published_at": "2026-10-16T04:14:48.000000+00:00",
+   "first_seen_at": "2026-10-16T11:15:57.658911+00:00",
+   "event": "torpedo order",
+   "stored_story": 139
+  }
+ ],
+ "filings": [
+  {
+   "exchange": "NSE",
+   "symbol": "BDL.NS",
+   "company": "Bharat Dynamics Limited",
+   "subject": "Bagging/Receiving of orders/contracts",
+   "description": "Bharat Dynamics Limited has informed the Exchange about Bagging/Receiving of orders/contracts",
+   "filed_at": "2026-10-15T09:26:35.000000+00:00",
+   "first_seen_at": "2026-10-15T13:37:02.331021+00:00",
+   "kind": "filing",
+   "link": "https://nsearchives.nseindia.com/corporate/BDL_15102026145544_Covorder15102026.pdf",
+   "key": "9a70c20fbfd60d48947eebde45814f8f1a842036",
+   "event": "torpedo order"
+  },
+  {
+   "exchange": "NSE",
+   "symbol": "BDL.NS",
+   "company": "Bharat Dynamics Limited",
+   "subject": "Bagging/Receiving of orders/contracts (Sub-para 4-Para B)",
+   "description": "Bharat Dynamics Limited has informed the Exchange about Bagging/Receiving of orders/contracts (Sub-para 4-Para B)",
+   "filed_at": "2026-10-15T09:29:37.000000+00:00",
+   "first_seen_at": "2026-10-15T13:37:02.331021+00:00",
+   "kind": "filing",
+   "link": "https://nsearchives.nseindia.com/corporate/xbrl/REG30_PARA_B_15963_WebXMLFile_20261015_145936748.xml",
+   "key": "5fb46f3a5fc1191927f16c870ac3f733a65aacdf",
+   "event": "torpedo order"
+  },
+  {
+   "exchange": "NSE",
+   "symbol": "BDL.NS",
+   "company": "Bharat Dynamics Limited",
+   "subject": "Bagging/Receiving of orders/contracts (Sub-para 4-Para B)",
+   "description": "Bharat Dynamics Limited has informed the Exchange about Bagging/Receiving of orders/contracts (Sub-para 4-Para B)",
+   "filed_at": "2026-10-15T09:33:46.000000+00:00",
+   "first_seen_at": "2026-10-15T13:37:02.331021+00:00",
+   "kind": "filing",
+   "link": "https://nsearchives.nseindia.com/corporate/xbrl/REG30_PARA_B_15963_WebXMLFile_20261015_150345694.xml",
+   "key": "5375bf40ea6e07167346cadb62415c9a8558cbb6",
+   "event": "torpedo order"
+  }
+ ]
+}

@@ -10,7 +10,6 @@ from sqlalchemy.orm import Session, sessionmaker
 from app.config import Settings, WatchlistFile, load_watchlist_file
 from app.db import init_db, make_engine, make_session_factory
 from app.models import (
-    FeedCheck,
     WatchAlert,
     WatchArticle,
     WatchCall,
@@ -26,7 +25,6 @@ from app.watch.alerts import (
     away_summaries,
     deliver,
     digest_section,
-    feed_warnings,
     followups,
     news_alerts,
     retry_pending,
@@ -198,8 +196,14 @@ def test_one_alert_per_story_lists_every_stock_it_is_about(
         out = news_alerts(session, settings, NAMES, NOW)
     assert [o.key for o in out] == [f"news:{story.id}"]
     text = out[0].messages[0]
-    assert "▲ HAL (high) · ▲ Bharat Dynamics (medium)" in text
-    assert "media report, not yet filed" in text and "<blockquote expandable>" in text
+    assert text.startswith("<b>BASIS · watchlist alert · HIGH</b>\n")
+    # The item reads as it does everywhere (app/watch/render.py): every company, the linked
+    # headline, then when it came out and how far it has got.
+    assert "▲ <b>HAL</b> · ▲ <b>Bharat Dynamics</b>: <a href=" in text
+    assert ">Russia partners Adani Defence, HAL, BDL for missiles</a>" in text
+    assert "<i>10:30 · media only, not filed</i>" in text
+    # Each company's own call, and the sources, folded underneath.
+    assert "<blockquote expandable>" in text and "▲ Bharat Dynamics · medium · regulatory" in text
     deliver(db, out, lambda messages: None, NOW)
     with db() as session:
         assert news_alerts(session, settings, NAMES, NOW) == []  # once per story
@@ -266,7 +270,10 @@ def test_a_filing_after_the_alert_is_one_follow_up(
         assert followups(session, settings, NAMES, later) == []  # waiting for the re-call
         out = followups(session, settings, NAMES, later + timedelta(minutes=16))
     assert [o.key for o in out] == [f"followup:{story.id}"]
-    assert "NSE asked the company to clarify" in out[0].messages[0]
+    text = out[0].messages[0]
+    assert text.startswith("<b>BASIS · watchlist update</b>")
+    assert "first media report 10:30 · NSE asked for clarification 11:10" in text
+    assert "11:10 · NSE · News Verification" in text
     deliver(db, out, lambda m: None, later)
     with db() as session:
         assert followups(session, settings, NAMES, later + timedelta(hours=1)) == []
@@ -325,61 +332,20 @@ def test_the_away_summary_is_newest_first_with_original_times_and_gaps(
         out, empty = away_summaries(session, watchlist, None, settings, NOW + timedelta(minutes=11))
     assert empty == [] and len(out) == 1
     text = "\n".join(out[0].messages)
-    assert text.index("Newer HAL order") < text.index("Older raid story")  # newest first
+    assert text.startswith(
+        "<b>BASIS · while you were away</b>\n<i>Thu 08 Oct, 00:30 – 10:30 · 2 updates</i>"
+    )
+    # Most material first (user, 2026-10-16), each with its original time, IST.
+    assert text.index("<b>HIGH</b>") < text.index("Older raid story") < text.index("<b>MEDIUM</b>")
+    assert text.index("<b>MEDIUM</b>") < text.index("Newer HAL order")
+    assert "Older raid story</a>\n<i>04:30 · media only, not filed</i>" in text
+    assert "Newer HAL order</a>\n<i>08:30 · media only, not filed</i>" in text
     assert "Fresh BDL news" not in text  # under an hour old: alerted as usual instead
-    assert "<b>08:30</b>" in text and "<b>04:30</b>" in text  # original times, IST
     assert "Possible gap: Wed 07 Oct 20:30 to Thu 08 Oct 23:30" not in text
     assert "Possible gap:" in text and "5 searches failed" in text
 
 
 # ---------------------------------------------------------------- feeds and sending
-
-
-def test_a_failing_feed_is_one_warning_per_episode(
-    db: sessionmaker[Session], settings: Settings
-) -> None:
-    with db() as session:
-        for minutes in (30, 20, 10, 0):
-            session.add(
-                FeedCheck(
-                    kind="watch",
-                    feed_name="CNBC-TV18",
-                    feed_url="https://c/rss",
-                    checked_at=NOW - timedelta(minutes=minutes),
-                    status="ok" if minutes == 30 else "error",
-                    error="HTTP 403",
-                    newest_entry_at=NOW - timedelta(minutes=40),
-                )
-            )
-        session.commit()
-        out = feed_warnings(session, settings, NOW)
-    assert (
-        len(out) == 1 and "failing since" in out[0].messages[0] and "HTTP 403" in out[0].messages[0]
-    )
-    deliver(db, out, lambda m: None, NOW)
-    with db() as session:
-        assert feed_warnings(session, settings, NOW) == []
-
-
-def test_a_feed_that_is_always_slow_is_not_stale(
-    db: sessionmaker[Session], settings: Settings
-) -> None:
-    """ET's curated company feed is hours old all day: only a change from that is a fault."""
-    with db() as session:
-        for hour in range(48):
-            checked = NOW - timedelta(hours=hour)
-            session.add(
-                FeedCheck(
-                    kind="watch",
-                    feed_name="The Economic Times",
-                    feed_url="https://et/rss",
-                    checked_at=checked,
-                    status="ok",
-                    newest_entry_at=checked - timedelta(hours=10),
-                )
-            )
-        session.commit()
-        assert feed_warnings(session, settings, NOW) == []
 
 
 def test_a_failed_send_is_recorded_and_retried(db: sessionmaker[Session]) -> None:
@@ -429,35 +395,3 @@ def test_the_digest_section_lists_todays_stories_most_material_first(
     assert text is not None and text.startswith("<b>WATCHLIST</b> · 2 stories today")
     assert text.index("Prime Focus raid") < text.index("HAL director appointed")
     assert "Options chart" not in text and "Yesterday's BDL story" not in text
-
-
-def test_a_usually_fresh_feed_going_quiet_is_stale(
-    db: sessionmaker[Session], settings: Settings
-) -> None:
-    afternoon = datetime(2026, 10, 8, 11, 0, tzinfo=UTC)  # 16:30 IST, inside the window
-    with db() as session:
-        for minutes in range(0, 24 * 60, 60):  # a day of checks, newest entry 30 min old
-            checked = afternoon - timedelta(hours=8, minutes=minutes)
-            session.add(
-                FeedCheck(
-                    kind="watch",
-                    feed_name="Livemint",
-                    feed_url="https://lm/rss",
-                    checked_at=checked,
-                    status="ok",
-                    newest_entry_at=checked - timedelta(minutes=30),
-                )
-            )
-        for hours in range(8, -1, -1):  # then eight hours with nothing new
-            session.add(
-                FeedCheck(
-                    kind="watch",
-                    feed_name="Livemint",
-                    feed_url="https://lm/rss",
-                    checked_at=afternoon - timedelta(hours=hours),
-                    status="not_modified",
-                )
-            )
-        session.commit()
-        out = feed_warnings(session, settings, afternoon)
-    assert len(out) == 1 and "Livemint: nothing new for 8.5 h" in out[0].messages[0]

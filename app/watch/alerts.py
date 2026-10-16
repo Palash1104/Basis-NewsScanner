@@ -16,15 +16,15 @@ What reaches Telegram, and when:
              started) get one too, from their `late` run, and never an alert of their own.
              A late filing on a story already alerted is shown as an update to it:
              "Update: <the story> (alerted 10:23)", with the filing under it.
-  feed       a feed failing (errors in a row) or gone stale (nothing new for much longer
-             than is usual for it, in the daytime)
+
+Feed health is not sent (user, 2026-10-16: one notification per feed after every night off
+was noise, and wrong): it is a section of /runs, app/feed_health.py.
 
 Every alert is a watch_alerts row whose key makes it happen once. It is written before it is
 sent; a failed send is retried for half an hour, three times at most.
 """
 
 import logging
-import statistics
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, time, timedelta
@@ -36,7 +36,6 @@ from sqlalchemy.orm import Session, selectinload, sessionmaker
 from app.config import Settings, WatchlistFile
 from app.delivery.format import TELEGRAM_LIMIT, telegram_length
 from app.models import (
-    FeedCheck,
     WatchAlert,
     WatchArticle,
     WatchCall,
@@ -48,10 +47,18 @@ from app.models import (
 from app.schedule import start_of_news_day
 from app.watch.analyse import kept_articles, kept_symbols, trigger_for
 from app.watch.moves import MoveEvent, Snapshot, Typical, detect
+from app.watch.render import (
+    MARK,
+    Sections,
+    low_item,
+    move_lines,
+    section_for,
+    story_item,
+    time_range,
+)
 
 log = logging.getLogger(__name__)
 
-MARK = {"positive": "▲", "negative": "▼", "neutral": "●"}
 RANK = {"high": 0, "medium": 1, "low": 2}
 FOLLOWUP_WAIT = timedelta(minutes=15)
 AWAY_WAIT = timedelta(minutes=10)
@@ -62,7 +69,6 @@ RETRY_FOR = timedelta(minutes=30)
 MAX_ATTEMPTS = 3
 SOURCES_SHOWN = 3
 DIGEST_STORIES = 8
-STALE_HISTORY = 12  # daytime checks of a feed before it can be called stale
 
 # Runs whose stories get a "while you were away" summary: catch-ups, and passes that read
 # filings late (app/watch/scan.py `_record_late`).
@@ -174,41 +180,32 @@ def _sources(story: WatchStory) -> str:
     return " · ".join(links)
 
 
-def _first_seen_line(story: WatchStory, settings: Settings) -> str:
-    articles = sorted(story.articles, key=lambda a: a.first_seen_at)
-    if not articles:
-        exchanges = sorted({f.exchange for f in story.filings}) or ["the exchange"]
-        where = " and ".join(exchanges)
-        return f"first seen {_local(story.first_seen_at, settings)} in {where}'s filings"
-    first = articles[0]
-    via = (
-        "Google News"
-        if first.sightings and first.sightings[0].via == "google_news"
-        else first.source_name
-    )
-    return f"first seen {_local(first.first_seen_at, settings)} via {_t(via)}"
-
-
 def news_message(
-    story: WatchStory, calls: Sequence[WatchCall], names: Mapping[str, str], settings: Settings
+    story: WatchStory,
+    calls: Sequence[WatchCall],
+    names: Mapping[str, str],
+    settings: Settings,
+    now: datetime | None = None,
 ) -> str:
-    lines = [
-        "<b>BASIS · watchlist alert</b>",
-        f"<b>{_marks(calls, names)}</b>",
-        f"<b>{_t(story.headline)}</b>",
-        f"<i>{_t(story_state(story, settings))} · {_first_seen_line(story, settings)}</i>",
-        "",
-        _t(calls[0].summary),
-    ]
-    details = [
+    """An instant alert: the item as everywhere else (app/watch/render.py), then the
+    summary, each company's call and the sources folded underneath."""
+    ref = now or story.first_seen_at
+    details = [_t(calls[0].summary)] if calls else []
+    details += [
         f"{MARK[c.sentiment]} {_t(names.get(c.symbol, c.symbol))} · {c.materiality} · "
         f"{c.event_type.replace('_', ' ')} — {_t(c.reason)}"
         for c in calls
     ]
     if sources := _sources(story):
         details.append(f"Sources: {sources}")
-    lines.append("<blockquote expandable>" + "\n".join(details) + "</blockquote>")
-    return "\n".join(lines)
+    level = calls[0].materiality.upper() if calls else ""
+    return "\n".join(
+        [
+            f"<b>BASIS · watchlist alert{' · ' + level if level else ''}</b>",
+            story_item(story, calls, names, settings, ref),
+            "<blockquote expandable>" + "\n".join(details) + "</blockquote>",
+        ]
+    )
 
 
 # ---------------------------------------------------------------- deciding what to send
@@ -267,7 +264,7 @@ def news_alerts(
             Outgoing(
                 "news",
                 key,
-                (news_message(story, visible, names, settings),),
+                (news_message(story, visible, names, settings, now),),
                 story.id,
                 tuple(c.symbol for c in visible),
             )
@@ -323,21 +320,13 @@ def followups(
         visible = shown(story_calls, list(names))
         lines = [
             "<b>BASIS · watchlist update</b>",
-            f"<b>{_t(story.headline)}</b>",
-            f"<i>Now: {_t(story_state(story, settings))}</i>",
+            story_item(story, visible if recalled else [], names, settings, now, reason=False),
         ]
-        for filing in sorted(new, key=lambda f: f.filed_at):
-            link = (
-                f' · <a href="{escape(filing.link, quote=True)}">the filing</a>'
-                if filing.link
-                else ""
-            )
-            lines.append(
-                f"{_local(filing.filed_at, settings, now)} · {filing.exchange} · "
-                f"{_t(filing.subject)}{link}"
-            )
+        lines += [
+            _filing_line(filing, settings, now) for filing in sorted(new, key=lambda f: f.filed_at)
+        ]
         if visible and recalled:
-            lines += ["", f"<b>{_marks(visible, names)}</b>", _t(visible[0].reason)]
+            lines.append(f"{_marks(visible, names)} — {_t(visible[0].reason)}")
         out.append(
             Outgoing(
                 "followup", key, ("\n".join(lines),), story.id, tuple(c.symbol for c in visible)
@@ -346,36 +335,17 @@ def followups(
     return out
 
 
-def move_message(event: MoveEvent, names: Mapping[str, str], settings: Settings) -> str:
-    when = _local(event.at, settings)
-    if event.kind == "sector":
-        group = (event.group or "sector").capitalize()
-        head = (
-            f"{MARK['positive' if event.move > 0 else 'negative']} {group} index {event.move:+.1%}"
-        )
-        peers = " · ".join(f"{_t(names.get(s, s))} {m:+.1%}" for s, m in event.peers)
-        times = f" · {event.multiple:.1f}× its typical day" if event.multiple else ""
-        return "\n".join(
-            [
-                f"<b>BASIS · {group.lower()} sector move</b>",
-                f"<b>{_t(head)}</b> at {when}{times}",
-                peers,
-                "<i>The peers moved together, so no stock is alerted on its own.</i>",
-            ]
-        )
-    name = names.get(event.symbol or "", event.symbol or "")
-    head = f"{MARK['positive' if event.move > 0 else 'negative']} {name} {event.move:+.1%}"
-    net = (
-        f", {event.excess:+.1%} net of the {event.group} index" if event.excess is not None else ""
+def move_message(
+    event: MoveEvent, names: Mapping[str, str], settings: Settings, now: datetime | None = None
+) -> str:
+    """ "Moved, no story yet": a header, then the move as it reads everywhere else. The
+    digest's watchlist section reuses the lines under the header."""
+    title = (
+        f"BASIS · {(event.group or 'sector').lower()} sector move"
+        if event.kind == "sector"
+        else "BASIS · moved, no story yet"
     )
-    return "\n".join(
-        [
-            "<b>BASIS · moved, no story yet</b>",
-            f"<b>{_t(head)}</b> since the last close, at {when}{net}",
-            f"{event.multiple:.1f}× its typical day's move. No story about it yet in the feeds "
-            "BASIS reads.",
-        ]
-    )
+    return "\n".join([f"<b>{title}</b>", *move_lines(event, names, settings, now or event.at)])
 
 
 def move_alerts(
@@ -582,7 +552,7 @@ def away_summaries(
         finished_at = run.finished_at or run.started_at
         if unfinished and now - finished_at < AWAY_WAIT:
             continue  # its stories are still being called
-        items: list[tuple[datetime, str]] = []
+        sections = Sections.empty()
         for story in stories:
             reported = first_reported(story)
             late = [
@@ -590,19 +560,14 @@ def away_summaries(
                 for f in story.filings
                 if f.first_seen_at == run.started_at and f.filed_at < cutoff
             ]
+            story_calls = calls.get(story.id, {})
             if late and story.id in alerted:
                 # The reader has this story already: the filing is an update to it.
                 when = max(f.filed_at for f in late)
                 text = update_item(
-                    story,
-                    late,
-                    calls.get(story.id, {}),
-                    alerted[story.id],
-                    names,
-                    settings,
-                    gap_end,
+                    story, late, story_calls, alerted[story.id], names, settings, gap_end
                 )
-                items.append((when, text))
+                sections.add("high", when, text)  # only a high story was alerted
                 continue
             if story.first_seen_at == run.started_at and (gap_start <= reported < cutoff or late):
                 when = reported
@@ -610,30 +575,25 @@ def away_summaries(
                 when = max(f.filed_at for f in late)
             else:
                 continue
-            visible = shown(calls.get(story.id, {}), list(names))
+            visible = shown(story_calls, list(names))
             if story.id in calls and not visible:
                 continue  # every company only named in passing
-            head = (
-                _marks(visible, names)
-                if visible
-                else _t(", ".join(names.get(s, s) for s in sorted(kept_symbols(story))))
-            )
-            line = f"• <b>{_local(when, settings, gap_end)}</b> · {head} — {_t(story.headline)}"
-            detail = _t(visible[0].reason) if visible else ""
-            state = _t(story_state(story, settings))
-            items.append((when, f"{line}\n  <i>{detail + ' · ' if detail else ''}{state}</i>"))
+            section = section_for(visible)
+            if section == "low":
+                sections.add("low", when, low_item(story, visible, names, settings, gap_end, when))
+            else:
+                sections.add(section, when, story_item(story, visible, names, settings, gap_end))
         if typical and run.job == "catchup":  # through a late run the live check was running
             for event in moves_in_period(
                 session, watchlist, typical, settings, gap_start, run.started_at
             ):
                 if event.at >= run.started_at - away:
                     continue  # fresh: the live check alerts it
-                text = move_message(event, names, settings).split("\n")[1]
-                items.append(
-                    (event.at, f"• <b>{_local(event.at, settings, gap_end)}</b> · moved: {text}")
+                sections.add(
+                    "moves", event.at, "\n".join(move_lines(event, names, settings, gap_end))
                 )
         gaps = details.get("possible_gaps") or []
-        if not items and not gaps:
+        if not len(sections) and not gaps:
             empty.append(run)
             continue
         header = ["<b>BASIS · while you were away</b>"]
@@ -644,14 +604,14 @@ def away_summaries(
                 if details.get("exchanges") == ["BSE"]
                 else f"<i>Filings that reached BASIS late, first seen at {seen}</i>"
             )
-        header += [
-            f"<i>{_local(gap_start, settings)} – {_local(gap_end, settings)} · "
-            f"{len(items)} {'item' if len(items) == 1 else 'items'}, newest first</i>",
-            "",
-        ]
-        body = [text for _, text in sorted(items, key=lambda pair: pair[0], reverse=True)]
+        count = len(sections)
+        header.append(
+            f"<i>{time_range(gap_start, gap_end, settings)} · "
+            f"{count} {'update' if count == 1 else 'updates'}</i>"
+        )
+        body = sections.blocks()
         if not body:
-            body = ["Nothing about your watchlist was reported while BASIS was off."]
+            body = ["", "Nothing about your watchlist was reported while BASIS was off."]
         footer = [
             f"<i>Possible gap: {_local(datetime.fromisoformat(g['from']), settings)} to "
             f"{_local(datetime.fromisoformat(g['to']), settings)} - {_t(g['what'])} "
@@ -660,6 +620,32 @@ def away_summaries(
         ]
         out.append(Outgoing("away", f"away:{run.id}", tuple(split(header, body, footer))))
     return out, empty
+
+
+def rebuild_away(
+    session: Session,
+    watchlist: WatchlistFile,
+    typical: Mapping[str, Typical] | None,
+    settings: Settings,
+    run: WatchRun,
+    now: datetime,
+) -> list[str] | None:
+    """A past "while you were away" summary rebuilt in the current format, headed TEST, for
+    `newsdesk watch-test-message`. Nothing is written: the run is only treated as unsent in
+    memory, so the session must be rolled back (or closed) afterwards, never committed."""
+    with session.no_autoflush:
+        run.details = {**(run.details or {}), "summary_sent": False}
+        out, _ = away_summaries(session, watchlist, typical, settings, now)
+    for item in out:
+        if item.key == f"away:{run.id}":
+            messages = list(item.messages)
+            messages[0] = messages[0].replace(
+                "<b>BASIS · while you were away</b>",
+                "<b>TEST · BASIS · while you were away</b>",
+                1,
+            )
+            return messages
+    return None
 
 
 def news_alert_times(
@@ -695,28 +681,34 @@ def update_item(
     ref: datetime,
 ) -> str:
     """A late filing on a story already alerted, as an update to that story (user,
-    2026-10-08): the story as the alert named it, when it was alerted, each late filing at
-    its own time, and the story's call again if the filing changed it."""
+    2026-10-08): the story as the alert named it and when it was alerted, each late filing
+    at its own time, and the story's call again if the filing changed it."""
     first_late_seen = min(f.first_seen_at for f in late)
-    lines = [
-        f"• <b>{_local(max(f.filed_at for f in late), settings, ref)}</b> · "
-        f"Update: {_t(story.headline)} (alerted {_local(alerted_at, settings, ref)})"
-    ]
-    for filing in sorted(late, key=lambda f: f.filed_at):
-        description = filing.description.strip()
-        if len(description) > UPDATE_DESCRIPTION_CHARS:
-            description = description[: UPDATE_DESCRIPTION_CHARS - 1].rstrip() + "…"
-        link = (
-            f' · <a href="{escape(filing.link, quote=True)}">the filing</a>' if filing.link else ""
-        )
-        lines.append(
-            f"  {_local(filing.filed_at, settings, ref)} · {filing.exchange} · "
-            f"{_t(filing.subject)}: {_t(description)}{link}"
-        )
     recalled = [c for c in shown(calls, list(names)) if c.created_at >= first_late_seen]
+    item = story_item(story, recalled, names, settings, ref, reason=False).split("\n")
+    head, rest = item[0].split(": ", 1)
+    lines = [f"{head}: Update: {rest} (alerted {_local(alerted_at, settings, ref)})", *item[1:]]
+    lines += [
+        _filing_line(filing, settings, ref, UPDATE_DESCRIPTION_CHARS)
+        for filing in sorted(late, key=lambda f: f.filed_at)
+    ]
     if recalled:
-        lines.append(f"  <i>{_marks(recalled, names)} · {_t(recalled[0].reason)}</i>")
+        lines.append(_t(recalled[0].reason))
     return "\n".join(lines)
+
+
+def _filing_line(
+    filing: WatchFiling, settings: Settings, ref: datetime, description_chars: int = 0
+) -> str:
+    """ "08:00 · BSE · Company Update: <description> · the filing" """
+    text = _t(filing.subject)
+    description = filing.description.strip()
+    if description_chars and description:
+        if len(description) > description_chars:
+            description = description[: description_chars - 1].rstrip() + "…"
+        text += f": {_t(description)}"
+    link = f' · <a href="{escape(filing.link, quote=True)}">the filing</a>' if filing.link else ""
+    return f"{_local(filing.filed_at, settings, ref)} · {filing.exchange} · {text}{link}"
 
 
 def split(header: Sequence[str], body: Sequence[str], footer: Sequence[str]) -> list[str]:
@@ -727,84 +719,11 @@ def split(header: Sequence[str], body: Sequence[str], footer: Sequence[str]) -> 
         candidate = f"{current}\n{block}" if current else block
         if telegram_length(candidate) > TELEGRAM_LIMIT and current:
             messages.append(current)
-            current = block
+            current = block.lstrip("\n")
         else:
             current = candidate
     messages.append(current)
     return messages
-
-
-# ---------------------------------------------------------------- feed health
-
-
-def feed_warnings(session: Session, settings: Settings, now: datetime) -> list[Outgoing]:
-    """One warning per feed per episode: failing (`feed_failing_after` errors in a row) or
-    stale - nothing new for longer than `feed_stale_hours` AND twice what is usual for the
-    feed in the daytime. A feed needs STALE_HISTORY daytime checks before it can be stale at
-    all: ET's curated company feed is hours old all day, and a US outlet is quiet through
-    India's daytime, and neither is a fault (both would have warned on the first day)."""
-    watch = settings.watch
-    since = now - timedelta(days=7)
-    rows = session.scalars(
-        select(FeedCheck).where(FeedCheck.checked_at >= since).order_by(FeedCheck.checked_at)
-    ).all()
-    by_feed: dict[str, list[FeedCheck]] = {}
-    for row in rows:
-        by_feed.setdefault(row.feed_url, []).append(row)
-    start, end = (time(*(int(x) for x in v.split(":"))) for v in watch.feed_stale_window)
-    lines: list[tuple[str, str]] = []
-    for url, checks in by_feed.items():
-        name = checks[-1].feed_name
-        recent = checks[-watch.feed_failing_after :]
-        if len(recent) == watch.feed_failing_after and all(c.status == "error" for c in recent):
-            run_start = recent[0].checked_at
-            for check in reversed(checks[: -watch.feed_failing_after]):
-                if check.status != "error":
-                    break
-                run_start = check.checked_at
-            lines.append(
-                (
-                    f"feed:{url}:failing:{run_start.isoformat()}",
-                    f"• {_t(name)}: failing since {_local(run_start, settings, now)} "
-                    f"({_t(recent[-1].error or 'error')})",
-                )
-            )
-            continue
-        if name == "Google News" or not start <= now.astimezone(settings.tz).time() <= end:
-            continue
-        newest: datetime | None = None
-        ages: list[float] = []
-        for check in checks:
-            if check.newest_entry_at is not None:
-                newest = (
-                    check.newest_entry_at if newest is None else max(newest, check.newest_entry_at)
-                )
-            if (
-                newest is not None
-                and check.status != "error"
-                and start <= check.checked_at.astimezone(settings.tz).time() <= end
-            ):
-                ages.append((check.checked_at - newest).total_seconds() / 3600)
-        if newest is None or checks[-1].status == "error" or len(ages) < STALE_HISTORY:
-            continue
-        age = (now - newest).total_seconds() / 3600
-        if age > max(watch.feed_stale_hours, 2 * statistics.median(ages)):
-            day = now.astimezone(settings.tz).date().isoformat()
-            lines.append(
-                (
-                    f"feed:{url}:stale:{day}",
-                    f"• {_t(name)}: nothing new for {age:.1f} h (newest entry "
-                    f"{_local(newest, settings, now)})",
-                )
-            )
-    if not lines:
-        return []
-    already = _sent_keys(session, [key for key, _ in lines])
-    fresh = [(key, text) for key, text in lines if key not in already]
-    out = []
-    for key, text in fresh:
-        out.append(Outgoing("feed", key, ("<b>BASIS · feed warning</b>\n" + text,)))
-    return out
 
 
 # ---------------------------------------------------------------- sending
@@ -868,13 +787,15 @@ def deliver(
 
 
 def retry_pending(session: Session, now: datetime) -> list[Outgoing]:
-    """Alerts recorded but not sent, still inside the retry window."""
+    """Alerts recorded but not sent, still inside the retry window. Never a feed warning:
+    those are no longer sent at all, and one recorded by an older version stays unsent."""
     return [
         Outgoing(
             a.kind, a.key, tuple(a.text.split(MESSAGE_SEPARATOR)), a.story_id, tuple(a.symbols)
         )
         for a in session.scalars(
             select(WatchAlert).where(
+                WatchAlert.kind != "feed",
                 WatchAlert.sent_at.is_(None),
                 WatchAlert.attempts < MAX_ATTEMPTS,
                 WatchAlert.created_at >= now - RETRY_FOR,
@@ -905,47 +826,37 @@ def digest_section(
     session: Session, watchlist: WatchlistFile, settings: Settings, now: datetime
 ) -> str | None:
     """The watchlist section at the top of the digest: today's called stories (the news day
-    starts at 22:00 the night before, as for the digest), most material first, then today's
-    price and sector alerts. None when there is nothing."""
+    starts at 22:00 the night before, as for the digest) and today's price and sector
+    alerts, in the same shape as everywhere else (app/watch/render.py). None when there is
+    nothing."""
     names = {s.symbol: s.name or s.symbol for s in watchlist.stocks}
     since = start_of_news_day(settings, now) or now - timedelta(hours=24)
     stories = _load_stories(session, since)
     calls = current_calls(session, [s.id for s in stories])
-    rows: list[tuple[tuple[int, float], WatchStory, list[WatchCall]]] = []
+    sections = Sections.empty()
+    count = 0
     for story in stories:
         visible = shown(calls.get(story.id, {}), list(names))
         # Today's news, as for the rest of the digest: what broke since the day began, not
         # what BASIS happened to read today.
-        if visible and first_reported(story) >= since:
-            rows.append(
-                ((RANK[visible[0].materiality], -story.first_seen_at.timestamp()), story, visible)
-            )
+        reported = first_reported(story)
+        if not visible or reported < since:
+            continue
+        count += 1
+        section = section_for(visible)
+        if section == "low":
+            sections.add("low", reported, low_item(story, visible, names, settings, now, reported))
+        else:
+            sections.add(section, reported, story_item(story, visible, names, settings, now))
     moves = session.scalars(
         select(WatchAlert)
         .where(WatchAlert.kind.in_(["price", "sector"]), WatchAlert.created_at >= since)
         .order_by(WatchAlert.created_at)
     ).all()
-    if not rows and not moves:
-        return None
-    rows.sort(key=lambda row: row[0])
-    lines = [f"<b>WATCHLIST</b> · {len(rows)} {'story' if len(rows) == 1 else 'stories'} today"]
-    for _, story, visible in rows[:DIGEST_STORIES]:
-        lines.append(f"<b>{_marks(visible, names)}</b> · {_t(story.headline)}")
-        # The state only where it says something: a filing, or a story rated high.
-        state = (
-            f" · {_t(story_state(story, settings))}"
-            if story.filings or visible[0].materiality == "high"
-            else ""
-        )
-        lines.append(f"<i>{_t(visible[0].reason)}{state}</i>")
-    rest = rows[DIGEST_STORIES:]
-    if rest:
-        lines.append(
-            "<blockquote expandable>"
-            + "\n".join(f"{_marks(v, names)} · {_t(s.headline)}" for _, s, v in rest)
-            + "</blockquote>"
-        )
     for alert in moves:
-        head = alert.text.split("\n")[1] if "\n" in alert.text else alert.text
-        lines.append(f"Moved: {head}")
-    return "\n".join(lines)
+        lines = alert.text.split(MESSAGE_SEPARATOR)[0].split("\n")[1:]
+        sections.add("moves", alert.created_at, "\n".join(lines) or alert.text)
+    if not len(sections):
+        return None
+    head = f"<b>WATCHLIST</b> · {count} {'story' if count == 1 else 'stories'} today"
+    return "\n".join([head, *(block for block in sections.blocks(spaced=False))])

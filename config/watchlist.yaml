@@ -82,7 +82,10 @@ watchlist:
     # Air exercises and flypasts fly Tejas often - 25 headlines in 30 days, "Japan air chief
     # flies Tejas" among them - and none is HAL's business.
     noise: [sortie, exercise, Veer Guardian, Tarang Shakti, formation, air show, airshow,
-            flypast]
+            flypast,
+            # HAL is also Halliburton's NYSE ticker: "Baker Hughes (BKR) vs. SLB and HAL: Can
+            # IET Growth and LNG Demand Drive..." reached the 2026-10-15 digest as HAL news.
+            Halliburton, SLB, Schlumberger, Baker Hughes, BKR, oilfield, NYSE]
 
   - type: stock
     symbol: BDL.NS

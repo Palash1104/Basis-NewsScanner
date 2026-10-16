@@ -4,7 +4,9 @@ The pipeline's rules (cosine similarity to a story's centroid, and to its seed s
 can't drift into a blob), with one addition: an item may only join a story that shares one of
 its stocks. So "Russia partners Adani Defence, HAL, BDL..." is one story touching HAL and
 BDL - one alert later, not two - while an HAL order and a BDL order on the same day, worded
-alike, stay two stories.
+alike, stay two stories. And one more: two items stating different money amounts are two
+events (app/watch/events.py) - "BDL's Rs 56.8 crore tender" is not "Rs 810 crore contract with
+BDL", however alike the embedding model finds them.
 """
 
 from collections.abc import Hashable, Iterable
@@ -12,6 +14,8 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
 import numpy as np
+
+from app.watch.events import Amount, amounts_conflict
 
 
 @dataclass
@@ -22,6 +26,7 @@ class _Story:
     seed: np.ndarray
     last: datetime
     members: int = 1
+    amounts: set[Amount] = field(default_factory=set)
 
 
 @dataclass
@@ -34,13 +39,23 @@ class StoryGrouper[K: Hashable]:
     def __len__(self) -> int:
         return len(self._stories)
 
-    def match(self, vector: np.ndarray, symbols: Iterable[str], seen_at: datetime) -> K | None:
-        """The most similar story sharing a stock that clears both thresholds, or None."""
+    def match(
+        self,
+        vector: np.ndarray,
+        symbols: Iterable[str],
+        seen_at: datetime,
+        amounts: Iterable[Amount] = (),
+    ) -> K | None:
+        """The most similar story sharing a stock that clears both thresholds and states no
+        money amount that disagrees with this item's, or None."""
         wanted = set(symbols)
+        stated = set(amounts)
         best: K | None = None
         best_score = -1.0
         for key, story in self._stories.items():
             if not story.symbols & wanted or story.last < seen_at - self.window:
+                continue
+            if amounts_conflict(story.amounts, stated):
                 continue
             score = float(story.centroid @ vector)
             if score < self.threshold or score <= best_score:
@@ -50,15 +65,28 @@ class StoryGrouper[K: Hashable]:
             best, best_score = key, score
         return best
 
-    def add(self, key: K, vector: np.ndarray, symbols: Iterable[str], seen_at: datetime) -> None:
+    def add(
+        self,
+        key: K,
+        vector: np.ndarray,
+        symbols: Iterable[str],
+        seen_at: datetime,
+        amounts: Iterable[Amount] = (),
+    ) -> None:
         """Add an item to story `key`, creating it (with this item as its seed) if needed.
         Callers add items oldest first, as the pipeline does."""
         story = self._stories.get(key)
         if story is None:
             self._stories[key] = _Story(
-                set(symbols), vector.copy(), vector.copy(), vector.copy(), seen_at
+                set(symbols),
+                vector.copy(),
+                vector.copy(),
+                vector.copy(),
+                seen_at,
+                amounts=set(amounts),
             )
             return
+        story.amounts |= set(amounts)
         story.symbols |= set(symbols)
         story.total = story.total + vector
         norm = float(np.linalg.norm(story.total))

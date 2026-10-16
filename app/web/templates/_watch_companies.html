@@ -1,0 +1,21 @@
+{# Type-ahead suggestions for "Add a stock" (GET /watchlist/companies). #}
+{% if not ready %}
+  <p class="watch-note">NSE's list of companies hasn't been downloaded yet.</p>
+{% elif query | length < 2 %}
+{% elif not matches %}
+  <p class="watch-note">No NSE-listed company matches “{{ query }}”.</p>
+{% else %}
+  <ul class="watch-suggest-list">
+    {% for company in matches %}
+      <li>
+        <button type="button" class="watch-suggest"
+          hx-get="/watchlist/preview?symbol={{ company.symbol | urlencode }}"
+          hx-target="#watch-preview" hx-indicator="#watch-preview-wait">
+          <b>{{ company.short_name }}</b>
+          <span class="cell-note">{{ company.symbol }} · NSE{% if company.series and company.series != "EQ" %} · {{ company.series }}{% endif %}</span>
+          {% if company.yahoo_symbol in on_list %}<span class="tag tag-neutral">on the watchlist</span>{% endif %}
+        </button>
+      </li>
+    {% endfor %}
+  </ul>
+{% endif %}

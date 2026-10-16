@@ -26,6 +26,16 @@
       <span class="cell-note">of {{ view.pipeline_runs }} runs kept the computed order</span>
     </div>
     <div class="track-figure">
+      <span class="kicker">Feeds</span>
+      {% if feed_problems %}
+        <b class="down">{{ feed_problems | length }}</b>
+        <span class="cell-note">of {{ feeds | length + searches | length }} need a look</span>
+      {% else %}
+        <b>{{ feeds | length + searches | length }}</b>
+        <span class="cell-note">all answering</span>
+      {% endif %}
+    </div>
+    <div class="track-figure">
       <span class="kicker">Layer B declines</span>
       {% if view.layer_b_calls %}
         <b>{{ "%.0f" | format(view.decline_rate * 100) }}%</b>
@@ -70,6 +80,85 @@
       {% endfor %}
     </tbody>
   </table>
+
+  <div class="section-label">
+    <span class="kicker">Feed health</span><span class="line"></span>
+  </div>
+  <p class="sub">
+    Shown here only, never sent to Telegram. A feed's age is measured at its own last fetch,
+    so hours the laptop was off never count against it: a feed is judged again once BASIS has
+    fetched it. <b>Failing</b> is {{ settings.watch.feed_failing_after }} failed fetches in a
+    row; <b>stale</b> is nothing new for over {{ "%g" | format(settings.watch.feed_stale_hours) }} h
+    and twice its usual daytime age, at a fetch made in the daytime.
+  </p>
+  {% macro feed_rows(rows) %}
+    {% for feed in rows %}
+      <tr>
+        <td>{{ feed.label }}<div class="cell-note">{{ "pipeline" if feed.kind == "pipeline" else "watchlist scan" }}</div></td>
+        <td>{{ feed.last_checked | ist }}</td>
+        <td>
+          {% if feed.age_hours is not none %}
+            {{ "%.1f" | format(feed.age_hours) }} h old
+            {% if feed.usual_hours is not none %}<div class="cell-note">usually {{ "%.1f" | format(feed.usual_hours) }} h</div>{% endif %}
+          {% else %}—{% endif %}
+        </td>
+        <td>
+          {% if feed.state == "failing" %}<span class="down"><b>failing</b></span>
+          {% elif feed.state == "stale" %}<span class="down"><b>stale</b></span>
+          {% elif feed.state == "new" %}<span class="muted">learning</span>
+          {% else %}ok{% endif %}
+          {% if feed.detail %}<div class="cell-note">{{ feed.detail }}</div>{% endif %}
+        </td>
+      </tr>
+    {% endfor %}
+  {% endmacro %}
+  {% set feed_head %}
+    <thead>
+      <tr><th>Feed</th><th>Last fetched</th><th>Newest entry then</th><th>State</th></tr>
+    </thead>
+  {% endset %}
+  {% set problem_feeds = feeds | selectattr("problem") | list %}
+  {% if problem_feeds or searches_failing %}
+    <table class="table feeds-table">
+      {{ feed_head }}
+      <tbody>
+        {{ feed_rows(problem_feeds) }}
+        {% if searches_failing %}
+          <tr>
+            <td>Google News searches<div class="cell-note">{{ searches | length }} batches of watchlist names</div></td>
+            <td>{{ (searches_failing | map(attribute="last_checked") | max) | ist }}</td>
+            <td>—</td>
+            <td><span class="down"><b>{{ searches_failing | length }} failing</b></span>
+              <div class="cell-note">{{ searches_failing[0].detail }}</div></td>
+          </tr>
+        {% endif %}
+      </tbody>
+    </table>
+  {% elif feeds or searches %}
+    <p class="feed-note">Every feed is answering and bringing news as usual.</p>
+  {% endif %}
+  {% if feeds or searches %}
+    <details class="feeds-all">
+      <summary>All {{ feeds | length }} feeds{% if searches %} and {{ searches | length }} Google News searches{% endif %}</summary>
+      <table class="table feeds-table">
+        {{ feed_head }}
+        <tbody>
+          {{ feed_rows(feeds) }}
+          {% if searches %}
+            <tr>
+              <td>Google News searches<div class="cell-note">{{ searches | length }} batches of watchlist names</div></td>
+              <td>{{ (searches | map(attribute="last_checked") | max) | ist }}</td>
+              <td>—</td>
+              <td>{% if searches_failing %}<span class="down"><b>{{ searches_failing | length }} failing</b></span>{% else %}ok<div class="cell-note">a quiet day for a stock is not a fault</div>{% endif %}</td>
+            </tr>
+          {% endif %}
+        </tbody>
+      </table>
+    </details>
+  {% endif %}
+  {% if not feeds and not searches %}
+    <p class="feed-note">No feed fetched in the last two weeks.</p>
+  {% endif %}
 
   <div class="section-label">
     <span class="kicker">LLM requests per quota day</span><span class="line"></span>

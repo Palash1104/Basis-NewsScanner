@@ -1,0 +1,80 @@
+{# One company before it is added (GET /watchlist/preview): its draft entry, editable, the
+   Yahoo check, and what its names keep and drop among real headlines. #}
+{% set blocked = on_list or problem or not version or not result.ticker or not result.ticker.ok %}
+<div class="watch-preview">
+  <div class="kicker">NSE · {{ company.symbol }}{% if company.isin %} · {{ company.isin }}{% endif %}</div>
+  <h3 class="watch-preview-name">{{ company.name }}</h3>
+  {% if on_list %}<p class="watch-flash">{{ draft.symbol }} is already on the watchlist.</p>{% endif %}
+  {% if problem %}<p class="watch-flash watch-flash-error">{{ problem }}.</p>{% endif %}
+  {% if result.ticker %}
+    <p class="watch-ticker {{ 'up' if result.ticker.ok else 'down' }}">
+      {{ "✓" if result.ticker.ok else "✕" }} {{ result.ticker.detail }}</p>
+  {% endif %}
+
+  <form method="post" action="/watchlist/add" class="watch-add-form">
+    <input type="hidden" name="token" value="{{ token }}" />
+    <input type="hidden" name="version" value="{{ version or '' }}" />
+    <input type="hidden" name="symbol" value="{{ company.symbol }}" />
+    <div class="field">
+      <label for="watch-name">Name on the page and in alerts</label>
+      <input id="watch-name" class="input" name="name" value="{{ draft.name }}" />
+    </div>
+    <div class="field">
+      <label for="watch-strong">Strong names: enough on their own in a headline (comma-separated)</label>
+      <input id="watch-strong" class="input" name="strong" value="{{ draft.aliases.strong | join(', ') }}" />
+    </div>
+    <div class="field">
+      <label for="watch-weak">Weak names: short or shared, so they count only with a market word
+        nearby (shares, order, crore, results…)</label>
+      <input id="watch-weak" class="input" name="weak" value="{{ draft.aliases.weak | join(', ') }}" />
+    </div>
+    {% if groups %}
+      <div class="field">
+        <label for="watch-group">Peer group (its price moves are judged against the group)</label>
+        <select id="watch-group" class="input" name="group">
+          <option value="">None</option>
+          {% for key, group in groups.items() %}
+            <option value="{{ key }}" {% if draft.group == key %}selected{% endif %}>{{ group.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+    {% endif %}
+    <div class="watch-add-actions">
+      <button class="btn btn-secondary" type="button" hx-get="/watchlist/preview"
+        hx-include="closest form" hx-target="#watch-preview" hx-indicator="#watch-preview-wait">
+        Preview again</button>
+      <button class="btn btn-primary" type="submit" {% if blocked %}disabled{% endif %}>Add to watchlist</button>
+    </div>
+  </form>
+
+  <div class="watch-verdicts">
+    <p class="watch-counts">
+      <b>{{ result.counts.keep }}</b> keep · <b>{{ result.counts.mention }}</b> mention ·
+      <b>{{ result.counts.drop }}</b> drop
+    </p>
+    <p class="watch-note">
+      Among BASIS's stored headlines from the last 30 days{% if result.ticker %}, and
+      {{ result.searched }} from a Google News search of the same 30 days{% endif %}.
+      <b>Keep</b> is about the company: analysed and alerted. <b>Mention</b> is one name in a
+      list: shown, never alerted. <b>Drop</b> is not about it.
+      {% if result.search_error %}The Google News search failed ({{ result.search_error }}).{% endif %}
+    </p>
+    {% if result.shown %}
+      <table class="table watch-verdict-table">
+        <thead><tr><th>Verdict</th><th>Headline</th><th>Why</th></tr></thead>
+        <tbody>
+          {% for row in result.shown %}
+            <tr>
+              <td><span class="tag {{ 'tag-accent' if row.verdict == 'keep' else 'tag-neutral' }}">{{ row.verdict }}</span></td>
+              <td>{{ row.title }}<div class="cell-note">{{ row.source }} · {{ row.published | ist }} · {{ row.where }}</div></td>
+              <td class="cell-note">{{ row.reason }}{% if row.alias %} (“{{ row.alias }}”){% endif %}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p class="watch-note">No headline in that time names it. Check the names above, then add
+        it if they are right: the scanner will judge every new headline the same way.</p>
+    {% endif %}
+  </div>
+</div>

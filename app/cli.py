@@ -67,6 +67,7 @@ from app.models import (
     RuleDisagreementRow,
     Run,
     Story,
+    WatchAlert,
     WatchRun,
     utcnow,
 )
@@ -128,7 +129,8 @@ from app.schedule import (
     settings_for_run,
     start_of_news_day,
 )
-from app.watch.alerts import digest_section
+from app.watch import companies as company_list
+from app.watch.alerts import digest_section, rebuild_away
 from app.watch.power import keep_awake, on_ac_power, recent_resumes
 from app.watch.prices import YahooSnapshots, price_symbols
 from app.watch.report import wake_section, watch_report
@@ -250,7 +252,7 @@ def feed_checks(results: Sequence[FeedResult], now: datetime) -> list[FeedCheck]
     return [
         FeedCheck(
             kind="pipeline",
-            feed_name=result.feed.name,
+            feed_name=result.feed.label,
             feed_url=result.feed.url,
             checked_at=now,
             status="ok" if result.ok else "error",
@@ -1612,6 +1614,75 @@ def watch(
             run_forever(watcher, time.sleep)
         except KeyboardInterrupt:
             typer.echo("stopped")
+
+
+@app.command("companies")
+def companies_command(
+    query: Annotated[str, typer.Argument(help="A name or NSE symbol to look up.")] = "",
+    refresh: Annotated[
+        bool, typer.Option("--refresh", help="Download NSE's company list again first.")
+    ] = False,
+) -> None:
+    """NSE's list of listed companies, which the page's "Add a stock" searches. The watchlist
+    scanner downloads it weekly; --refresh does it now."""
+    settings, _ = _bootstrap()
+    path = settings.resolve_path(company_list.LIST_FILE)
+    if refresh or company_list.list_age(path, utcnow()) is None:
+        typer.echo(
+            company_list.refresh(path, settings.http.user_agent, settings.http.timeout_seconds)
+        )
+    found = company_list.load_companies(path)
+    if not query:
+        typer.echo(f"{len(found)} companies in {path}")
+        return
+    for company in company_list.search(found, query):
+        typer.echo(f"{company.symbol:<14} {company.name}  ({company.isin}, {company.series})")
+
+
+@app.command("watch-test-message")
+def watch_test_message(
+    run_id: Annotated[
+        int | None,
+        typer.Option(
+            "--run", help="The catch-up (watch_runs id); the latest summary sent by default."
+        ),
+    ] = None,
+    send: Annotated[
+        bool, typer.Option("--send", help="Send it to Telegram. Without it, print it.")
+    ] = False,
+) -> None:
+    """Rebuild a past "while you were away" summary in the current format, from what is
+    stored, headed TEST. Nothing is recorded and the real summary is left as it was."""
+    settings, session_factory = _bootstrap()
+    watchlist = load_watchlist_file()
+    now = utcnow()
+    typical = build_watcher(settings, session_factory, None, None).typical_moves(now)
+    with session_factory() as session:
+        if run_id is None:
+            latest = session.scalar(
+                select(WatchAlert)
+                .where(WatchAlert.kind == "away")
+                .order_by(WatchAlert.created_at.desc())
+            )
+            run_id = int(latest.key.split(":")[1]) if latest is not None else None
+        run = session.get(WatchRun, run_id) if run_id is not None else None
+        if run is None:
+            typer.echo("no catch-up summary to rebuild yet")
+            raise typer.Exit(1)
+        messages = rebuild_away(session, watchlist, typical, settings, run, now)
+        session.rollback()
+    if not messages:
+        typer.echo(f"catch-up {run_id} has nothing to report")
+        raise typer.Exit(1)
+    if not send:
+        typer.echo("\n\n".join(messages))
+        return
+    token, chat_id = get_secret("TELEGRAM_BOT_TOKEN"), get_secret("TELEGRAM_CHAT_ID")
+    if not token or not chat_id:
+        typer.echo("no Telegram credentials (TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID)")
+        raise typer.Exit(1)
+    asyncio.run(send_messages(messages, token, chat_id, settings.http))
+    typer.echo(f"sent catch-up {run_id}'s summary as {len(messages)} TEST message(s)")
 
 
 @app.command("watch-report")

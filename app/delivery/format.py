@@ -153,9 +153,18 @@ def _fit_block(text: str, limit: int) -> str:
         return text
     lines = text.split("\n")
     more = "<i>… more on the watchlist page</i>"
-    while lines and telegram_length("\n".join([*lines, more])) > limit:
+
+    def closed(kept: list[str]) -> list[str]:
+        # The watchlist's LOW items sit in an expandable quote spanning several lines: a cut
+        # inside it must still close it, or Telegram rejects the whole message.
+        joined = "\n".join(kept)
+        if joined.count("<blockquote") > joined.count("</blockquote>"):
+            return [*kept[:-1], kept[-1] + "</blockquote>"] if kept else kept
+        return kept
+
+    while lines and telegram_length("\n".join([*closed(lines), more])) > limit:
         lines.pop()
-    return "\n".join([*lines, more])
+    return "\n".join([*closed(lines), more])
 
 
 def format_digest(

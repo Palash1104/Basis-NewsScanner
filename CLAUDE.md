@@ -410,6 +410,60 @@ order (the user dropped the stops between steps 3 and 7 on 2026-10-08):
   - The ET company feed (2143429.cms) carries two weeks of curated items and updates
     slowly: its newest entry was 11.6 h old at noon.
 
+- **Changes of 2026-10-16** (user: "a few modifications"):
+  - **Feed health is no longer sent to Telegram.** It is a section of `/runs`
+    (`app/feed_health.py`), with problem feeds first and the rest folded. The warnings were
+    also wrong: they measured a feed's age against the clock, so after a night off every feed
+    looked a day stale (22 notifications on 2026-10-15). A feed's age is now measured at its
+    own last fetch, so time the laptop was off never counts. Unsent `feed` rows are never
+    retried. Feeds that share an outlet `name` have a `section` (feeds.yaml,
+    watch_feeds.yaml), so "CNBC" is "CNBC · top news" or "CNBC · economy"; `name` stays the
+    outlet, which is what counts sources once.
+  - **Grouping, two new rules** (`app/watch/events.py`), both with real fixtures
+    (`tests/fixtures/watch_grouping_bdl.json`):
+    - Different money amounts are different stories. Story 137 grouped "BDL's Rs 56.8 crore
+      tender" with "Rs 810 crore contract with BDL"; the call summarized both and the summary
+      item showed one headline with the other's reason, rated high positive. An amount needs a
+      currency mark and a unit ("1.4 crore shares" and "Rs 114" are not deal sizes).
+    - Order news for one stock within `watch.order_attach_hours` (6) of an order story joins
+      the one reported closest to it, before similarity is asked. NSE's order filings say only
+      "Bagging/Receiving of orders/contracts", so on 2026-10-15 the filing and the Rs 1,307
+      crore torpedo reports came out as two items. Amounts still have to agree.
+    - Stored stories were not regrouped: the fix applies to new items.
+  - **Telegram format** (`app/watch/render.py`): every watchlist item, in alerts, follow-ups,
+    the "while you were away" summary and the digest's section, is "▲ Company: linked
+    headline" (the company's name dropped from the headline when it opens with it), one
+    status line ("NSE filing 14:56 · first media report 14:59", "07:26 · media only, not
+    filed"), and the call's reason only when it says something the headline doesn't.
+    Summaries group items HIGH / MEDIUM / PRICE MOVES / LOW, LOW folded in an expandable
+    quote. A price move reads "▲ Zen Technologies +2.7% today, +3.8% vs defence index".
+    `format._fit_block` closes the quote if it cuts inside it. `newsdesk watch-test-message`
+    rebuilds a stored summary in the current format, headed TEST.
+  - **Watchlist editor** on `/watchlist` (user asked for add/remove with type-ahead):
+    - Type-ahead from NSE's `EQUITY_L.csv` (`app/watch/companies.py`, verified 2026-10-16),
+      cached at `data/nse_equity_list.csv`. The scanner downloads it when missing or a week
+      old; `newsdesk companies --refresh` does it now. BSE-only companies are not offered:
+      BSE's API refused this machine in October.
+    - A draft takes the name without "Limited" as a strong alias and the NSE symbol as strong
+      (6+ characters) or weak. The preview (`app/watch/preview.py`) checks Yahoo and runs the
+      matcher over 30 days of stored headlines plus one Google News search, then the user
+      edits the names and adds it. Adding is disabled until Yahoo answers.
+    - Writes go through `app/watch/watchlist_edit.py`: text edits that keep every comment,
+      validated before writing (exactly one entry added or gone, every other entry
+      unchanged), refused if the file changed since the page loaded, previous file kept in
+      `data/backups/` (last 20), written via a temporary file and a rename.
+    - The web app's only POST routes. Each checks Host (localhost names only, which stops DNS
+      rebinding), Origin or Referer, Sec-Fetch-Site, and a per-server-start token in the
+      page. Forms are read by hand (`read_form`): FastAPI's `Form()` needs python-multipart,
+      which is not a dependency.
+    - The preview is the web app's one request to the outside (Yahoo, Google News), made only
+      when the user asks for it.
+    - The scanner re-reads `config/watchlist.yaml` when its mtime changes
+      (`Watcher.refresh_watchlist`); a file that doesn't load keeps the old list. The web app
+      does the same per request (`current_watchlist`).
+  - HAL's `noise` gained Halliburton's words (Halliburton, SLB, Baker Hughes, BKR, NYSE...):
+    HAL is also Halliburton's NYSE ticker, and 16 of 277 stored HAL matches were Halliburton.
+
 ## Commands
 
 ```
@@ -435,6 +489,8 @@ uv run newsdesk watch-report [--days 3]       # scanner volumes, first sources, 
 uv run newsdesk wake-log [--days 1]           # did the market-hours wake fire, network, scan; per weekday morning
 uv run newsdesk skipped-extractions [--days 30]   # stories with no event extraction (by category), for the monthly check
 uv run newsdesk lead-times [--days 30]         # which source had each watchlist story first, lead over the filing
+uv run newsdesk watch-test-message [--run ID] [--send]   # a stored "while you were away" in the current format, headed TEST
+uv run newsdesk companies [QUERY] [--refresh]   # NSE's company list behind the page's "Add a stock"
 uv run python scripts/watch_gate.py [--limit 20] [ids]   # the watchlist call, live, on stored stories -> data/watch_gate.md
 powershell -ExecutionPolicy Bypass -File scripts/install_tasks.ps1 [-Remove]   # Windows tasks
 ```

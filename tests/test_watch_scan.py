@@ -533,10 +533,13 @@ def test_the_report_counts_volumes_multi_stock_stories_and_first_sources(
 
     assert "| HAL | 2 / 1 / 0 |" in text  # HAL order + Russia kept, the picks list a mention
     assert "| Bharat Dynamics | 1 / 1 / 0 |" in text
-    assert "1 of 4 stories with a keep are a keep for two or more stocks" in text
+    # NSE's HAL order filing joins the HAL order story (app/watch/events.py: order news for
+    # one stock within hours of itself is one story), so there are three stories, not four.
+    assert "1 of 3 stories with a keep are a keep for two or more stocks" in text
     assert "Russia partners" in text
-    # The HAL order and both filings came in the backlog pass; Russia is the one counted.
-    assert "1 story counted, 3 left out as backlog" in text
+    # The HAL order (with its filing) and the Prime Focus filings came in the backlog pass;
+    # Russia is the one counted.
+    assert "1 story counted, 2 left out as backlog" in text
     assert "| Markets Daily | 1 |" in text
     assert "| HAL.NS | 1 | 0 |" in text  # one poll, no errors
     assert "None: the task never ran" in text

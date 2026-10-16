@@ -1481,3 +1481,162 @@ a:hover {
     font-size: 32px;
   }
 }
+
+/* ---------------------------------------------------------------- watchlist editor */
+/* "Add a stock" (user, 2026-10-16): the design's own button, form fields and tags, below the
+   screen head. Hidden until the button's #watch-add is the target, or after an edit. */
+
+.watch-head-side {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 12px;
+}
+
+.watch-add {
+  display: none;
+  padding: 8px 0 28px;
+  border-bottom: 2px solid var(--color-divider);
+}
+
+.watch-add:target,
+.watch-add.open {
+  display: block;
+}
+
+.watch-add-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.watch-search {
+  max-width: 460px;
+  margin-top: 8px;
+}
+
+.watch-flash {
+  margin: 8px 0;
+  font-size: 14px;
+}
+
+.watch-flash-error {
+  color: var(--color-link);
+}
+
+.watch-suggest-list {
+  max-width: 460px;
+  margin: 4px 0 12px;
+  padding: 0;
+  list-style: none;
+}
+
+.watch-suggest {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 10px;
+  font: inherit;
+  font-size: 14px;
+  text-align: left;
+  color: var(--color-text);
+  background: transparent;
+  border: none;
+  border-top: 1px solid color-mix(in srgb, var(--color-text) 20%, transparent);
+  cursor: pointer;
+}
+
+.watch-suggest:hover,
+.watch-suggest:focus-visible {
+  background: var(--color-surface);
+}
+
+.watch-preview {
+  max-width: 920px;
+  padding-top: 16px;
+  border-top: 1px solid color-mix(in srgb, var(--color-text) 20%, transparent);
+}
+
+.watch-preview-name {
+  margin: 4px 0 6px;
+  font-size: 24px;
+}
+
+.watch-ticker {
+  margin: 0 0 12px;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.watch-add-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px 24px;
+  max-width: 920px;
+}
+
+.watch-add-actions {
+  display: flex;
+  grid-column: 1 / -1;
+  gap: 12px;
+}
+
+.watch-counts {
+  margin: 20px 0 4px;
+  font-size: 15px;
+}
+
+.watch-verdict-table td {
+  vertical-align: top;
+}
+
+.watch-card-remove {
+  margin-top: 8px;
+}
+
+.watch-card-remove .btn {
+  padding-inline: 0;
+  font-size: 12px;
+  color: var(--color-muted);
+}
+
+.watch-card-remove .btn:hover {
+  color: var(--color-link);
+  background: transparent;
+  text-decoration: underline;
+}
+
+.feeds-all {
+  margin-top: 12px;
+}
+
+.feeds-all summary {
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--color-muted);
+}
+
+.feeds-all[open] summary {
+  margin-bottom: 8px;
+}
+
+.htmx-indicator {
+  display: none;
+}
+
+.htmx-request.htmx-indicator,
+.htmx-request .htmx-indicator {
+  display: block;
+}
+
+@media (max-width: 700px) {
+  .watch-add-form {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .watch-head-side {
+    align-items: flex-start;
+  }
+}

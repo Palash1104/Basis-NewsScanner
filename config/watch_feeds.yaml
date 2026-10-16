@@ -19,15 +19,15 @@
 feeds:
   # Carried "Prime Focus shares tank 8% after Income Tax raids": live by 10:23, though its
   # pubDate says 13:46 - this outlet stamps the last update, not first publication.
-  - {name: CNBC-TV18, url: "https://www.cnbctv18.com/commonfeeds/v1/cne/rss/market.xml", region: IN, weight: 2}
-  - {name: CNBC-TV18, url: "https://www.cnbctv18.com/commonfeeds/v1/cne/rss/latest.xml", region: IN, weight: 2}
-  - {name: The Economic Times, url: "https://economictimes.indiatimes.com/markets/stocks/rssfeeds/2146842.cms", region: IN, weight: 2}
-  - {name: The Economic Times, url: "https://economictimes.indiatimes.com/news/company/rssfeeds/2143429.cms", region: IN, weight: 2}
-  - {name: Business Standard, url: "https://www.business-standard.com/rss/markets/news-10601.rss", region: IN, weight: 2}
-  - {name: Business Standard, url: "https://www.business-standard.com/rss/companies/news-10101.rss", region: IN, weight: 2}
-  - {name: Business Standard, url: "https://www.business-standard.com/rss/latest.rss", region: IN, weight: 2}
-  - {name: Livemint, url: "https://www.livemint.com/rss/markets", region: IN, weight: 2}
-  - {name: Livemint, url: "https://www.livemint.com/rss/companies", region: IN, weight: 2}
-  - {name: BusinessLine, url: "https://www.thehindubusinessline.com/markets/stock-markets/feeder/default.rss", region: IN, weight: 2}
-  - {name: BusinessLine, url: "https://www.thehindubusinessline.com/companies/feeder/default.rss", region: IN, weight: 2}
+  - {name: CNBC-TV18, url: "https://www.cnbctv18.com/commonfeeds/v1/cne/rss/market.xml", section: market, region: IN, weight: 2}
+  - {name: CNBC-TV18, url: "https://www.cnbctv18.com/commonfeeds/v1/cne/rss/latest.xml", section: latest, region: IN, weight: 2}
+  - {name: The Economic Times, url: "https://economictimes.indiatimes.com/markets/stocks/rssfeeds/2146842.cms", section: stocks, region: IN, weight: 2}
+  - {name: The Economic Times, url: "https://economictimes.indiatimes.com/news/company/rssfeeds/2143429.cms", section: company, region: IN, weight: 2}
+  - {name: Business Standard, url: "https://www.business-standard.com/rss/markets/news-10601.rss", section: markets, region: IN, weight: 2}
+  - {name: Business Standard, url: "https://www.business-standard.com/rss/companies/news-10101.rss", section: companies, region: IN, weight: 2}
+  - {name: Business Standard, url: "https://www.business-standard.com/rss/latest.rss", section: latest, region: IN, weight: 2}
+  - {name: Livemint, url: "https://www.livemint.com/rss/markets", section: markets, region: IN, weight: 2}
+  - {name: Livemint, url: "https://www.livemint.com/rss/companies", section: companies, region: IN, weight: 2}
+  - {name: BusinessLine, url: "https://www.thehindubusinessline.com/markets/stock-markets/feeder/default.rss", section: stock markets, region: IN, weight: 2}
+  - {name: BusinessLine, url: "https://www.thehindubusinessline.com/companies/feeder/default.rss", section: companies, region: IN, weight: 2}
   - {name: Business Today, url: "https://www.businesstoday.in/rssfeeds?id=home", region: IN, weight: 2}
