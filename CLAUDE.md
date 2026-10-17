@@ -450,7 +450,12 @@ order (the user dropped the stops between steps 3 and 7 on 2026-10-08):
       and BSE's `ListofScripData` API (the PEAD tool's URL and headers: BSE answers 403
       without Origin and Accept). BSE's is fetched with `requests` (`_bse_get`), the PEAD
       tool's own call: on 2026-10-17 BSE answered httpx 403 with the same URL and headers,
-      the morning after the PEAD tool's `requests` call had downloaded it. Kept in `data/companies.json`; each list is downloaded
+      the morning after the PEAD tool's `requests` call had downloaded it. At 16:50 BSE refused the
+      PEAD tool's exact call from this laptop as well, so a refused call is asked again as a
+      browser (curl_cffi impersonating Chrome, after opening bseindia.com for its cookies).
+      While BSE refuses and there's no good copy, BSE's codes come from the PEAD tool's
+      `scrip_master.json` (beside `watch.bse_announcements_db`): codes and ISINs, no names,
+      so NSE companies get their BSE code and BSE-only ones wait (`via: "pead"`). Kept in `data/companies.json`; each list is downloaded
       again when 20 hours old, a failed one keeps its last good copy and rests 2 hours.
       `data/nse_equity_list.csv` (the NSE-only file of 2026-10-16) is read until the first
       download. Both `newsdesk serve` (a background thread, `ListRefresher`; never inside a
@@ -479,8 +484,32 @@ order (the user dropped the stops between steps 3 and 7 on 2026-10-08):
       answers, and refused unless the form's ticker is one the preview checked.
     - Layout (2026-10-17): `/watchlist` is full width (`screen-wide`); the cards are a
       subgrid, so kicker, name, price, chart and driver line up across a row whatever the
-      name's length, and Remove sits in the card head. "Add a stock" is a panel with the
-      search on the left and the picked company on the right, stacked below 900 px.
+      name's length, and Remove sits in the card head.
+    - "Add a stock" is a dialog over the page, from the user's design (2026-10-17): search
+      and the newest listings (each row a "+", a tick when already listed) on the left; an
+      empty "Preview a company" state on the right, replaced while a preview is asked for by
+      a designed wait (the company's name, the three things being asked, a sketch of what
+      comes; `#watch-preview-wait`, shown through CSS `:has`); the company lists' state in
+      the footer. `static/js/watch-add.js` opens and closes it (the button, Close, Escape, a
+      click outside), locks the page's scroll and switches the preview's tabs; without JS
+      the button's `#watch-add` still opens it through `:target`. Added and removed are said
+      on the page with the dialog shut; only a failed add (`add_error`) reopens it.
+    - The preview (user's design, 2026-10-17): codes, name, "Listed … | sector | market
+      cap", the price and its 1-day move under "Add to watchlist" (disabled with the reason
+      when already listed, no Yahoo prices, no strong name or an unreadable file). Tabs:
+      Overview (3 months of closes, last close, 52-week range of closes, market cap,
+      sector, industry, what the company does, the first six headlines with a source
+      filter and a link to each), Headlines (all, with counts), Key Info (the names to
+      edit, Preview again, the codes and the Yahoo check) and Price History (the year's
+      closes, 1W/1M/3M/1Y moves). One form holds every field. The figures come from two
+      more Yahoo requests once the ticker check passes (`preview.yahoo_profile`: a year
+      of daily bars, then `Ticker.info`); either failing leaves its fields "—". The
+      design's "Small Cap" label is left out: SEBI's size classes go by rank, which BASIS
+      can't know, so the market cap itself is shown. Tests never reach Yahoo: a stand-in
+      `ticker_fetch` without a `profile_fetch` means no profile.
+    - Cards and the rail show a shut market's last session ("last session") when nothing
+      is inside the 24 hours: on a Saturday evening every NSE card read "no price yet".
+    - The feed's rail shows Biggest movers above the watchlist (user, 2026-10-17).
     - Writes go through `app/watch/watchlist_edit.py`: text edits that keep every comment,
       validated before writing (exactly one entry added or gone, every other entry
       unchanged), refused if the file changed since the page loaded, previous file kept in

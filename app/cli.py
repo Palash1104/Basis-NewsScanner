@@ -1638,6 +1638,7 @@ def companies_command(
                 now=now,
                 lock_dir=_lock_dir(settings),
                 sources=sources,
+                pead_master=company_list.pead_master_path(settings.watch.bse_announcements_db),
             )
         )
     found, lists = company_list.load(path)

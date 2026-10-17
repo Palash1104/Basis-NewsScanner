@@ -166,6 +166,79 @@ watchlist:
       strong: ["Garden Reach Shipbuilders & Engineers"]
       weak: ["GRSE"]
 
+  - type: stock
+    symbol: "SJLOGISTIC.NS"
+    name: "S J Logistics (India)"
+    nse_symbol: "SJLOGISTIC"
+    nse_name: "S J Logistics (India) Limited"
+    isin: "INE0F3301020"
+    # Added from the BASIS page on 2026-10-17; aliases checked in its preview.
+    aliases:
+      strong: ["S J Logistics (India)", "SJLOGISTIC"]
+
+  - type: stock
+    symbol: "ENSER.NS"
+    name: "Enser Communications"
+    nse_symbol: "ENSER"
+    nse_name: "Enser Communications Limited"
+    isin: "INE0R9I01021"
+    # Added from the BASIS page on 2026-10-17; aliases checked in its preview.
+    aliases:
+      strong: ["Enser Communications"]
+      weak: ["ENSER"]
+
+  - type: stock
+    symbol: "LORDSCHLO.NS"
+    name: "Lords Chloro Alkali"
+    nse_symbol: "LORDSCHLO"
+    nse_name: "Lords Chloro Alkali Limited"
+    isin: "INE846D01012"
+    # Added from the BASIS page on 2026-10-17; aliases checked in its preview.
+    aliases:
+      strong: ["Lords Chloro Alkali", "LORDSCHLO"]
+
+  - type: stock
+    symbol: "TOLINS.NS"
+    name: "Tolins Tyres"
+    nse_symbol: "TOLINS"
+    nse_name: "Tolins Tyres Limited"
+    isin: "INE0RWQ01014"
+    # Added from the BASIS page on 2026-10-17; aliases checked in its preview.
+    aliases:
+      strong: ["Tolins Tyres", "TOLINS"]
+
+  - type: stock
+    symbol: "PVRINOX.NS"
+    name: "Pvr Inox"
+    nse_symbol: "PVRINOX"
+    nse_name: "PVR INOX Limited"
+    isin: "INE191H01014"
+    # Added from the BASIS page on 2026-10-17; aliases checked in its preview.
+    aliases:
+      strong: ["Pvr Inox", "PVRINOX"]
+
+  - type: stock
+    symbol: "KRISHNADEF.NS"
+    name: "Krishna Defence And Allied Industries"
+    nse_symbol: "KRISHNADEF"
+    nse_name: "Krishna Defence And Allied Industries Limited"
+    isin: "INE0J5601015"
+    # Added from the BASIS page on 2026-10-17; aliases checked in its preview.
+    aliases:
+      strong: ["Krishna Defence And Allied Industries", "KRISHNADEF"]
+
+  - type: stock
+    symbol: "BEL.NS"
+    name: "Bharat Electronics"
+    nse_symbol: "BEL"
+    nse_name: "Bharat Electronics Limited"
+    isin: "INE263A01024"
+    bse_code: "500049"
+    # Added from the BASIS page on 2026-10-17; aliases checked in its preview.
+    aliases:
+      strong: ["Bharat Electronics"]
+      weak: ["BEL"]
+
   # Commodities: the four the web rail's watchlist held by default, moved here so there is
   # one watchlist. A browser's own edited list was never sent to the server, so anything
   # added in the old "Edit watchlist" dialog has to be added here by hand.

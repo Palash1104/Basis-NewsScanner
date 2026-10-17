@@ -1,67 +1,155 @@
-{# One company before it is added (GET /watchlist/preview): its draft entry, editable, the
-   Yahoo check, and what its names keep and drop among real headlines. #}
-{% set blocked = on_list or problem or not version or not result.ticker or not result.ticker.ok %}
-<div class="watch-preview">
-  <div class="kicker">
-    {%- if company.nse_symbol %}NSE · {{ company.nse_symbol }}{% if company.sme %} (SME){% endif %}{% endif -%}
-    {%- if company.nse_symbol and company.bse_code %} · {% endif -%}
-    {%- if company.bse_code %}BSE · {{ company.bse_code }}{% endif -%}
-    {%- if company.isin %} · {{ company.isin }}{% endif -%}
+{# One company before it is added (GET /watchlist/preview), laid out from the user's design
+   (2026-10-17): codes, name and what it is, its price and "Add to watchlist" at the top; then
+   tabs - Overview (a quarter's prices, key figures, what the company does, the headlines BASIS
+   would track), Headlines (every one, with its verdict), Key Info (the names BASIS will match,
+   editable, and the codes) and Price History (the year). One form holds every field, so the
+   names edited under Key Info are what "Add to watchlist" writes. The tabs are switched by
+   static/js/watch-add.js. #}
+{% set exchange = "BSE" if draft.symbol.endswith(".BO") else "NSE" %}
+{% set added = company.listed or company.first_seen %}
+{% macro headline_rows(rows) %}
+  <ul class="watch-hl-list">
+    {% for row in rows %}
+      <li class="watch-hl" data-where="{{ row.where }}">
+        <span class="watch-verdict watch-verdict-{{ row.verdict }}">{{ row.verdict }}</span>
+        <span class="watch-hl-text">
+          <span class="watch-hl-title">{{ row.title }}</span>
+          <span class="watch-hl-meta">{{ row.source }} · {{ row.published | ist }} · {{ row.where }}
+            <span class="watch-hl-why">· {{ row.reason }}{% if row.alias %} (“{{ row.alias }}”){% endif %}</span></span>
+        </span>
+        {% if row.url %}
+          <a class="watch-hl-open" href="{{ row.url }}" target="_blank" rel="noopener noreferrer"
+            aria-label="Open the article" title="Open the article">
+            <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M9 2.5h4.5V7M13.5 2.5 7.5 8.5M12 9.5v4H2.5V4h4" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" /></svg>
+          </a>
+        {% endif %}
+      </li>
+    {% endfor %}
+  </ul>
+{% endmacro %}
+{% macro filter() %}
+  <label class="watch-hl-filter">
+    <span class="visually-hidden">Show headlines from</span>
+    <select class="input" data-headline-filter>
+      <option value="">All sources</option>
+      <option value="Google News">Google News</option>
+      <option value="stored">Stored by BASIS</option>
+    </select>
+  </label>
+{% endmacro %}
+
+<form id="watch-add-form" method="post" action="/watchlist/add" class="watch-pv">
+  <input type="hidden" name="token" value="{{ token }}" />
+  <input type="hidden" name="version" value="{{ version or '' }}" />
+  <input type="hidden" name="company" value="{{ company.key }}" />
+  <input type="hidden" name="yahoo" value="{{ result.ticker.symbol if result.ticker and result.ticker.symbol else '' }}" />
+
+  <div class="watch-pv-head">
+    <div class="watch-pv-title">
+      <p class="kicker watch-pv-codes">
+        {%- if company.nse_symbol %}<span>NSE · {{ company.nse_symbol }}{% if company.sme %} (SME){% endif %}</span>{% endif -%}
+        {%- if company.bse_code %}<span>BSE · {{ company.bse_code }}</span>{% endif -%}
+        {%- if company.isin %}<span>{{ company.isin }}</span>{% endif -%}
+      </p>
+      <h3 class="watch-pv-name">{{ company.name }}</h3>
+      <p class="watch-pv-sub">
+        {%- if added %}<span>{{ "Listed" if company.listed else "On BSE's list since" }} {{ added.strftime("%d %b %Y") }}</span>{% endif -%}
+        {%- if facts.sector %}<span>{{ facts.sector }}</span>{% endif -%}
+        {%- if facts.market_cap %}<span>{{ facts.market_cap }}</span>{% endif -%}
+      </p>
+    </div>
+    <div class="watch-pv-side">
+      {% include "_watch_submit.html" %}
+      {% if facts.price %}
+        <p class="watch-pv-price">
+          <b>{{ facts.price }}</b>
+          {% if facts.change %}<span class="watch-pv-move {{ 'up' if facts.up else 'down' }}">{{ facts.change }}</span>
+            <span class="tag tag-neutral" title="since the session before">1d</span>{% endif %}
+        </p>
+      {% endif %}
+    </div>
   </div>
-  <h3 class="watch-preview-name">{{ company.name }}</h3>
-  {% if company.is_new(today) %}
-    <p class="watch-preview-new">{{ "Listed" if company.listed else "New on BSE's list" }}
-      {{ company.added_on.strftime("%d %b %Y") }}.</p>
-  {% endif %}
-  {% if on_list %}<p class="watch-flash">Already on the watchlist as {{ on_list.name or on_list.symbol }} ({{ on_list.symbol }}).</p>{% endif %}
-  {% if problem %}<p class="watch-flash watch-flash-error">{{ problem }}.</p>{% endif %}
-  {% if result.ticker %}
-    <p class="watch-ticker {{ 'up' if result.ticker.ok else 'down' }}">
-      {{ "✓" if result.ticker.ok else "✕" }} {{ result.ticker.detail }}</p>
+  {% if blocked %}
+    <p class="watch-pv-blocked" role="status">{{ blocked }}.{% if result.ticker and not result.ticker.ok %}
+      {{ result.ticker.detail }}.{% endif %}</p>
   {% endif %}
 
-  <form method="post" action="/watchlist/add" class="watch-add-form">
-    <input type="hidden" name="token" value="{{ token }}" />
-    <input type="hidden" name="version" value="{{ version or '' }}" />
-    <input type="hidden" name="company" value="{{ company.key }}" />
-    <input type="hidden" name="yahoo" value="{{ result.ticker.symbol if result.ticker and result.ticker.symbol else '' }}" />
-    <div class="field">
-      <label for="watch-name">Name on the page and in alerts</label>
-      <input id="watch-name" class="input" name="name" value="{{ draft.name }}" />
-    </div>
-    <div class="field">
-      <label for="watch-strong">Strong names: enough on their own in a headline (comma-separated)</label>
-      <input id="watch-strong" class="input" name="strong" value="{{ draft.aliases.strong | join(', ') }}" />
-    </div>
-    <div class="field">
-      <label for="watch-weak">Weak names: short or shared, so they count only with a market word
-        nearby (shares, order, crore, results…)</label>
-      <input id="watch-weak" class="input" name="weak" value="{{ draft.aliases.weak | join(', ') }}" />
-    </div>
-    {% if groups %}
-      <div class="field">
-        <label for="watch-group">Peer group (its price moves are judged against the group)</label>
-        <select id="watch-group" class="input" name="group">
-          <option value="">None</option>
-          {% for key, group in groups.items() %}
-            <option value="{{ key }}" {% if draft.group == key %}selected{% endif %}>{{ group.name }}</option>
-          {% endfor %}
-        </select>
+  <div class="watch-tabs" role="tablist" aria-label="About {{ company.short_name }}">
+    <button type="button" role="tab" class="watch-tab" data-tab="overview" aria-selected="true">Overview</button>
+    <button type="button" role="tab" class="watch-tab" data-tab="headlines" aria-selected="false">Headlines ({{ result.rows | length }})</button>
+    <button type="button" role="tab" class="watch-tab" data-tab="info" aria-selected="false">Key Info</button>
+    <button type="button" role="tab" class="watch-tab" data-tab="history" aria-selected="false">Price History</button>
+  </div>
+
+  {# ---------------------------------------------------------------- overview #}
+  <section class="watch-panel" data-panel="overview" role="tabpanel">
+    <div class="watch-pv-overview">
+      <div class="watch-pv-chart">
+        {% if facts.overview | length > 1 %}
+          <svg viewBox="0 0 220 132" preserveAspectRatio="none" role="img"
+            aria-label="Daily closes over the last three months">
+            <polygon class="watch-chart-area" points="4,128 {{ chart_points(facts.overview, 220, 132, 6) }} 216,128" />
+            <polyline class="watch-chart-line" points="{{ chart_points(facts.overview, 220, 132, 6) }}" />
+          </svg>
+          <span class="watch-pv-chart-note">3 months</span>
+        {% else %}
+          <p class="watch-note">No price history from Yahoo.</p>
+        {% endif %}
       </div>
-    {% endif %}
-    <div class="watch-add-actions">
-      <button class="btn btn-secondary" type="button" hx-get="/watchlist/preview"
-        hx-include="closest form" hx-target="#watch-preview" hx-indicator="#watch-preview-wait">
-        Preview again</button>
-      <button class="btn btn-primary" type="submit" {% if blocked %}disabled{% endif %}>Add to watchlist</button>
+      <dl class="watch-pv-stats">
+        <dt>Last close ({{ exchange }})</dt>
+        <dd>{% if facts.price %}{{ facts.price }}{% if facts.change %} <span class="{{ 'up' if facts.up else 'down' }}">{{ facts.change }}</span>{% endif %}{% else %}—{% endif %}</dd>
+        <dt>52-week range</dt>
+        <dd>{% if facts.low %}{{ facts.low }} – {{ facts.high }}{% else %}—{% endif %}</dd>
+        <dt>Market cap</dt>
+        <dd>{{ facts.market_cap or "—" }}</dd>
+        <dt>Sector</dt>
+        <dd>{{ facts.sector or "—" }}</dd>
+        <dt>Industry</dt>
+        <dd>{{ facts.industry or "—" }}</dd>
+      </dl>
+      <div class="watch-pv-about">
+        <svg class="watch-pv-about-icon" viewBox="0 0 24 30" width="22" height="28" aria-hidden="true">
+          <path d="M2 2h14l6 6v20H2z M16 2v6h6 M6 14h12 M6 18h12 M6 22h9" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" />
+        </svg>
+        <div>
+          <p class="watch-pv-about-title">
+            {%- if company.is_new(today) and company.listed %}Newly listed on {{ company.listed.strftime("%d %b %Y") }}
+            {%- elif company.is_new(today) %}New on BSE's list since {{ added.strftime("%d %b %Y") }}
+            {%- else %}About the company{% endif -%}
+          </p>
+          <p class="watch-pv-about-text">{{ facts.summary or "Yahoo has no description of the company." }}</p>
+        </div>
+      </div>
     </div>
-  </form>
 
-  <div class="watch-verdicts">
-    <p class="watch-counts">
-      <b>{{ result.counts.keep }}</b> keep · <b>{{ result.counts.mention }}</b> mention ·
-      <b>{{ result.counts.drop }}</b> drop
-    </p>
+    <div class="watch-hl-head">
+      <h4 class="watch-hl-heading">Headlines BASIS will track
+        <span class="watch-info" tabindex="0"
+          title="Keep: about the company - analysed and alerted. Mention: one name in a list - shown, never alerted. Drop: not about it. From BASIS's stored headlines of the last 30 days and one Google News search of the same 30 days.">i</span>
+      </h4>
+      {{ filter() }}
+    </div>
+    {% if result.shown %}
+      {{ headline_rows(result.shown[:6]) }}
+      {% if result.shown | length > 6 %}
+        <button type="button" class="watch-link-button" data-tab-go="headlines">See all {{ result.rows | length }} headlines</button>
+      {% endif %}
+    {% else %}
+      <p class="watch-note">No headline in the last 30 days names it. Check its names under Key
+        Info, then add it if they are right: the scanner will judge every new headline the same way.</p>
+    {% endif %}
+  </section>
+
+  {# ---------------------------------------------------------------- headlines #}
+  <section class="watch-panel" data-panel="headlines" role="tabpanel" hidden>
+    <div class="watch-hl-head">
+      <p class="watch-counts">
+        <b>{{ result.counts.keep }}</b> keep · <b>{{ result.counts.mention }}</b> mention ·
+        <b>{{ result.counts.drop }}</b> drop
+      </p>
+      {{ filter() }}
+    </div>
     <p class="watch-note">
       Among BASIS's stored headlines from the last 30 days{% if result.ticker %}, and
       {{ result.searched }} from a Google News search of the same 30 days{% endif %}.
@@ -69,22 +157,89 @@
       list: shown, never alerted. <b>Drop</b> is not about it.
       {% if result.search_error %}The Google News search failed ({{ result.search_error }}).{% endif %}
     </p>
-    {% if result.shown %}
-      <table class="table watch-verdict-table">
-        <thead><tr><th>Verdict</th><th>Headline</th><th>Why</th></tr></thead>
-        <tbody>
-          {% for row in result.shown %}
-            <tr>
-              <td><span class="tag {{ 'tag-accent' if row.verdict == 'keep' else 'tag-neutral' }}">{{ row.verdict }}</span></td>
-              <td>{{ row.title }}<div class="cell-note">{{ row.source }} · {{ row.published | ist }} · {{ row.where }}</div></td>
-              <td class="cell-note">{{ row.reason }}{% if row.alias %} (“{{ row.alias }}”){% endif %}</td>
-            </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    {% else %}
-      <p class="watch-note">No headline in that time names it. Check the names above, then add
-        it if they are right: the scanner will judge every new headline the same way.</p>
+    {% if result.shown %}{{ headline_rows(result.shown) }}{% else %}
+      <p class="watch-note">No headline in that time names it.</p>
     {% endif %}
-  </div>
-</div>
+  </section>
+
+  {# ---------------------------------------------------------------- key info #}
+  <section class="watch-panel" data-panel="info" role="tabpanel" hidden>
+    <h4 class="watch-pv-section">How BASIS will track it</h4>
+    {% if problem %}<p class="watch-flash watch-flash-error">{{ problem }}.</p>{% endif %}
+    <div class="watch-add-form">
+      <div class="field">
+        <label for="watch-name">Name on the page and in alerts</label>
+        <input id="watch-name" class="input" name="name" value="{{ draft.name }}" />
+      </div>
+      <div class="field">
+        <label for="watch-strong">Strong names: enough on their own in a headline (comma-separated)</label>
+        <input id="watch-strong" class="input" name="strong" value="{{ draft.aliases.strong | join(', ') }}" />
+      </div>
+      <div class="field">
+        <label for="watch-weak">Weak names: short or shared, so they count only with a market word
+          nearby (shares, order, crore, results…)</label>
+        <input id="watch-weak" class="input" name="weak" value="{{ draft.aliases.weak | join(', ') }}" />
+      </div>
+      {% if groups %}
+        <div class="field">
+          <label for="watch-group">Peer group (its price moves are judged against the group)</label>
+          <select id="watch-group" class="input" name="group">
+            <option value="">None</option>
+            {% for key, group in groups.items() %}
+              <option value="{{ key }}" {% if draft.group == key %}selected{% endif %}>{{ group.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+      {% endif %}
+      <div class="watch-add-actions">
+        <button class="btn btn-secondary" type="button" hx-get="/watchlist/preview"
+          hx-include="closest form" hx-target="#watch-preview" hx-indicator="#watch-preview-wait">
+          Preview again</button>
+        <span class="watch-note">Checks the edited names against the headlines again.</span>
+      </div>
+    </div>
+
+    <h4 class="watch-pv-section">Codes</h4>
+    <dl class="watch-pv-stats watch-pv-codes-list">
+      <dt>Yahoo ticker</dt>
+      <dd>{% if result.ticker %}<span class="{{ 'up' if result.ticker.ok else 'down' }}">{{ "✓" if result.ticker.ok else "✕" }}</span> {{ result.ticker.detail }}{% else %}not checked{% endif %}</dd>
+      <dt>NSE symbol</dt>
+      <dd>{% if company.nse_symbol %}{{ company.nse_symbol }}{% if company.nse_series %} · series {{ company.nse_series }}{% endif %}{% else %}not on NSE{% endif %}</dd>
+      <dt>BSE code</dt>
+      <dd>{% if company.bse_code %}{{ company.bse_code }}{% if company.bse_id %} · {{ company.bse_id }}{% endif %}{% else %}not on BSE{% endif %}</dd>
+      <dt>ISIN</dt>
+      <dd>{{ company.isin or "—" }}{% if company.bse_isin %} (BSE: {{ company.bse_isin }}){% endif %}</dd>
+      <dt>Listed</dt>
+      <dd>{% if company.listed %}{{ company.listed.strftime("%d %b %Y") }}{% elif company.first_seen %}first on BSE's list {{ company.first_seen.strftime("%d %b %Y") }}{% else %}—{% endif %}</dd>
+    </dl>
+    {% if profile_error %}<p class="watch-note">Yahoo's profile was incomplete ({{ profile_error }}).</p>{% endif %}
+  </section>
+
+  {# ---------------------------------------------------------------- price history #}
+  <section class="watch-panel" data-panel="history" role="tabpanel" hidden>
+    {% if facts.history | length > 1 %}
+      <div class="watch-pv-history">
+        <svg viewBox="0 0 600 200" preserveAspectRatio="none" role="img"
+          aria-label="Daily closes over the last year">
+          <polygon class="watch-chart-area" points="4,196 {{ chart_points(facts.history, 600, 200, 8) }} 596,196" />
+          <polyline class="watch-chart-line" points="{{ chart_points(facts.history, 600, 200, 8) }}" />
+        </svg>
+        <p class="watch-pv-history-axis">
+          <span>{{ facts.first_day.strftime("%d %b %Y") }}</span>
+          <span>High {{ facts.high }} · Low {{ facts.low }}</span>
+          <span>{{ facts.last_day.strftime("%d %b %Y") }}</span>
+        </p>
+      </div>
+      {% if facts.returns %}
+        <dl class="watch-pv-returns">
+          {% for label, move, up in facts.returns %}
+            <div><dt>{{ label }}</dt><dd class="{{ 'up' if up else 'down' }}">{{ move }}</dd></div>
+          {% endfor %}
+        </dl>
+      {% endif %}
+      <p class="watch-note">Daily closes from Yahoo ({{ draft.symbol }}), the last year.</p>
+    {% else %}
+      <p class="watch-note">Yahoo has no price history for it.</p>
+    {% endif %}
+  </section>
+</form>

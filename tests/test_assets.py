@@ -249,3 +249,40 @@ def test_approved_yahoo_name_is_not_flagged() -> None:
     assert [f.split(":")[0] for f in flagged.flags] == ["name"]
     approved = check_ticker(tnx, FakeYahoo({"^TNX": [sample]}), NOW, sleep=_no_sleep)
     assert approved.flags == []
+
+
+def test_a_stock_without_hourly_bars_still_gets_its_daily_prices(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """SJLOGISTIC.NS (NSE SME, 2026-10-17): yfinance loads `tradingPeriods` lazily from an
+    hourly request, and raises KeyError when there are no hourly bars. Its own metadata
+    wrapper is used here, with that hourly request coming back empty."""
+    import pandas as pd
+    import yfinance as yf
+    from yfinance.scrapers.history import HistoryMetadata
+
+    from app.assets import yahoo_fetch
+
+    class History:
+        _history_metadata = {"currency": "INR", "exchangeName": "NSI"}
+
+        def _load_history_metadata_trading_periods(self) -> None:
+            return None  # what yfinance does when the hourly request fails
+
+    class Ticker:
+        def __init__(self, symbol: str) -> None:
+            self.symbol = symbol
+
+        def history(self, **_: object) -> pd.DataFrame:
+            index = pd.DatetimeIndex([datetime(2026, 10, 16, tzinfo=ZoneInfo("Asia/Kolkata"))])
+            return pd.DataFrame({"Close": [61.5]}, index=index)
+
+        def get_history_metadata(self) -> HistoryMetadata:
+            return HistoryMetadata(History())
+
+    with pytest.raises(KeyError):
+        dict(Ticker("SJLOGISTIC.NS").get_history_metadata())  # what used to happen
+    monkeypatch.setattr(yf, "Ticker", Ticker)
+    sample = yahoo_fetch(10)("SJLOGISTIC.NS")
+    assert [close for _, close in sample.closes] == [61.5]
+    assert sample.metadata == {"currency": "INR", "exchangeName": "NSI"}

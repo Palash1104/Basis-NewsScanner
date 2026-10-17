@@ -15,7 +15,9 @@ underscores, a trailing comma, newest listing first, two-digit years). BSE's lis
 the PEAD tool has downloaded every day since 2026-09-24 from this laptop with BSE_HEADERS
 (BSE answers 403 without Origin and Accept), 5,110 active codes on 2026-10-16; the row shape
 is the PEAD tool's fixture of a real row. Every request is the user's own data: none of these
-can be reached from anywhere else BASIS has been tested.
+can be reached from anywhere else BASIS has been tested. BSE's list is fetched with `requests`,
+the PEAD tool's own call: on 2026-10-17 BSE answered httpx 403 for the same URL and headers,
+the morning after the PEAD tool's `requests` call had downloaded it (`_bse_get`).
 
 The lists are merged by ISIN: a company on both exchanges is one entry and is added as its NSE
 ticker (.NS); a company only on BSE is added as a BSE ticker (.BO), in whichever form Yahoo
@@ -51,7 +53,7 @@ import os
 import re
 import threading
 import time
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
@@ -309,6 +311,8 @@ def merge(
                 if "bse_code" not in entry:
                     entry["bse_isin"] = isin
         if entry is None:
+            if not row.get("name"):
+                continue  # a code without a name (the PEAD tool's copy) can't be offered alone
             entry = by_key[key] = {"key": key, "isin": isin if valid else None, "name": row["name"]}
         if "bse_code" not in entry:
             entry["bse_code"] = row["code"]
@@ -326,6 +330,7 @@ class SourceState:
     fetched_at: datetime | None = None  # the last good download
     tried_at: datetime | None = None  # the last attempt, good or not
     error: str | None = None  # why the last attempt failed
+    via: str | None = None  # "pead": rows from the PEAD tool's copy, not BSE (see _from_pead)
 
 
 @dataclass
@@ -354,6 +359,7 @@ def read_file(path: Path) -> ListFile:
             fetched_at=_when(held.get("fetched_at")),
             tried_at=_when(held.get("tried_at")),
             error=held.get("error"),
+            via=held.get("via"),
         )
     state.first_seen = {k: v for k, v in (data.get("first_seen") or {}).items() if v}
     return state
@@ -376,6 +382,7 @@ def _write(path: Path, state: ListFile) -> None:
                 "fetched_at": held.fetched_at.isoformat() if held.fetched_at else None,
                 "tried_at": held.tried_at.isoformat() if held.tried_at else None,
                 "error": held.error,
+                "via": held.via,
                 "count": len(held.rows),
                 "rows": held.rows,
             }
@@ -404,10 +411,21 @@ class ListStatus:
     count: int
     fetched_at: datetime | None
     error: str | None
+    via: str | None = None
 
     @property
     def label(self) -> str:
         return LABELS[self.source]
+
+    @property
+    def short_error(self) -> str | None:
+        """The error in a few words for the page: "HTTP 403", else the message without its
+        exception class."""
+        if not self.error:
+            return None
+        if found := re.search(r"HTTP \d{3}", self.error):
+            return found.group(0)
+        return self.error.split(": ", 1)[-1][:80]
 
 
 _cache: dict[Path, tuple[tuple[int, int], list[Company], list[ListStatus]]] = {}
@@ -428,7 +446,8 @@ def load(path: Path) -> tuple[list[Company], list[ListStatus]]:
         state = read_file(path)
         companies = merge({s: v.rows for s, v in state.sources.items()}, state.first_seen)
         status = [
-            ListStatus(s, len(v.rows), v.fetched_at, v.error) for s, v in state.sources.items()
+            ListStatus(s, len(v.rows), v.fetched_at, v.error, v.via)
+            for s, v in state.sources.items()
         ]
         held = (stamp, companies, status)
         _cache[path] = held
@@ -452,18 +471,96 @@ def due(path: Path, now: datetime) -> list[str]:
     return found
 
 
-def _fetch(client: httpx.Client, source: str, user_agent: str) -> list[dict[str, str]]:
-    if source == "bse":
-        response = client.get(BSE_LIST_URL, headers=BSE_HEADERS)
+# (status, body) for a URL and headers, with a timeout: how BSE's list is fetched.
+BseGet = Callable[[str, Mapping[str, str], float], tuple[int, bytes]]
+
+
+def _refused(status: int, body: bytes) -> bool:
+    return status in (401, 403) or b"access denied" in body[:2000].lower()
+
+
+def _bse_get(url: str, headers: Mapping[str, str], timeout: float) -> tuple[int, bytes]:
+    """BSE's list, asked two ways until one is let through:
+
+    1. The PEAD tool's call, verbatim: `requests.get` with its headers. It downloaded the list
+       on 2026-10-16 at 18:18; BSE refused httpx the same request the next morning.
+    2. As a browser: curl_cffi impersonating Chrome (its TLS and HTTP/2 fingerprint as well as
+       its headers), opening bseindia.com first for the cookies a browser would carry. BSE
+       refused the PEAD tool's call too at 16:50 on 2026-10-17, from this laptop.
+
+    Both libraries come with yfinance. Returns the first answer that isn't a refusal, or the
+    last refusal."""
+    import requests
+
+    response = requests.get(url, headers=dict(headers), timeout=timeout)
+    status, body = response.status_code, response.content
+    if not _refused(status, body):
+        return status, body
+    log.info("BSE refused the PEAD tool's call (HTTP %s); asking as a browser", status)
+    try:
+        from curl_cffi import requests as browser
+
+        with browser.Session(impersonate="chrome") as session:
+            session.get("https://www.bseindia.com/", timeout=timeout)
+            answer = session.get(
+                url,
+                headers={key: headers[key] for key in ("Referer", "Origin", "Accept")},
+                timeout=timeout,
+            )
+            if not _refused(answer.status_code, answer.content):
+                log.info("BSE answered the browser-like request")
+            return answer.status_code, answer.content
+    except Exception as exc:
+        log.warning("the browser-like request to BSE failed: %s", exc)
+        return status, body
+
+
+def _fetch(
+    client: httpx.Client, source: str, user_agent: str, bse_get: BseGet | None, timeout: float
+) -> list[dict[str, str]]:
+    if source == "bse" and bse_get is not None:
+        status, body = bse_get(BSE_LIST_URL, BSE_HEADERS, timeout)
     else:
-        url = NSE_MAIN_URL if source == "nse" else NSE_SME_URL
-        response = client.get(url, headers={"User-Agent": user_agent, "Accept": "text/csv,*/*"})
-    if response.status_code in (401, 403) or "access denied" in response.text[:2000].lower():
-        raise RuntimeError(f"refused (HTTP {response.status_code})")
-    response.raise_for_status()
+        if source == "bse":
+            url, headers = BSE_LIST_URL, BSE_HEADERS
+        else:
+            url = NSE_MAIN_URL if source == "nse" else NSE_SME_URL
+            headers = {"User-Agent": user_agent, "Accept": "text/csv,*/*"}
+        response = client.get(url, headers=headers)
+        status, body = response.status_code, response.content
+    if _refused(status, body):
+        raise RuntimeError(f"refused (HTTP {status})")
+    if status >= 400:
+        raise RuntimeError(f"HTTP {status}")
     if source == "bse":
-        return parse_bse_json(response.json())
-    return parse_nse_csv(response.content)
+        return parse_bse_json(json.loads(body))
+    return parse_nse_csv(body)
+
+
+PEAD_MASTER = "scrip_master.json"
+
+
+def pead_master_path(announcements_db: str | None) -> Path | None:
+    """The PEAD tool's scrip master, beside the announcements file BASIS already reads."""
+    return Path(announcements_db).parent / PEAD_MASTER if announcements_db else None
+
+
+def _from_pead(path: Path) -> list[dict[str, str]]:
+    """BSE's codes and ISINs from the PEAD tool's scrip master ({"bse": {code: ISIN}}), which
+    it builds from the same BSE list whenever it runs. It has no names, so it only gives the
+    companies also on NSE their BSE code - which is what matching BSE filings and the .BO
+    tickers need; a company only on BSE can't be offered until BSE's own list arrives.
+    Empty when the file isn't there or isn't that."""
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        codes = data.get("bse") or {}
+    except (OSError, ValueError, AttributeError):
+        return []
+    return [
+        {"code": str(code), "id": "", "name": "", "isin": str(isin)}
+        for code, isin in codes.items()
+        if str(code).isdigit() and ISIN.fullmatch(str(isin))
+    ]
 
 
 def refresh(
@@ -474,20 +571,27 @@ def refresh(
     now: datetime | None = None,
     lock_dir: Path | None = None,
     sources: Iterable[str] | None = None,
+    bse_get: BseGet | None = None,
+    pead_master: Path | None = None,
 ) -> str:
     """Download the lists that are due (`sources`, or all three) and write the merged file.
-    Returns a line saying what happened; never raises."""
+    Returns a line saying what happened; never raises. BSE's list comes through `bse_get`,
+    `requests` by default; with a `transport` (tests) and no `bse_get`, everything goes
+    through httpx. When BSE refuses and there is no good copy of its list, its codes come
+    from the PEAD tool's own copy (`pead_master`, see `_from_pead`) until BSE answers."""
     now = now or datetime.now(UTC)
     wanted = [s for s in (sources if sources is not None else SOURCES) if s in SOURCES]
     if not wanted:
         return "company lists: nothing due"
+    if bse_get is None and transport is None:
+        bse_get = _bse_get
     try:
         if lock_dir is None:
-            return _refresh(path, user_agent, timeout, transport, now, wanted)
+            return _refresh(path, user_agent, timeout, transport, now, wanted, bse_get, pead_master)
         with job_lock(lock_dir, "companies") as acquired:
             if not acquired:
                 return "company lists: another process is refreshing them"
-            return _refresh(path, user_agent, timeout, transport, now, wanted)
+            return _refresh(path, user_agent, timeout, transport, now, wanted, bse_get, pead_master)
     except Exception as exc:  # a refresh must never take its caller down
         log.warning("company lists not refreshed: %s", exc)
         return f"company lists not refreshed: {type(exc).__name__}: {exc}"
@@ -500,6 +604,8 @@ def _refresh(
     transport: httpx.BaseTransport | None,
     now: datetime,
     wanted: Sequence[str],
+    bse_get: BseGet | None,
+    pead_master: Path | None = None,
 ) -> str:
     state = read_file(path)
     if not path.exists() and not state.sources["nse"].rows:
@@ -511,10 +617,15 @@ def _refresh(
             held = state.sources[source]
             held.tried_at = now
             try:
-                rows = _fetch(client, source, user_agent)
+                rows = _fetch(client, source, user_agent, bse_get, timeout)
             except Exception as exc:
                 held.error = f"{type(exc).__name__}: {exc}"
                 parts.append(f"{LABELS[source]} failed ({held.error})")
+                # No good copy of BSE's own: its codes from the PEAD tool's copy meanwhile.
+                usable = source == "bse" and (not held.rows or held.via) and pead_master
+                if usable and (fallback := _from_pead(pead_master)):  # type: ignore[arg-type]
+                    held.rows, held.via = fallback, "pead"
+                    parts.append(f"BSE codes from the PEAD tool's copy {len(fallback)}")
                 continue
             # A code that wasn't in the last good copy is new today - unless there was no
             # last copy, when nothing can be told apart from the companies always there.
@@ -524,7 +635,7 @@ def _refresh(
                     key = _row_key(source, row)
                     if key not in before:
                         state.first_seen.setdefault(key, today)
-            held.rows, held.fetched_at, held.error = rows, now, None
+            held.rows, held.fetched_at, held.error, held.via = rows, now, None, None
             parts.append(f"{LABELS[source]} {len(rows)}")
     _write(path, state)
     return "company lists: " + ", ".join(parts)
@@ -670,8 +781,16 @@ class ListRefresher:
     called by the watchlist pages; it starts a refresh only when one is due (or `force`, the
     page's "Try again"), and never two at once."""
 
-    def __init__(self, path: Path, lock_dir: Path, user_agent: str, enabled: bool) -> None:
+    def __init__(
+        self,
+        path: Path,
+        lock_dir: Path,
+        user_agent: str,
+        enabled: bool,
+        pead_master: Path | None = None,
+    ) -> None:
         self.path = path
+        self.pead_master = pead_master
         self.lock_dir = lock_dir
         self.user_agent = user_agent
         self.enabled = enabled
@@ -702,6 +821,10 @@ class ListRefresher:
 
     def _run(self, sources: list[str]) -> None:
         self.last_line = refresh(
-            self.path, self.user_agent, lock_dir=self.lock_dir, sources=sources
+            self.path,
+            self.user_agent,
+            lock_dir=self.lock_dir,
+            sources=sources,
+            pead_master=self.pead_master,
         )
         log.info(self.last_line)

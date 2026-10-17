@@ -37,7 +37,7 @@ from app.db import (
 )
 from app.models import Article
 from app.pipeline.fetch import SourceResolver
-from app.watch import companies, watchlist_edit
+from app.watch import companies, preview, watchlist_edit
 from app.watch.analyse import company_label
 from app.watch.scan import Watcher
 from app.web.main import create_app
@@ -49,6 +49,9 @@ BSE_ROWS = json.loads((FIXTURES / "bse_scrips.json").read_text(encoding="utf-8")
 NOW = datetime(2026, 10, 16, 13, 0, tzinfo=UTC)  # 18:30 IST, 16 Oct
 TODAY = date(2026, 10, 16)
 ORIGIN = "http://testserver"
+# "Add to watchlist" at the top of a preview: live, or not.
+SUBMIT_LIVE = 'class="btn btn-primary watch-pv-add" type="submit">'
+SUBMIT_OFF = 'class="btn btn-primary watch-pv-add" type="submit" disabled>'
 
 GOOGLE_NEWS = b"""<rss version="2.0"><channel><title>Search</title>
 <item><title>Tata Motors shares jump 4% after JLR sales beat - Mint</title>
@@ -89,8 +92,16 @@ def exchanges(
     return httpx.MockTransport(answer)
 
 
-def download(path: Path, now: datetime = NOW, **answers: object) -> str:
-    return companies.refresh(path, "test", transport=exchanges(**answers), now=now)  # type: ignore[arg-type]
+def download(
+    path: Path, now: datetime = NOW, pead_master: Path | None = None, **answers: object
+) -> str:
+    return companies.refresh(
+        path,
+        "test",
+        transport=exchanges(**answers),  # type: ignore[arg-type]
+        now=now,
+        pead_master=pead_master,
+    )
 
 
 @pytest.fixture
@@ -273,6 +284,105 @@ def test_each_list_keeps_its_last_good_copy(tmp_path: Path) -> None:
     assert by_source["bse"].count == 8 and "refused" in (by_source["bse"].error or "")
     assert by_source["bse"].fetched_at == NOW  # the last good download
     assert by_source["nse_sme"].error is None and by_source["nse_sme"].label == "NSE SME"
+
+
+def test_bse_s_list_is_fetched_the_way_the_pead_tool_fetches_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """BSE answered httpx 403 on 2026-10-17 where the PEAD tool's `requests` call had worked
+    the evening before: the list is fetched with `requests`, with the PEAD tool's headers."""
+    import requests
+
+    asked: list[tuple[str, dict[str, str], float]] = []
+
+    class Answer:
+        status_code = 200
+        content = json.dumps(BSE_ROWS).encode()
+
+    def get(url: str, headers: dict[str, str], timeout: float) -> Answer:
+        asked.append((url, headers, timeout))
+        return Answer()
+
+    monkeypatch.setattr(requests, "get", get)
+    path = tmp_path / "companies.json"
+    assert companies.refresh(path, "test", sources=["bse"]) == "company lists: BSE 8"
+    assert asked == [(companies.BSE_LIST_URL, companies.BSE_HEADERS, companies.TIMEOUT)]
+    refused = companies.refresh(
+        path, "test", sources=["bse"], bse_get=lambda url, headers, timeout: (403, b"")
+    )
+    assert refused == "company lists: BSE failed (RuntimeError: refused (HTTP 403))"
+
+
+def test_when_bse_refuses_the_pead_tool_s_call_it_is_asked_as_a_browser(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """2026-10-17 16:50: BSE refused the PEAD tool's own call from this laptop too."""
+    import requests
+    from curl_cffi import requests as browser
+
+    class Refused:
+        status_code = 403
+        content = b"<html><h1>Access Denied</h1></html>"
+
+    class Answer:
+        status_code = 200
+        content = json.dumps(BSE_ROWS).encode()
+
+    asked: list[str] = []
+
+    class Session:
+        def __init__(self, impersonate: str) -> None:
+            asked.append(f"impersonate {impersonate}")
+
+        def __enter__(self) -> "Session":
+            return self
+
+        def __exit__(self, *_: object) -> None:
+            return None
+
+        def get(self, url: str, headers: dict[str, str] | None = None, **_: object) -> Answer:
+            asked.append(url)
+            if url == companies.BSE_LIST_URL:
+                assert headers is not None and "User-Agent" not in headers  # Chrome's own
+            return Answer()
+
+    monkeypatch.setattr(requests, "get", lambda *a, **k: Refused())
+    monkeypatch.setattr(browser, "Session", Session)
+    path = tmp_path / "companies.json"
+    assert companies.refresh(path, "test", sources=["bse"]) == "company lists: BSE 8"
+    assert asked == ["impersonate chrome", "https://www.bseindia.com/", companies.BSE_LIST_URL]
+
+
+PEAD_MASTER = {
+    "bse": {"541154": "INE066F01020", "541143": "INE171Z01026", "500002": "INE117A01022"},
+    "nse": {"HAL": "INE066F01020"},
+    "updated": "2026-10-16",
+}
+
+
+def test_while_bse_refuses_its_codes_come_from_the_pead_tool_s_copy(tmp_path: Path) -> None:
+    """The PEAD tool's scrip master has BSE's codes and ISINs but no names: NSE companies get
+    their BSE code; a company only on BSE (ABB here) waits for BSE's own list."""
+    master = tmp_path / "scrip_master.json"
+    master.write_text(json.dumps(PEAD_MASTER), encoding="utf-8")
+    path = tmp_path / "companies.json"
+    line = download(path, refuse=("bse",), pead_master=master)
+    assert "BSE failed (RuntimeError: refused (HTTP 403))" in line
+    assert "BSE codes from the PEAD tool's copy 3" in line
+    listed = companies.load_companies(path)
+    assert company(listed, "HAL").bse_code == "541154" and company(listed, "BDL").bse_code
+    assert companies.find(listed, "500002") is None  # no name, so not offered
+    status = {s.source: s for s in companies.load(path)[1]}["bse"]
+    assert status.via == "pead" and status.fetched_at is None  # still due: BSE is asked again
+    assert companies.due(path, NOW + timedelta(hours=2)) == ["bse"]
+    # BSE answers: its own list replaces the copy, and nothing is dated new for the change.
+    download(path, NOW + timedelta(hours=2), pead_master=master)
+    status = {s.source: s for s in companies.load(path)[1]}["bse"]
+    assert status.via is None and status.count == 8 and status.error is None
+    assert company(companies.load_companies(path), "500002").name == "ABB India Limited"
+    assert "BSE:541154" not in companies.read_file(path).first_seen
+    assert companies.pead_master_path("C:/x/announcements.db") == Path("C:/x/scrip_master.json")
+    assert companies.pead_master_path(None) is None
 
 
 def test_the_lists_are_downloaded_once_a_day_and_rest_after_a_failure(tmp_path: Path) -> None:
@@ -528,6 +638,16 @@ def test_the_page_has_an_add_button_a_search_box_and_a_remove_on_every_card(
     assert body.count('action="/watchlist/remove"') == 12  # 8 stocks and 4 commodities
     assert 'id="watch-search"' in body and 'hx-get="/watchlist/companies"' in body
     assert 'class="screen screen-wide"' in body  # the full window, not a column
+    # "Add a stock" is a closed dialog: the search, the empty preview, the wait a preview
+    # shows while it is asked for, and the footer's lists state. "Add to watchlist" comes
+    # with a preview, so there is none yet.
+    assert '<section id="watch-add" class="watch-add"' in body and 'role="dialog"' in body
+    assert "Preview a company" in body and "data-watch-close" in body
+    assert 'id="watch-preview-wait" class="watch-wait htmx-indicator"' in body
+    assert "Searching Google News over the last 30 days" in body
+    assert "NSE 11 · NSE SME 2 · BSE 8" in body
+    assert "watch-pv-add" not in body
+    assert "js/watch-add.js" in body
 
 
 def test_the_search_box_is_there_before_the_lists_are(
@@ -557,6 +677,7 @@ def test_a_failed_download_says_why_and_offers_to_try_again(
     assert "The company lists couldn't be downloaded." in body
     assert "<li>BSE: RuntimeError: refused (HTTP 403)</li>" in body
     assert "retry=1" in body and "Try again</button>" in body
+    assert "BSE download failed: HTTP 403" in body  # the footer, in a few words
     client.get("/watchlist/companies", params={"retry": "1"})
     assert lists.forced
 
@@ -574,6 +695,8 @@ def test_suggestions_come_as_you_type(page: TestClient) -> None:
         in page.get("/watchlist/companies", params={"q": "zzzz"}).text
     )
     footer = page.get("/watchlist/companies", params={"q": "zzzz"}).text
+    # The dialog footer's lists state comes along with every answer.
+    assert 'id="watch-lists" class="watch-lists" hx-swap-oob="true"' in footer
     assert "NSE 11 · NSE SME 2 · BSE 8" in footer and "new listings appear within a day" in footer
 
 
@@ -596,7 +719,11 @@ def test_with_nothing_typed_the_newest_listings_are_offered(
 def test_the_preview_checks_yahoo_and_shows_keeps_and_drops(page: TestClient) -> None:
     first = page.get("/watchlist/preview", params={"company": "INE155A01022"}).text
     assert 'value="Tata Motors Passenger Vehicles"' in first and 'value="TMPV"' in first
-    assert "NSE · TMPV · BSE · 500570 · INE155A01022" in first
+    assert "<span>NSE · TMPV</span><span>BSE · 500570</span><span>INE155A01022</span>" in first
+    # The tabs, Overview first; the names to edit are under Key Info, in the same form.
+    assert 'data-tab="overview" aria-selected="true"' in first
+    assert 'data-panel="info" role="tabpanel" hidden' in first and 'id="watch-name"' in first
+    assert "No price history from Yahoo." in first  # a stand-in Yahoo: no profile asked
     # "Preview again" with the names edited.
     body = page.get(
         "/watchlist/preview",
@@ -609,13 +736,13 @@ def test_the_preview_checks_yahoo_and_shows_keeps_and_drops(page: TestClient) ->
     assert "Tata Motors to cut EV prices" in body  # a stored headline
     assert "top auto picks" in body  # a mention
     assert "<b>2</b> keep" in body and "<b>1</b> mention" in body
-    assert "Add to watchlist</button>" in body and "disabled>Add" not in body
+    assert SUBMIT_LIVE in body and 'id="watch-add-form"' in body
     assert page.get("/watchlist/preview", params={"company": "NOTREAL"}).status_code == 404
 
 
 def test_a_bse_only_company_is_previewed_under_the_ticker_yahoo_knows(page: TestClient) -> None:
     body = page.get("/watchlist/preview", params={"company": "INE117A01022"}).text
-    assert "BSE · 500002 · INE117A01022" in body and "NSE ·" not in body
+    assert "<span>BSE · 500002</span><span>INE117A01022</span>" in body and "NSE ·" not in body
     assert "500002.BO on Yahoo: last close 712.50 INR (BSE)" in body  # ABB.BO had nothing
     assert 'name="yahoo" value="500002.BO"' in body
 
@@ -627,7 +754,60 @@ def test_a_company_yahoo_does_not_know_cannot_be_added(page: TestClient) -> None
     page.app.state.ticker_fetch = nothing  # type: ignore[attr-defined]
     body = page.get("/watchlist/preview", params={"company": "INE117A01022"}).text
     assert "Yahoo has no recent prices under ABB.BO or 500002.BO" in body
-    assert 'name="yahoo" value=""' in body and "disabled>Add to watchlist" in body
+    assert 'name="yahoo" value=""' in body and SUBMIT_OFF in body
+    assert "Yahoo has no prices for it, so its moves couldn&#39;t be followed." in body
+
+
+def test_an_already_listed_company_says_so_where_add_would_be(page: TestClient) -> None:
+    body = page.get("/watchlist/preview", params={"company": "INE171Z01026"}).text
+    assert SUBMIT_OFF in body
+    assert "Already on the watchlist as Bharat Dynamics." in body
+
+
+def test_the_preview_shows_the_company_as_yahoo_describes_it(
+    tmp_path: Path, settings: Settings, watchlist_copy: Path, lists_path: Path
+) -> None:
+    """The user's design: price and day's move by the Add button; three months' line, key
+    figures and what the company does on Overview; the year and its returns on Price History.
+    Every figure here is made up for the test."""
+    start = datetime(2025, 10, 17, 10, 0, tzinfo=UTC)
+    closes = [(start + timedelta(days=d), 100.0 + d / 10) for d in range(366)]
+    closes[-1] = (closes[-1][0], closes[-2][1] * 1.001)
+
+    def profile(symbol: str) -> preview.Profile:
+        assert symbol == "TMPV.NS"
+        return preview.Profile(
+            closes=closes,
+            currency="INR",
+            sector="Consumer Cyclical",
+            industry="Auto Manufacturers",
+            market_cap=2.5e12,
+            summary="Makes passenger cars and electric vehicles. " * 12,
+        )
+
+    client = make_page(tmp_path, settings, watchlist_copy, lists_path)
+    client.app.state.profile_fetch = profile  # type: ignore[attr-defined]
+    body = client.get("/watchlist/preview", params={"company": "INE155A01022"}).text
+    assert "<b>₹136.54</b>" in body and ">+0.1%</span>" in body  # last close, the day's move
+    assert "<span>Consumer Cyclical</span><span>₹2,50,000 Cr</span>" not in body
+    assert "<span>Consumer Cyclical</span><span>₹250,000 Cr</span>" in body
+    assert "<dd>₹100.00 – ₹136.54</dd>" in body  # the year's range
+    assert "<dd>Auto Manufacturers</dd>" in body
+    assert "About the company" in body and "Makes passenger cars" in body and "…" in body
+    assert 'aria-label="Daily closes over the last three months"' in body
+    assert 'aria-label="Daily closes over the last year"' in body
+    assert "<dt>1 year</dt>" in body and "<dt>1 week</dt>" in body
+    assert SUBMIT_LIVE in body
+
+
+def test_a_profile_s_figures_are_written_out() -> None:
+    assert preview.money(712.5, "INR") == "₹712.50" and preview.money(12345.6, "INR") == "₹12,346"
+    assert preview.market_cap(3.482e10, "INR") == "₹3,482 Cr"
+    assert preview.market_cap(None, "INR") is None
+    assert preview.chart_points([1.0, 2.0], 100, 50, 0) == "0.0,50.0 100.0,0.0"
+    assert preview.chart_points([1.0], 100, 50) == ""
+    empty = preview.facts(preview.Profile())
+    assert empty.price is None and empty.returns == [] and empty.overview == []
 
 
 def test_adding_from_the_page_writes_the_file(page: TestClient, watchlist_copy: Path) -> None:
@@ -642,7 +822,7 @@ def test_adding_from_the_page_writes_the_file(page: TestClient, watchlist_copy: 
     response = page.post(
         "/watchlist/add", data=form, headers={"Origin": ORIGIN}, follow_redirects=False
     )
-    assert response.status_code == 303 and "added=Tata%20Motors" in response.headers["location"]
+    assert response.headers["location"] == "/watchlist?added=Tata%20Motors"  # dialog closed
     entry = load_watchlist_file(watchlist_copy).stocks[-1]
     assert entry.symbol == "TMPV.NS" and entry.aliases.weak == ["TML"]
     assert entry.isin == "INE155A01022" and entry.bse_code == "500570"
@@ -694,8 +874,11 @@ def test_an_add_the_preview_did_not_vouch_for_is_refused(
         headers={"Origin": ORIGIN},
         follow_redirects=False,
     )
-    assert response.status_code == 303 and "error=" in response.headers["location"]
-    assert error in page.get(response.headers["location"]).text
+    location = response.headers["location"]
+    assert response.status_code == 303 and location.startswith("/watchlist?add_error=")
+    assert location.endswith("#watch-add")
+    body = page.get(location).text
+    assert error in body and 'class="watch-add open"' in body  # the dialog reopens, says why
     assert watchlist_copy.read_text(encoding="utf-8") == before
 
 
@@ -706,6 +889,10 @@ def test_removing_from_the_page_writes_the_file(page: TestClient, watchlist_copy
     )
     assert response.status_code == 303
     assert "GC=F" not in [e.symbol for e in load_watchlist_file(watchlist_copy).watchlist]
+    assert response.headers["location"] == "/watchlist?removed=Gold"  # said on the page
+    body = page.get(response.headers["location"]).text
+    assert '<p class="watch-page-flash" role="status">Removed Gold.</p>' in body
+    assert '<section id="watch-add" class="watch-add"' in body  # the dialog stays shut
 
 
 @pytest.mark.parametrize(
@@ -782,3 +969,42 @@ def test_the_scanner_picks_up_an_edit_without_a_restart(
     watchlist_copy.write_text("watchlist: [oops", encoding="utf-8")
     assert watcher.refresh_watchlist() is False
     assert "TMPV.NS" in [s.symbol for s in watcher.stocks]
+
+
+def test_a_shut_market_shows_its_last_session_not_no_price(settings: Settings) -> None:
+    """Saturday 17:00 IST, 2026-10-17: NSE's last bar was more than 24 hours old, and every
+    card read "no price yet". The last session's move is shown instead (Prime Focus's real
+    closes: 277.45 on Thursday, 290.30 on Friday)."""
+    from app.models import PriceBar
+    from app.web.watch_queries import watch_cards
+
+    engine = make_engine(":memory:")
+    init_db(engine)
+    with make_session_factory(engine)() as session:
+        for at, close in (
+            (datetime(2026, 10, 15, 8, 45, tzinfo=UTC), 278.5),
+            (datetime(2026, 10, 15, 9, 45, tzinfo=UTC), 277.45),
+            (datetime(2026, 10, 16, 3, 45, tzinfo=UTC), 285.6),
+            (datetime(2026, 10, 16, 9, 45, tzinfo=UTC), 290.3),
+        ):
+            session.add(
+                PriceBar(
+                    symbol="PFOCUS.NS",
+                    interval="60m",
+                    ts=at,
+                    open=close,
+                    high=close,
+                    low=close,
+                    close=close,
+                    volume=1,
+                )
+            )
+        session.commit()
+        watched = load_watchlist_file(CONFIG_DIR / "watchlist.yaml")
+        saturday = datetime(2026, 10, 17, 11, 30, tzinfo=UTC)
+        card = next(
+            c
+            for c in watch_cards(session, watched, {}, settings, saturday)
+            if c.symbol == "PFOCUS.NS"
+        )
+    assert (card.price, card.change, card.change_label) == ("₹290.30", "+4.6%", "last")

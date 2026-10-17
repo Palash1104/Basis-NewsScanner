@@ -69,6 +69,22 @@ class PriceSample:
 Fetch = Callable[[str], PriceSample]
 
 
+def _metadata(meta: Any) -> dict[str, Any]:
+    """Yahoo's metadata as a plain dict, without `tradingPeriods`. yfinance loads that one key
+    lazily, with an extra hourly request, and raises KeyError when the stock has no hourly
+    bars: "Yahoo could not be asked (KeyError: 'tradingPeriods')" for SJLOGISTIC.NS, an NSE
+    SME stock, in the watchlist preview (2026-10-17). Nothing here reads it."""
+    found: dict[str, Any] = {}
+    for key in list((meta or {}).keys()):
+        if key == "tradingPeriods":
+            continue
+        try:
+            found[key] = meta[key]
+        except KeyError:
+            continue
+    return found
+
+
 def yahoo_fetch(timeout: float) -> Fetch:
     """5 days of daily bars plus Yahoo's metadata for a symbol, via yfinance (one request)."""
     import yfinance as yf
@@ -91,7 +107,7 @@ def yahoo_fetch(timeout: float) -> Fetch:
             if "Close" in frame
             else []
         )
-        return PriceSample(closes, dict(ticker.get_history_metadata() or {}))
+        return PriceSample(closes, _metadata(ticker.get_history_metadata()))
 
     return fetch
 

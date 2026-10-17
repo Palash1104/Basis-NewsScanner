@@ -58,43 +58,11 @@
   {% include "_feed.html" %}
   </div>
 
-  {# The design's right rail: its watchlist card and, under it, the movers. The mockup's "in
+  {# The design's right rail: the movers, then the watchlist under them (user, 2026-10-17:
+     the watchlist grew to 18 entries and pushed the movers off the screen). The mockup's "in
      plain english" panel stays out - that was its own copy, about commodities in general. #}
   <aside class="rail">
     <p class="rail-stamp">Prices as of {{ prices_as_of }} &middot; not a live feed</p>
-
-    <h6 class="rail-head">Your watchlist</h6>
-    <p class="rail-note">last price &middot; move &middot; one-week line</p>
-    {% for row in rail_watch %}
-      <div class="watch">
-        <div class="watch-head">
-          {% if row.href %}
-            <a class="watch-name" href="{{ row.href }}" title="{{ row.name }}">{{ row.name }}</a>
-          {% else %}
-            <a class="watch-name" href="/watchlist" title="{{ row.name }}">{{ row.name }}</a>
-          {% endif %}
-          {% if row.change %}
-            <span class="watch-change {{ 'up' if row.up else 'down' }}"
-              title="{{ 'since the last close' if row.change_label == 'today' else 'over ' ~ mover_hours ~ 'h' }}">{{ row.change }}</span>
-          {% endif %}
-        </div>
-        <div class="watch-foot">
-          <span class="watch-price">{{ row.price or "no price yet" }}</span>
-          {% if row.series.points %}
-            <svg class="spark" viewBox="0 0 {{ rail_spark[0] }} {{ rail_spark[1] }}"
-              width="{{ rail_spark[0] }}" height="{{ rail_spark[1] }}" aria-hidden="true">
-              <polyline points="{{ rail_points(row.series) }}" fill="none" stroke-width="1.6"
-                stroke-linejoin="round" class="{{ 'up' if row.series.rose else 'down' }}" />
-            </svg>
-          {% endif %}
-        </div>
-      </div>
-    {% else %}
-      <p class="rail-empty">Nothing on the watchlist. Add entries to config/watchlist.yaml.</p>
-    {% endfor %}
-    <a class="btn btn-ghost watch-edit" href="/watchlist">Open the watchlist</a>
-
-    <hr class="hr rail-rule" />
 
     <h6 class="rail-head">Biggest movers &middot; {{ mover_hours }}h</h6>
     <p class="rail-note">{{ mover_hours }}h move &middot; one-week line</p>
@@ -118,6 +86,39 @@
         pipeline run.
       </p>
     {% endif %}
+
+    <hr class="hr rail-rule" />
+
+    <h6 class="rail-head">Your watchlist</h6>
+    <p class="rail-note">last price &middot; move &middot; one-week line</p>
+    {% for row in rail_watch %}
+      <div class="watch">
+        <div class="watch-head">
+          {% if row.href %}
+            <a class="watch-name" href="{{ row.href }}" title="{{ row.name }}">{{ row.name }}</a>
+          {% else %}
+            <a class="watch-name" href="/watchlist" title="{{ row.name }}">{{ row.name }}</a>
+          {% endif %}
+          {% if row.change %}
+            <span class="watch-change {{ 'up' if row.up else 'down' }}"
+              title="{{ {'today': 'since the last close', 'last': 'its last session, the market is shut'}.get(row.change_label, 'over ' ~ mover_hours ~ 'h') }}">{{ row.change }}</span>
+          {% endif %}
+        </div>
+        <div class="watch-foot">
+          <span class="watch-price">{{ row.price or "no price yet" }}</span>
+          {% if row.series.points %}
+            <svg class="spark" viewBox="0 0 {{ rail_spark[0] }} {{ rail_spark[1] }}"
+              width="{{ rail_spark[0] }}" height="{{ rail_spark[1] }}" aria-hidden="true">
+              <polyline points="{{ rail_points(row.series) }}" fill="none" stroke-width="1.6"
+                stroke-linejoin="round" class="{{ 'up' if row.series.rose else 'down' }}" />
+            </svg>
+          {% endif %}
+        </div>
+      </div>
+    {% else %}
+      <p class="rail-empty">Nothing on the watchlist. Add entries to config/watchlist.yaml.</p>
+    {% endfor %}
+    <a class="btn btn-ghost watch-edit" href="/watchlist">Open the watchlist</a>
   </aside>
 </div>
 

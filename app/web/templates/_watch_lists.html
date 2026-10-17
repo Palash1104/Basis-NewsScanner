@@ -1,0 +1,23 @@
+{# The company lists' state, in the dialog's footer. The page draws it; every search answer
+   sends it again (oob) so a download that finishes shows up without a reload. #}
+<div id="watch-lists" class="watch-lists"{% if oob %} hx-swap-oob="true"{% endif %}>
+  {% if lists %}
+    <p class="watch-lists-counts">
+      {%- for status in lists -%}
+        {{ status.label }}{% if status.via %} codes{% endif %} {{ "{:,}".format(status.count) }}{{ " · " if not loop.last }}
+      {%- endfor -%}
+    </p>
+    {% set failed = lists | selectattr("error") | list %}
+    {% set fetched = lists | selectattr("fetched_at") | map(attribute="fetched_at") | list %}
+    <p class="watch-lists-state">
+      {%- for status in failed -%}
+        <span class="watch-lists-error" title="{{ status.error }}">{{ status.label }} download failed: {{ status.short_error }}</span> ·
+      {% endfor -%}
+      {%- if fetched %}Last updated {{ (fetched | max) | ist }}{% else %}Not downloaded yet{% endif -%}
+      {%- for status in lists if status.via %} · BSE codes from the PEAD tool's copy until BSE answers{% endfor -%}
+      {%- if not failed %} · new listings appear within a day{% endif -%}
+    </p>
+  {% else %}
+    <p class="watch-lists-counts">Company lists not downloaded yet</p>
+  {% endif %}
+</div>

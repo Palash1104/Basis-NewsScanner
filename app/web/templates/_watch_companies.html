@@ -1,5 +1,6 @@
 {# Type-ahead for "Add a stock" (GET /watchlist/companies): matches as you type, the newest
-   listings before anything is typed, and what is happening while the lists download. #}
+   listings before anything is typed, and what is happening while the lists download. The
+   lists' state in the dialog's footer comes along (oob). #}
 {% if not ready %}
   {% if downloading %}
     <p class="watch-note">Downloading the NSE and BSE company lists… The first time takes a
@@ -13,7 +14,7 @@
       {% for status in lists if status.error %}<li>{{ status.label }}: {{ status.error }}</li>{% endfor %}
     </ul>
     <button type="button" class="btn btn-secondary"
-      hx-get="/watchlist/companies?retry=1&q={{ query | urlencode }}"
+      hx-get="/watchlist/companies?retry=1" hx-include="#watch-search"
       hx-target="#watch-suggestions">Try again</button>
   {% else %}
     <p class="watch-note">The company lists haven't been downloaded yet. <code>uv run newsdesk
@@ -27,21 +28,34 @@
     <p class="watch-note">Keep typing: two letters or more.</p>
   {% elif not matches %}
     <p class="watch-note">No company listed on NSE or BSE matches “{{ query }}”.</p>
+  {% else %}
+    <p class="kicker watch-suggest-title">Matches</p>
   {% endif %}
   {% if matches %}
     <ul class="watch-suggest-list">
       {% for company in matches %}
+        {% set listed = company.key in on_list %}
         <li>
           <button type="button" class="watch-suggest"
             hx-get="/watchlist/preview?company={{ company.key | urlencode }}"
-            hx-target="#watch-preview" hx-indicator="#watch-preview-wait">
-            <span class="watch-suggest-name">{{ company.short_name }}</span>
-            <span class="watch-suggest-meta">
-              {%- if company.nse_symbol %}<span>NSE {{ company.nse_symbol }}</span>{% endif -%}
-              {%- if company.bse_code %}<span>BSE {{ company.bse_code }}{% if not company.nse_symbol and company.bse_id %} · {{ company.bse_id }}{% endif %}</span>{% endif -%}
-              {%- if company.sme %}<span class="tag tag-neutral">SME</span>{% endif -%}
-              {%- if company.is_new(today) %}<span class="tag tag-accent">New · {{ "listed" if company.listed else "on BSE" }} {{ company.added_on.strftime("%d %b") }}</span>{% endif -%}
-              {%- if company.key in on_list %}<span class="tag tag-neutral">on the watchlist</span>{% endif -%}
+            hx-target="#watch-preview" hx-indicator="#watch-preview-wait"
+            data-name="{{ company.short_name }}" aria-label="Preview {{ company.short_name }}">
+            <span class="watch-suggest-text">
+              <span class="watch-suggest-name">{{ company.short_name }}</span>
+              <span class="watch-suggest-meta">
+                {%- if company.nse_symbol %}<span>NSE {{ company.nse_symbol }}</span>{% endif -%}
+                {%- if company.bse_code %}<span>BSE {{ company.bse_code }}{% if not company.nse_symbol and company.bse_id %} · {{ company.bse_id }}{% endif %}</span>{% endif -%}
+                {%- if company.sme %}<span class="tag tag-neutral">SME</span>{% endif -%}
+                {%- if company.is_new(today) %}<span class="tag tag-accent">New · {{ "listed" if company.listed else "on BSE" }} {{ company.added_on.strftime("%d %b") }}</span>{% endif -%}
+                {%- if listed %}<span class="tag tag-neutral">on the watchlist</span>{% endif -%}
+              </span>
+            </span>
+            <span class="watch-suggest-plus{% if listed %} is-listed{% endif %}" aria-hidden="true">
+              {%- if listed -%}
+                <svg viewBox="0 0 16 16" width="16" height="16"><path d="M3 8.5l3 3 7-7" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" /></svg>
+              {%- else -%}
+                <svg viewBox="0 0 16 16" width="16" height="16"><path d="M8 2.5v11M2.5 8h11" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" /></svg>
+              {%- endif -%}
             </span>
           </button>
         </li>
@@ -49,15 +63,4 @@
     </ul>
   {% endif %}
 {% endif %}
-{% if lists %}
-  <p class="watch-lists">
-    Searches
-    {% for status in lists -%}
-      {{ status.label }} {{ "{:,}".format(status.count) }}
-      {%- if status.error %} <span class="down">(last download failed: {{ status.error }})</span>{% endif -%}
-      {{ " · " if not loop.last }}
-    {%- endfor %}.
-    {% set fetched = lists | selectattr("fetched_at") | map(attribute="fetched_at") | list %}
-    {% if fetched %}Downloaded {{ (fetched | max) | ist }}; new listings appear within a day.{% endif %}
-  </p>
-{% endif %}
+{% with oob = true %}{% include "_watch_lists.html" %}{% endwith %}

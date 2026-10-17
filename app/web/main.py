@@ -58,7 +58,10 @@ from app.presentation import ORDER_WORDS, ORIGIN_LABEL, story_age
 from app.schedule import pipeline_hours, start_of_news_day
 from app.watch import companies as company_list
 from app.watch import watchlist_edit
+from app.watch.preview import chart_points as preview_chart_points
+from app.watch.preview import facts as preview_facts
 from app.watch.preview import preview as preview_headlines
+from app.watch.preview import yahoo_profile as preview_profile
 from app.watch.scoring import lead_times
 from app.web import palette, queries, watch_queries
 
@@ -106,6 +109,7 @@ CARD_SPARK_WIDTH, CARD_SPARK_HEIGHT, CARD_SPARK_PAD = 300, 72, 7
 # The rail is narrow, so its watchlist draws a smaller line than the mockup's 68x22.
 RAIL_SPARK_WIDTH, RAIL_SPARK_HEIGHT, RAIL_SPARK_PAD = 68, 20, 2
 ASSET_WINDOW = "1m"
+PROFILE_TIMEOUT = 10.0  # seconds for each of the preview's two extra Yahoo requests
 ASSET_WINDOW_LABEL = "last month of daily bars"
 RUN_WINDOWS = (3, 7, 14)
 
@@ -374,6 +378,7 @@ def create_app(
     preview_transport: object | None = None,
     ticker_fetch: Callable | None = None,
     refresh_lists: bool = False,
+    profile_fetch: Callable | None = None,
 ) -> FastAPI:
     """Build the app. `init_db` is never called: the web UI does not migrate anything."""
     settings = settings or load_settings()
@@ -395,12 +400,17 @@ def create_app(
         settings.resolve_path(settings.paths.lock_dir),
         settings.http.user_agent,
         enabled=refresh_lists,
+        pead_master=company_list.pead_master_path(settings.watch.bse_announcements_db),
     )
     web.state.backup_dir = backup_dir or watchlist_edit.BACKUP_DIR
     web.state.allowed_hosts = allowed_hosts
     # Tests stand in for Google News and Yahoo here; None means the real ones.
     web.state.preview_transport = preview_transport
     web.state.ticker_fetch = ticker_fetch
+    # The company's year of prices and Yahoo profile. With a stand-in Yahoo (tests) and no
+    # stand-in profile, there is none: a test never reaches the real Yahoo by this road.
+    web.state.profile_fetch = profile_fetch
+    web.state.real_yahoo = ticker_fetch is None
     # A new token each time the server starts: a page from an older run has to be reloaded.
     web.state.write_token = secrets.token_urlsafe(32)
     web.mount("/static", StaticFiles(directory=WEB_DIR / "static"), name="static")
@@ -491,7 +501,12 @@ def create_app(
 
     @web.get("/watchlist", response_class=HTMLResponse)
     def watchlist(
-        request: Request, session: ReadSession, added: str = "", removed: str = "", error: str = ""
+        request: Request,
+        session: ReadSession,
+        added: str = "",
+        removed: str = "",
+        error: str = "",
+        add_error: str = "",
     ) -> HTMLResponse:
         """The design's watchlist screen: a card per entry, then the week's news touching
         the list, and what the watchlist sent to Telegram. Its "Add a stock" button opens
@@ -520,6 +535,7 @@ def create_app(
             "added": added,
             "removed": removed,
             "error": error,
+            "add_error": add_error,
         }
         return templates.TemplateResponse(request, "watchlist.html", context)
 
@@ -615,22 +631,51 @@ def create_app(
             fetch=request.app.state.ticker_fetch,
             tickers=found.yahoo_candidates,
         )
+        profile = None
         if result.ticker is not None and result.ticker.symbol:
             draft = draft.model_copy(update={"symbol": result.ticker.symbol})
+            state = request.app.state
+            fetch_profile = state.profile_fetch or (
+                preview_profile(PROFILE_TIMEOUT) if state.real_yahoo else None
+            )
+            if fetch_profile is not None:
+                try:
+                    profile = fetch_profile(result.ticker.symbol)
+                except Exception as exc:  # the preview stands without it
+                    log.warning("no Yahoo profile for %s: %s", result.ticker.symbol, exc)
+        on_list = company_list.on_watchlist(found, watched.watchlist)
+        version = _editor_context(request, now)["version"]
+        if on_list is not None:
+            blocked = f"Already on the watchlist as {on_list.name or on_list.symbol}"
+        elif problem:
+            blocked = problem[0].upper() + problem[1:]
+        elif not version:
+            blocked = "config/watchlist.yaml doesn't load, so nothing can be added"
+        elif result.ticker is None or not result.ticker.ok:
+            blocked = "Yahoo has no prices for it, so its moves couldn't be followed"
+        else:
+            blocked = None
         context = base_context(request, session, active="watchlist", now=now) | {
             "company": found,
             "draft": draft,
             "problem": problem,
             "result": result,
-            "on_list": company_list.on_watchlist(found, watched.watchlist),
+            "on_list": on_list,
+            "blocked": blocked,
+            "facts": preview_facts(profile),
+            "profile_error": profile.error if profile else None,
+            "chart_points": preview_chart_points,
             "today": now.astimezone(settings.tz).date(),
         }
         context |= _editor_context(request, now)
         return templates.TemplateResponse(request, "_watch_preview.html", context)
 
     def _back(**message: str) -> RedirectResponse:
+        """Back to the page with one message. Only a failed add reopens "Add a stock" (its
+        dialog shows the reason); anything else is said on the page itself."""
         key, value = next(iter(message.items()))
-        return RedirectResponse(f"/watchlist?{key}={quote(value)}#watch-add", status_code=303)
+        anchor = "#watch-add" if key == "add_error" else ""
+        return RedirectResponse(f"/watchlist?{key}={quote(value)}{anchor}", status_code=303)
 
     @web.post("/watchlist/add")
     async def watch_add(request: Request) -> Response:
@@ -643,14 +688,14 @@ def create_app(
             company_list.load_companies(state.companies_path), form.get("company", "")
         )
         if found is None:
-            return _back(error="that company is not in the NSE or BSE company lists")
+            return _back(add_error="that company is not in the NSE or BSE company lists")
         # The ticker the preview found Yahoo answers to; only one of the company's own.
         yahoo = form.get("yahoo", "")
         if yahoo not in found.yahoo_candidates:
-            return _back(error="preview the company first, so its Yahoo ticker is checked")
+            return _back(add_error="preview the company first, so its Yahoo ticker is checked")
         watched = current_watchlist(request)
         if (already := company_list.on_watchlist(found, watched.watchlist)) is not None:
-            return _back(error=f"{already.name or already.symbol} is already on the watchlist")
+            return _back(add_error=f"{already.name or already.symbol} is already on the watchlist")
         group = form.get("group", "")
         item = company_list.draft(found, group if group in watched.groups else None, yahoo)
         item = item.model_copy(
@@ -673,9 +718,9 @@ def create_app(
                 backup_dir=state.backup_dir,
             )
         except watchlist_edit.EditRefused as exc:
-            return _back(error=str(exc))
+            return _back(add_error=str(exc))
         except ValueError as exc:
-            return _back(error=f"not added: {exc}")
+            return _back(add_error=f"not added: {exc}")
         log.info("watchlist: added %s from the page", item.symbol)
         return _back(added=item.name or item.symbol)
 
@@ -687,8 +732,12 @@ def create_app(
             raise HTTPException(status_code=403, detail=why)
         state = request.app.state
         symbol = form.get("symbol", "")
+        # Named as its card names it: a commodity has no name of its own in the file.
+        assets = state.assets
         names = {
-            item.symbol: item.name or item.symbol for item in current_watchlist(request).watchlist
+            item.symbol: item.name
+            or (assets[item.symbol].display_name if item.symbol in assets else item.symbol)
+            for item in current_watchlist(request).watchlist
         }
         try:
             watchlist_edit.remove_entry(

@@ -25,46 +25,81 @@
   </div>
 </div>
 
-{# Opened by the button (CSS :target), or after an edit, which comes back here with a message.
-   Left: the search, always there; right: the company picked, before anything is added. #}
-<section id="watch-add" class="watch-add{% if added or removed or error or unreadable %} open{% endif %}"
-  aria-labelledby="watch-add-title">
-  <div class="watch-add-head">
-    <h2 id="watch-add-title" class="watch-add-title">Add a stock</h2>
-    <a class="btn btn-ghost" href="#">Close</a>
-  </div>
-  {% if added %}
-    <p class="watch-flash">Added {{ added }}. The scanner picks it up within a minute; its first
-      news comes with the next Google News search.</p>
-  {% endif %}
-  {% if removed %}<p class="watch-flash">Removed {{ removed }}.</p>{% endif %}
-  {% if error %}<p class="watch-flash watch-flash-error">Not changed: {{ error }}</p>{% endif %}
-  {% if unreadable %}
-    <p class="watch-note">config/watchlist.yaml doesn't load ({{ unreadable }}), so the page
-      won't change it. Fix it by hand; the page picks it up as soon as it loads.</p>
-  {% else %}
-    <div class="watch-add-grid">
-      <div class="watch-add-find">
-        <div class="field">
-          <label for="watch-search">Company name, NSE symbol or BSE code</label>
-          <input id="watch-search" class="input" type="search" name="q" autocomplete="off"
-            placeholder="e.g. Mazagon Dock, MAZDOCK or 543237"
-            hx-get="/watchlist/companies" hx-trigger="input changed delay:200ms, search"
-            hx-target="#watch-suggestions" hx-sync="this:replace" />
-        </div>
-        {# Filled on load with the newest listings, then with matches as you type. #}
-        <div id="watch-suggestions" class="watch-suggestions" aria-live="polite"
-          hx-get="/watchlist/companies" hx-trigger="load"></div>
+{% if added %}
+  <p class="watch-page-flash" role="status">Added {{ added }}. The scanner picks it up within a
+    minute; its first news comes with the next Google News search.</p>
+{% endif %}
+{% if removed %}<p class="watch-page-flash" role="status">Removed {{ removed }}.</p>{% endif %}
+{% if error %}<p class="watch-page-flash watch-flash-error" role="alert">Not changed: {{ error }}</p>{% endif %}
+
+{# "Add a stock" is a dialog over the page (user's design, 2026-10-17): the search and the
+   newest listings on the left; on the right a designed wait while a preview is asked for,
+   then the company with "Add to watchlist" at its top; the company lists' state in the
+   footer. static/js/watch-add.js opens and closes it (the button, Close, Escape, a click
+   outside) and switches the preview's tabs; without JavaScript the button's #watch-add still
+   opens it (CSS :target). A failed add comes back with it open and says why. #}
+<section id="watch-add" class="watch-add{% if add_error or unreadable %} open{% endif %}"
+  role="dialog" aria-modal="true" aria-labelledby="watch-add-title">
+  <div class="watch-add-dialog">
+    <div class="watch-add-head">
+      <div>
+        <h2 id="watch-add-title" class="watch-add-title">Add a stock</h2>
+        <p class="watch-add-sub">Find a company and preview the headlines BASIS will track.</p>
       </div>
-      <div class="watch-add-detail">
-        <p id="watch-preview-wait" class="watch-note htmx-indicator">Checking Yahoo and Google News…</p>
-        <div id="watch-preview">
-          <p class="watch-note watch-add-empty">Pick a company to see which of its headlines BASIS
-            would keep, and to check Yahoo has its prices. Nothing is added until you say so.</p>
-        </div>
-      </div>
+      <a class="watch-add-close" href="#" data-watch-close>Close</a>
     </div>
-  {% endif %}
+    {% if add_error %}<p class="watch-flash watch-flash-error" role="alert">Not added: {{ add_error }}</p>{% endif %}
+    {% if unreadable %}
+      <p class="watch-note watch-add-broken">config/watchlist.yaml doesn't load ({{ unreadable }}), so
+        the page won't change it. Fix it by hand; the page picks it up as soon as it loads.</p>
+    {% else %}
+      <div class="watch-add-grid">
+        <div class="watch-add-find">
+          <div class="watch-search">
+            <svg class="watch-search-icon" viewBox="0 0 20 20" width="20" height="20" aria-hidden="true">
+              <circle cx="8.5" cy="8.5" r="6" fill="none" stroke="currentColor" stroke-width="1.8" />
+              <path d="M13 13l5 5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
+            </svg>
+            <input id="watch-search" class="input" type="search" name="q" autocomplete="off"
+              placeholder="Company name, NSE symbol or BSE code"
+              aria-describedby="watch-search-hint"
+              hx-get="/watchlist/companies" hx-trigger="input changed delay:200ms, search"
+              hx-target="#watch-suggestions" hx-sync="this:replace" />
+          </div>
+          <p id="watch-search-hint" class="watch-search-hint">Search by name, symbol or exchange code</p>
+          {# Filled on load with the newest listings, then with matches as you type. #}
+          <div id="watch-suggestions" class="watch-suggestions" aria-live="polite"
+            hx-get="/watchlist/companies" hx-trigger="load"></div>
+        </div>
+        <div class="watch-add-detail">
+          <div class="watch-add-body">
+            {# While a preview is asked for, this takes the place of the right side (CSS :has):
+               the company being checked, what is being asked, and the shape of what comes. #}
+            <div id="watch-preview-wait" class="watch-wait htmx-indicator" role="status" aria-live="polite">
+              <div class="watch-wait-bar" aria-hidden="true"><span></span></div>
+              <p class="kicker">Preview</p>
+              <h3 class="watch-wait-title">Checking <span data-wait-name>the company</span>…</h3>
+              <ul class="watch-wait-steps">
+                <li><span class="watch-wait-dot" aria-hidden="true"></span>Asking Yahoo for its prices and profile</li>
+                <li><span class="watch-wait-dot" aria-hidden="true"></span>Searching Google News over the last 30 days</li>
+                <li><span class="watch-wait-dot" aria-hidden="true"></span>Judging every headline BASIS has stored</li>
+              </ul>
+              <div class="watch-wait-sketch" aria-hidden="true">
+                <span class="watch-wait-tabs"></span>
+                <span class="watch-wait-row"><span class="watch-wait-chart"></span><span class="watch-wait-lines"><span></span><span></span><span></span><span></span></span></span>
+                <span class="watch-wait-line"></span><span class="watch-wait-line"></span><span class="watch-wait-line short"></span>
+              </div>
+              <p class="watch-note">This takes a few seconds.</p>
+            </div>
+            <div id="watch-preview">{% include "_watch_empty.html" %}</div>
+          </div>
+          <div class="watch-add-foot">
+            {% include "_watch_lists.html" %}
+          </div>
+        </div>
+      </div>
+    {% endif %}
+  </div>
 </section>
 
 <div class="watch-cards">
@@ -91,7 +126,7 @@
         <span>{{ card.price or "no price yet" }}</span>
         {% if card.change %}
           <span class="watch-card-change {{ 'up' if card.up else 'down' }}">{{ card.change }}</span>
-          <span class="cell-note">{{ "since the last close" if card.change_label == "today" else "24h" }}</span>
+          <span class="cell-note">{{ {"today": "since the last close", "last": "last session"}.get(card.change_label, "24h") }}</span>
         {% endif %}
       </div>
       {% if card.series.points %}
@@ -163,4 +198,8 @@
     {% endfor %}
   </aside>
 </div>
+{% endblock %}
+
+{% block scripts %}
+  <script src="{{ url_for('static', path='js/watch-add.js') }}" defer></script>
 {% endblock %}

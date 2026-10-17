@@ -10,6 +10,7 @@ playbook's impacts for anything the universe also prices.
 from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
 from datetime import datetime, time, timedelta
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
@@ -211,7 +212,9 @@ def watch_cards(
     now: datetime,
 ) -> list[WatchCard]:
     """Every watchlist entry in the file's order, priced the most current way there is: the
-    scanner's own poll today for a stock, else the 24-hour move from the cache."""
+    scanner's own poll today for a stock, else the 24-hour move from the cache, else - with
+    its market shut for longer than that, as NSE is all weekend - its last session's move
+    (2026-10-17: every NSE card read "no price yet" on a Saturday evening)."""
     symbols = [item.symbol for item in watchlist.watchlist]
     moves = window_moves(session, now, MOVER_HOURS)
     series = series_for(session, symbols, RAIL_WINDOW, now)
@@ -232,6 +235,12 @@ def watch_cards(
             price = format_price(asset, close) if asset else _inr(close)
             change = format_move(asset, reference, pct) if asset else _pct(pct / 100)
             up = pct >= 0
+        elif last := _last_session(session, item.symbol, _zone(asset, settings)):
+            reference, close = last
+            pct = move_pct(reference, close)
+            price = format_price(asset, close) if asset else _inr(close)
+            change = format_move(asset, reference, pct) if asset else _pct(pct / 100)
+            label, up = "last", pct >= 0
         line = series.get(item.symbol, Series(item.symbol))
         if not line.points and item.type == "stock":
             line = _poll_series(session, item.symbol, now)
@@ -253,6 +262,30 @@ def watch_cards(
             )
         )
     return cards
+
+
+def _zone(asset: AssetConfig | None, settings: Settings) -> ZoneInfo:
+    """The exchange's time zone: the asset's own, else the app's (IST, for an NSE stock)."""
+    return ZoneInfo(asset.timezone) if asset and asset.timezone else settings.tz
+
+
+def _last_session(session: Session, symbol: str, zone: ZoneInfo) -> tuple[float, float] | None:
+    """(previous session's last close, last close) from the cached hourly bars, sessions
+    dated in the exchange's own time zone; None without two sessions of bars."""
+    bars = session.execute(
+        select(PriceBar.ts, PriceBar.close)
+        .where(PriceBar.symbol == symbol, PriceBar.interval == INTRADAY)
+        .order_by(PriceBar.ts.desc())
+        .limit(60)
+    ).all()
+    if not bars:
+        return None
+    latest_at, latest = bars[0]
+    day = latest_at.astimezone(zone).date()
+    for at, close in bars[1:]:
+        if at.astimezone(zone).date() < day:
+            return close, latest
+    return None
 
 
 def _move_since(session: Session, symbol: str, since: datetime) -> float | None:

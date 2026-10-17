@@ -1,0 +1,24 @@
+{# The dialog's right side before a company is picked: what will happen, and a sketch of the
+   verdict list a preview fills. The sketch is decoration only. #}
+<div class="watch-empty">
+  <svg class="watch-empty-icon" viewBox="0 0 48 60" width="48" height="60" aria-hidden="true">
+    <path d="M3 3h30l12 12v42H3z" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linejoin="round" />
+    <path d="M33 3v12h12" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linejoin="round" />
+    <path d="M11 27h26M11 35h26M11 43h26M11 51h18" stroke="currentColor" stroke-width="2.5" />
+  </svg>
+  <h3 class="watch-empty-title">Preview a company</h3>
+  <p class="watch-empty-text">Choose a result to see the headlines BASIS would keep and check its
+    latest price. Nothing is added to your watchlist until you confirm.</p>
+  <div class="watch-skeleton" aria-hidden="true">
+    {% for widths in [(52, 88), (66, 92), (70, 100)] %}
+      <div class="watch-skeleton-row">
+        <span class="watch-skeleton-dot"></span>
+        <span class="watch-skeleton-lines">
+          <span class="watch-skeleton-bar" style="width: {{ widths[0] }}%"></span>
+          <span class="watch-skeleton-bar watch-skeleton-thin" style="width: {{ widths[1] }}%"></span>
+        </span>
+        <span class="watch-skeleton-tag"></span>
+      </div>
+    {% endfor %}
+  </div>
+</div>

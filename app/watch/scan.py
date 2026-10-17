@@ -65,7 +65,7 @@ from app.watch.analyse import analyse, read_replies
 from app.watch.catchup import Gap, SourceCoverage, find_gap, possible_gaps
 from app.watch.companies import LIST_FILE as COMPANY_LIST_FILE
 from app.watch.companies import due as company_lists_due
-from app.watch.companies import filing_keys, load_companies
+from app.watch.companies import filing_keys, load_companies, pead_master_path
 from app.watch.companies import refresh as refresh_company_list
 from app.watch.events import Amount, amounts, amounts_conflict, is_order_news
 from app.watch.group import StoryGrouper
@@ -304,6 +304,7 @@ class Watcher:
             now=now,
             lock_dir=self.settings.resolve_path(self.settings.paths.lock_dir),
             sources=sources,
+            pead_master=pead_master_path(self.settings.watch.bse_announcements_db),
         )
         log.info(line)
         return line

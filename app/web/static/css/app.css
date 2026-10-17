@@ -48,6 +48,15 @@ a:hover {
   color: var(--color-link-hover);
 }
 
+/* A link drawn as a button keeps the button's colours: the link hover above turned "Add a
+   stock" red on red (2026-10-17). */
+a.btn-primary,
+a.btn-primary:hover,
+a.btn-primary:visited {
+  color: var(--color-bg);
+  text-decoration: none;
+}
+
 /* A headline is ink, as in the design, where the whole row is clickable and the words are
  * never tinted. The design has no hover state for one, so the underline is the hover. */
 .story-headline a,
@@ -1506,10 +1515,10 @@ a:hover {
 }
 
 /* ---------------------------------------------------------------- watchlist editor */
-/* "Add a stock" (user, 2026-10-16; laid out again 2026-10-17): a filled panel under the screen
-   head, the search on the left - always there, whatever state the company lists are in - and
-   the company picked on the right. Hidden until the button's #watch-add is the target, or
-   after an edit, which comes back with a message. The design's own button, fields and tags. */
+/* "Add a stock" (user, 2026-10-16; a dialog over the page from the user's design,
+   2026-10-17): the search and the newest listings on the left, the company picked on the
+   right, the company lists' state and "Add to watchlist" in a footer under it. Opened by
+   static/js/watch-add.js (`open`, `closed`), or by CSS :target without it. */
 
 .watch-head-side {
   display: flex;
@@ -1518,63 +1527,133 @@ a:hover {
   gap: 12px;
 }
 
-.watch-add {
-  display: none;
-  margin: 28px 0 4px;
-  padding: 24px 28px 28px;
+.watch-page-flash {
+  margin: 0 0 20px;
+  padding: 12px 16px;
+  font-size: 14px;
   background: var(--color-surface);
-  /* The jump to #watch-add stops below the sticky masthead, not under it. */
-  scroll-margin-top: 96px;
+  border-left: 3px solid var(--color-text);
 }
 
-.watch-add:target,
-.watch-add.open {
-  display: block;
+.watch-page-flash.watch-flash-error {
+  border-left-color: var(--color-link);
+}
+
+.watch-add {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 32px;
+  /* Black in both themes: the page goes darker behind the dialog, never lighter. */
+  background: rgba(0, 0, 0, 0.38);
+}
+
+.watch-add.open,
+.watch-add:target:not(.closed) {
+  display: flex;
+}
+
+/* The page under the dialog stays put. */
+html.watch-add-locked,
+html:has(.watch-add:target:not(.closed)) {
+  overflow: hidden;
+}
+
+.watch-add-dialog {
+  display: flex;
+  flex-direction: column;
+  width: min(1360px, 100%);
+  height: min(820px, calc(100vh - 64px));
+  padding: 30px 34px 0;
+  background: var(--color-bg);
+  border: 1px solid var(--rule-light);
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.22), 0 2px 8px rgba(0, 0, 0, 0.08);
 }
 
 .watch-add-head {
   display: flex;
-  align-items: baseline;
+  flex: none;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 16px;
 }
 
 .watch-add-title {
   margin: 0;
-  font-size: 22px;
+  font-size: 32px;
+  line-height: 1.1;
 }
 
-/* The panel is the surface colour, which is also the inputs': on it they take the page's. */
-.watch-add .input {
-  background: var(--color-bg);
+.watch-add-sub {
+  margin: 8px 0 0;
+  font-size: 15px;
+  color: var(--color-muted);
+}
+
+.watch-add-close {
+  padding: 4px 0;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--color-link);
+  text-decoration: none;
+}
+
+.watch-add-close:hover {
+  text-decoration: underline;
+}
+
+.watch-add-broken {
+  margin: 24px 0;
 }
 
 .watch-add-grid {
   display: grid;
-  grid-template-columns: minmax(280px, 420px) minmax(0, 1fr);
-  gap: 0 40px;
-  align-items: start;
-  margin-top: 16px;
+  flex: 1;
+  grid-template-columns: minmax(280px, 400px) minmax(0, 1fr);
+  min-height: 0;
+  margin-top: 26px;
 }
 
 .watch-add-find,
 .watch-add-detail {
+  display: flex;
+  flex-direction: column;
   min-width: 0;
+  min-height: 0;
+}
+
+.watch-add-find {
+  padding: 4px 28px 24px 0;
+  border-right: 1px solid var(--rule-light);
 }
 
 .watch-add-detail {
-  min-height: 160px;
-  padding-left: 40px;
-  border-left: 1px solid var(--rule-light);
+  padding-left: 28px;
 }
 
-.watch-add-empty {
-  max-width: 46ch;
-  margin-top: 26px;
+.watch-add-body {
+  container-type: inline-size;
+  flex: 1;
+  min-height: 0;
+  padding: 4px 4px 24px 0;
+  overflow-y: auto;
+}
+
+.watch-add-foot {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 16px 0 22px;
+  border-top: 1px solid var(--rule-light);
 }
 
 .watch-flash {
-  margin: 10px 0;
+  margin: 12px 0 0;
   font-size: 14px;
 }
 
@@ -1582,43 +1661,91 @@ a:hover {
   color: var(--color-link);
 }
 
+/* The search: a magnifier inside the field, a hint under it. */
+.watch-search {
+  position: relative;
+  flex: none;
+}
+
+.watch-search-icon {
+  position: absolute;
+  top: 50%;
+  left: 14px;
+  color: var(--color-text);
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+
+.watch-search .input {
+  min-height: 46px;
+  padding: 10px 14px 10px 46px;
+  font-size: 16px;
+}
+
+.watch-search-hint {
+  flex: none;
+  margin: 10px 0 0;
+  font-size: 14px;
+  color: var(--color-muted);
+}
+
 .watch-suggestions {
-  margin-top: 12px;
+  flex: 1;
+  min-height: 0;
+  margin-top: 22px;
+  overflow-y: auto;
 }
 
 .watch-suggest-title {
-  margin: 0 0 6px;
+  margin: 0 0 10px;
 }
 
 .watch-suggest-list {
   margin: 0;
   padding: 0;
   list-style: none;
+  border-top: 1px solid var(--rule-light);
+}
+
+.watch-suggest-list li {
   border-bottom: 1px solid var(--rule-light);
 }
 
 .watch-suggest {
   display: flex;
-  flex-direction: column;
-  gap: 3px;
+  align-items: center;
+  gap: 16px;
   width: 100%;
-  padding: 10px;
+  padding: 13px 4px 13px 10px;
   font: inherit;
   text-align: left;
   color: var(--color-text);
   background: transparent;
   border: none;
-  border-top: 1px solid var(--rule-light);
   cursor: pointer;
 }
 
 .watch-suggest:hover,
-.watch-suggest:focus-visible {
-  background: var(--color-bg);
+.watch-suggest:focus-visible,
+.watch-suggest.is-picked {
+  background: var(--color-surface);
+}
+
+/* The company in the preview, marked down the left. */
+.watch-suggest.is-picked {
+  box-shadow: inset 3px 0 0 var(--color-link);
+}
+
+.watch-suggest-text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
 }
 
 .watch-suggest-name {
-  font-size: 15px;
+  font-size: 17px;
   font-weight: 700;
 }
 
@@ -1626,46 +1753,723 @@ a:hover {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 4px 10px;
-  font-size: 12px;
+  gap: 4px 12px;
+  font-size: 14px;
   color: var(--color-muted);
 }
 
 .watch-suggest-meta .tag {
-  padding: 1px 7px;
-  font-size: 10px;
+  padding: 2px 8px;
+  font-size: 12px;
 }
 
-.watch-lists {
-  margin: 14px 0 0;
-  font-size: 12px;
-  line-height: 1.5;
+/* The round "+" at the end of a row; a tick when the company is already on the list. */
+.watch-suggest-plus {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  color: var(--color-text);
+  border: 1.5px solid var(--color-text);
+  border-radius: 50%;
+}
+
+.watch-suggest:hover .watch-suggest-plus:not(.is-listed) {
+  color: var(--color-bg);
+  background: var(--color-text);
+}
+
+.watch-suggest-plus.is-listed {
   color: var(--color-muted);
+  border-color: var(--rule-medium);
 }
 
 .watch-list-errors {
   margin: 4px 0 12px;
   padding-left: 18px;
-  font-size: 12px;
-  color: var(--color-muted);
-}
-
-.watch-preview-name {
-  margin: 4px 0 6px;
-  font-size: 26px;
-  line-height: 1.15;
-}
-
-.watch-preview-new {
-  margin: 0 0 8px;
   font-size: 13px;
   color: var(--color-muted);
 }
 
-.watch-ticker {
-  margin: 0 0 16px;
+/* Before a company is picked. */
+.watch-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 16px 12px 8px;
+  text-align: center;
+}
+
+.watch-empty-icon {
+  color: var(--color-text);
+}
+
+.watch-empty-title {
+  margin: 22px 0 10px;
+  font-size: 30px;
+  line-height: 1.15;
+}
+
+.watch-empty-text {
+  max-width: 54ch;
+  margin: 0;
+  font-size: 16px;
+  line-height: 1.6;
+  color: var(--color-muted);
+}
+
+.watch-skeleton {
+  width: 100%;
+  max-width: 580px;
+  margin-top: 26px;
+  padding: 6px 26px;
+  border: 1.5px dashed var(--rule-medium);
+}
+
+.watch-skeleton-row {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 18px 0;
+}
+
+.watch-skeleton-row + .watch-skeleton-row {
+  border-top: 1px solid var(--rule-light);
+}
+
+.watch-skeleton-dot {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  background: var(--color-link);
+  border-radius: 50%;
+}
+
+.watch-skeleton-lines {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 9px;
+}
+
+.watch-skeleton-bar {
+  display: block;
+  height: 14px;
+  background: color-mix(in srgb, var(--color-text) 14%, transparent);
+}
+
+.watch-skeleton-thin {
+  height: 9px;
+  background: color-mix(in srgb, var(--color-text) 8%, transparent);
+}
+
+.watch-skeleton-tag {
+  flex: none;
+  width: 66px;
+  height: 22px;
+  background: color-mix(in srgb, var(--color-text) 8%, transparent);
+}
+
+/* The footer: the lists' state, then the button. */
+.watch-lists {
+  min-width: 0;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.watch-lists p {
+  margin: 0;
+}
+
+.watch-lists-state {
+  color: var(--color-muted);
+}
+
+.watch-lists-error {
+  color: var(--color-link);
+}
+
+/* ---------------------------------------------------------------- the picked company */
+/* The preview, from the user's design (2026-10-17): codes, name and what it is with the price
+   and "Add to watchlist" beside them, then four tabs. */
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.watch-pv-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+}
+
+.watch-pv-title {
+  min-width: 0;
+}
+
+.watch-pv-codes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 22px;
+  margin: 0 0 8px;
+}
+
+.watch-pv-name {
+  margin: 0;
+  font-size: 30px;
+  line-height: 1.12;
+}
+
+.watch-pv-sub {
+  display: flex;
+  flex-wrap: wrap;
+  margin: 8px 0 0;
+  font-size: 15px;
+  color: var(--color-muted);
+}
+
+.watch-pv-sub span + span::before {
+  content: "|";
+  margin: 0 12px;
+  color: var(--rule-medium);
+}
+
+.watch-pv-side {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 14px;
+}
+
+.watch-pv-add {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 11px 20px;
+  font-size: 15px;
+}
+
+.watch-pv-price {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0;
+  white-space: nowrap;
+}
+
+.watch-pv-price b {
+  font-size: 24px;
+  font-variant-numeric: tabular-nums;
+}
+
+.watch-pv-move {
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.watch-pv-blocked {
+  margin: 12px 0 0;
+  padding: 8px 12px;
+  font-size: 14px;
+  color: var(--color-link);
+  background: var(--color-surface);
+}
+
+.watch-tabs {
+  display: flex;
+  gap: 4px;
+  margin: 22px 0 18px;
+  border-bottom: 1px solid var(--rule-light);
+}
+
+.watch-tab {
+  margin-bottom: -1px;
+  padding: 10px 18px 12px;
+  font: inherit;
+  font-size: 15px;
+  color: var(--color-muted);
+  background: transparent;
+  border: none;
+  border-bottom: 3px solid transparent;
+  cursor: pointer;
+}
+
+.watch-tab:hover {
+  color: var(--color-text);
+}
+
+.watch-tab[aria-selected="true"] {
+  font-weight: 700;
+  color: var(--color-link);
+  border-bottom-color: var(--color-link);
+}
+
+.watch-panel[hidden] {
+  display: none;
+}
+
+/* Chart, figures and the company side by side when there is room (the design); the
+   company under the other two when there isn't. */
+.watch-pv-overview {
+  display: grid;
+  grid-template-columns: minmax(150px, 0.8fr) minmax(220px, 1fr);
+  gap: 20px;
+  align-items: start;
+}
+
+.watch-pv-about {
+  grid-column: 1 / -1;
+}
+
+@container (min-width: 780px) {
+  .watch-pv-overview {
+    grid-template-columns: minmax(170px, 0.85fr) minmax(240px, 1.1fr) minmax(220px, 1.15fr);
+  }
+
+  .watch-pv-about {
+    grid-column: auto;
+  }
+}
+
+.watch-pv-chart {
+  position: relative;
+  height: 150px;
+  background: var(--color-surface);
+}
+
+.watch-pv-chart svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.watch-pv-chart-note {
+  position: absolute;
+  right: 8px;
+  bottom: 6px;
+  font-size: 11px;
+  color: var(--color-muted);
+}
+
+.watch-pv-chart .watch-note {
+  padding: 16px;
+}
+
+.watch-chart-line {
+  fill: none;
+  stroke: var(--color-text);
+  stroke-width: 2;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+
+.watch-chart-area {
+  fill: color-mix(in srgb, var(--color-link) 12%, transparent);
+  stroke: none;
+}
+
+.watch-pv-stats {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 9px 18px;
+  margin: 0;
+  font-size: 14px;
+}
+
+.watch-pv-stats dt {
+  color: var(--color-muted);
+}
+
+.watch-pv-stats dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.watch-pv-overview .watch-pv-stats dd {
+  white-space: nowrap;
+}
+
+.watch-pv-about {
+  display: flex;
+  gap: 12px;
+  padding: 16px;
+  background: var(--color-surface);
+}
+
+.watch-pv-about-icon {
+  flex: none;
+  color: var(--color-muted);
+}
+
+.watch-pv-about-title {
+  margin: 0 0 6px;
   font-size: 14px;
   font-weight: 700;
+}
+
+.watch-pv-about-text {
+  display: -webkit-box;
+  margin: 0;
+  overflow: hidden;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--color-muted);
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 6;
+}
+
+.watch-hl-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin: 26px 0 10px;
+}
+
+.watch-panel[data-panel="headlines"] .watch-hl-head {
+  margin-top: 0;
+}
+
+.watch-hl-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 20px;
+}
+
+.watch-info {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--color-muted);
+  border: 1.5px solid currentColor;
+  border-radius: 50%;
+  cursor: help;
+}
+
+.watch-hl-filter .input {
+  width: auto;
+  min-width: 160px;
+}
+
+.watch-hl-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border-top: 1px solid var(--rule-light);
+}
+
+.watch-hl {
+  display: flex;
+  align-items: flex-start;
+  gap: 18px;
+  padding: 12px 4px;
+  border-bottom: 1px solid var(--rule-light);
+}
+
+.watch-hl[hidden] {
+  display: none;
+}
+
+.watch-verdict {
+  flex: none;
+  width: 72px;
+  padding: 5px 0;
+  font-size: 13px;
+  text-align: center;
+}
+
+/* Keep is the one green in BASIS: a verdict, not a price (the user's design). */
+.watch-verdict-keep {
+  color: var(--verdict-keep-text);
+  background: var(--verdict-keep-bg);
+}
+
+:root {
+  --verdict-keep-text: #1f6b3a;
+  --verdict-keep-bg: #dcefe2;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --verdict-keep-text: #9bd8ad;
+    --verdict-keep-bg: #1f3a28;
+  }
+}
+
+:root[data-theme="dark"] {
+  --verdict-keep-text: #9bd8ad;
+  --verdict-keep-bg: #1f3a28;
+}
+
+.watch-verdict-mention {
+  color: var(--color-text);
+  background: var(--color-neutral-100);
+}
+
+.watch-verdict-drop {
+  color: var(--color-accent-800);
+  background: var(--color-accent-100);
+}
+
+.watch-hl-text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.watch-hl-title {
+  font-size: 15px;
+  line-height: 1.35;
+}
+
+.watch-hl-meta {
+  font-size: 13px;
+  color: var(--color-muted);
+}
+
+.watch-hl-open {
+  flex: none;
+  padding: 2px;
+  color: var(--color-muted);
+}
+
+.watch-hl-open:hover {
+  color: var(--color-link);
+}
+
+.watch-link-button {
+  margin-top: 12px;
+  padding: 0;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--color-link);
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+
+.watch-link-button:hover {
+  text-decoration: underline;
+}
+
+.watch-pv-section {
+  margin: 4px 0 12px;
+  font-size: 18px;
+}
+
+.watch-pv-section ~ .watch-pv-section {
+  margin-top: 28px;
+}
+
+.watch-pv-codes-list {
+  max-width: 680px;
+}
+
+.watch-pv-history {
+  background: var(--color-surface);
+}
+
+.watch-pv-history svg {
+  display: block;
+  width: 100%;
+  height: 220px;
+}
+
+.watch-pv-history-axis {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0;
+  padding: 8px 10px;
+  font-size: 12px;
+  color: var(--color-muted);
+}
+
+.watch-pv-returns {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin: 18px 0 12px;
+}
+
+.watch-pv-returns div {
+  padding: 12px 14px;
+  border: 1px solid var(--rule-light);
+}
+
+.watch-pv-returns dt {
+  font-size: 12px;
+  color: var(--color-muted);
+}
+
+.watch-pv-returns dd {
+  margin: 4px 0 0;
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.watch-pv .up {
+  color: var(--color-up);
+}
+
+.watch-pv .down {
+  color: var(--color-down);
+}
+
+/* While a preview is asked for: the wait takes the right side, the old preview goes. */
+.watch-add-body:has(.watch-wait.htmx-request) #watch-preview {
+  display: none;
+}
+
+#watch-preview-wait.htmx-request {
+  display: flex;
+}
+
+.watch-wait {
+  flex-direction: column;
+  padding-top: 4px;
+}
+
+.watch-wait-bar {
+  height: 3px;
+  margin-bottom: 26px;
+  overflow: hidden;
+  background: var(--rule-light);
+}
+
+.watch-wait-bar span {
+  display: block;
+  width: 35%;
+  height: 100%;
+  background: var(--color-link);
+  animation: watch-wait-bar 1.3s ease-in-out infinite;
+}
+
+@keyframes watch-wait-bar {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(290%); }
+}
+
+.watch-wait .kicker {
+  margin: 0 0 8px;
+}
+
+.watch-wait-title {
+  margin: 0 0 18px;
+  font-size: 30px;
+  line-height: 1.12;
+}
+
+.watch-wait-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0 0 26px;
+  padding: 0;
+  font-size: 15px;
+  list-style: none;
+}
+
+.watch-wait-steps li {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.watch-wait-dot {
+  width: 9px;
+  height: 9px;
+  background: var(--color-link);
+  border-radius: 50%;
+  animation: watch-wait-dot 1.2s ease-in-out infinite;
+}
+
+.watch-wait-steps li:nth-child(2) .watch-wait-dot { animation-delay: 0.3s; }
+.watch-wait-steps li:nth-child(3) .watch-wait-dot { animation-delay: 0.6s; }
+
+@keyframes watch-wait-dot {
+  0%, 100% { opacity: 0.25; }
+  50% { opacity: 1; }
+}
+
+.watch-wait-sketch {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 18px;
+  padding: 18px;
+  border: 1.5px dashed var(--rule-medium);
+}
+
+.watch-wait-sketch span {
+  display: block;
+  background: color-mix(in srgb, var(--color-text) 9%, transparent);
+  animation: watch-wait-dot 1.6s ease-in-out infinite;
+}
+
+.watch-wait-tabs {
+  width: 60%;
+  height: 14px;
+}
+
+.watch-wait-sketch .watch-wait-row {
+  display: flex;
+  gap: 16px;
+  background: none;
+  animation: none;
+}
+
+.watch-wait-chart {
+  flex: none;
+  width: 34%;
+  height: 96px;
+}
+
+.watch-wait-sketch .watch-wait-lines {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  justify-content: space-around;
+  background: none;
+  animation: none;
+}
+
+.watch-wait-lines span {
+  height: 10px;
+}
+
+.watch-wait-line {
+  height: 12px;
+}
+
+.watch-wait-line.short {
+  width: 55%;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .watch-wait-bar span,
+  .watch-wait-dot,
+  .watch-wait-sketch span {
+    animation: none;
+  }
 }
 
 .watch-add-form {
@@ -1716,25 +2520,90 @@ a:hover {
   display: block;
 }
 
+/* Narrow windows: the dialog takes the screen and scrolls as one page, the picked company
+   under the search. */
 @media (max-width: 900px) {
   .watch-add {
-    padding: 20px 16px 24px;
+    align-items: stretch;
+    padding: 0;
+  }
+
+  .watch-add-dialog {
+    height: 100%;
+    padding: 20px 16px 0;
+    overflow-y: auto;
+    border: none;
+  }
+
+  .watch-add-title {
+    font-size: 26px;
   }
 
   .watch-add-grid {
+    flex: none;
     grid-template-columns: minmax(0, 1fr);
   }
 
+  .watch-add-find {
+    padding: 0 0 20px;
+    border-right: none;
+  }
+
+  .watch-suggestions {
+    overflow: visible;
+  }
+
   .watch-add-detail {
-    min-height: 0;
-    margin-top: 20px;
-    padding: 16px 0 0;
+    padding: 20px 0 0;
     border-top: 1px solid var(--rule-light);
-    border-left: none;
+  }
+
+  .watch-add-body {
+    overflow: visible;
+  }
+
+  .watch-add-foot {
+    position: sticky;
+    bottom: 0;
+    flex-wrap: wrap;
+    background: var(--color-bg);
   }
 
   .watch-add-form {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .watch-pv-head {
+    flex-direction: column;
+  }
+
+  .watch-pv-side {
+    align-items: flex-start;
+  }
+
+  .watch-pv-overview {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .watch-tabs {
+    overflow-x: auto;
+  }
+
+  .watch-tab {
+    flex: none;
+    padding: 10px 12px 12px;
+  }
+
+  .watch-hl-head {
+    flex-wrap: wrap;
+  }
+
+  .watch-pv-returns {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .watch-skeleton {
+    padding: 4px 14px;
   }
 
   .watch-head-side {
@@ -1757,4 +2626,10 @@ a:hover {
 
 .feeds-all[open] summary {
   margin-bottom: 8px;
+}
+
+/* The system's secondary button has a divider-coloured border, which dark mode loses on the
+   dialog's ground: give it the medium rule there. */
+.watch-pv .btn-secondary {
+  border-color: var(--rule-medium);
 }
