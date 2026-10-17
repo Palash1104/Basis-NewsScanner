@@ -11,6 +11,8 @@ Two exceptions, both on /watchlist and both the user's own action (2026-10-16):
 
 * "Preview" for a stock about to be added asks Yahoo for its ticker and Google News for its
   headlines (app/watch/preview.py), so its aliases can be judged before it is added.
+* `newsdesk serve` keeps the NSE and BSE company lists behind "Add a stock" a day fresh, in a
+  background thread, never inside a request (app/watch/companies.py `ListRefresher`).
 * "Add to watchlist" and "Remove" write config/watchlist.yaml (app/watch/watchlist_edit.py) -
   never the database. They are the only POST routes, and each checks that the request came
   from this app's own page: the Host is localhost, the Origin (or Referer) is this app, and
@@ -371,6 +373,7 @@ def create_app(
     allowed_hosts: frozenset[str] = LOCAL_HOSTS,
     preview_transport: object | None = None,
     ticker_fetch: Callable | None = None,
+    refresh_lists: bool = False,
 ) -> FastAPI:
     """Build the app. `init_db` is never called: the web UI does not migrate anything."""
     settings = settings or load_settings()
@@ -386,6 +389,13 @@ def create_app(
     web.state.watchlist = _load_watchlist(web.state.watchlist_path)
     web.state.watchlist_mtime = _file_mtime(web.state.watchlist_path)
     web.state.companies_path = companies_path or settings.resolve_path(company_list.LIST_FILE)
+    # Only `newsdesk serve` downloads the lists (refresh_lists=True); a test app never does.
+    web.state.lists = company_list.ListRefresher(
+        web.state.companies_path,
+        settings.resolve_path(settings.paths.lock_dir),
+        settings.http.user_agent,
+        enabled=refresh_lists,
+    )
     web.state.backup_dir = backup_dir or watchlist_edit.BACKUP_DIR
     web.state.allowed_hosts = allowed_hosts
     # Tests stand in for Google News and Yahoo here; None means the real ones.
@@ -515,34 +525,52 @@ def create_app(
 
     def _editor_context(request: Request, now: datetime) -> dict[str, object]:
         """What the editor needs: the token, the version of the file the page shows, the
-        peer groups, and whether NSE's company list has been downloaded yet."""
+        peer groups, and the state of the company lists."""
         state = request.app.state
         try:
             version: str | None = watchlist_edit.read(state.watchlist_path).version
             unreadable = None
         except Exception as exc:  # a broken file is shown, never edited
             version, unreadable = None, f"{type(exc).__name__}: {exc}"
-        age = company_list.list_age(state.companies_path, now)
+        state.lists.kick()
+        companies, lists = company_list.load(state.companies_path)
         return {
             "token": state.write_token,
             "version": version,
             "unreadable": unreadable,
             "groups": current_watchlist(request).groups,
-            "companies_age_days": None if age is None else age.days,
+            "companies_count": len(companies),
+            "lists": lists,
         }
 
     @web.get("/watchlist/companies", response_class=HTMLResponse)
-    def watch_companies(request: Request, q: str = "") -> HTMLResponse:
-        """Type-ahead for "Add a stock": NSE-listed companies whose name or symbol matches,
-        from the list the scanner keeps (no request is made here)."""
-        found = company_list.load_companies(request.app.state.companies_path)
-        on_list = {item.symbol for item in current_watchlist(request).watchlist}
+    def watch_companies(request: Request, q: str = "", retry: bool = False) -> HTMLResponse:
+        """Type-ahead for "Add a stock": NSE- and BSE-listed companies whose name or code
+        matches, or the newest listings when nothing is typed. Read from the cached lists;
+        when there are none yet, it says they are downloading and asks again shortly."""
+        state = request.app.state
+        downloading = state.lists.kick(force=retry)
+        companies, lists = company_list.load(state.companies_path)
+        today = utcnow().astimezone(settings.tz).date()
+        watched = current_watchlist(request).watchlist
+        query = q.strip()
+        matches = (
+            company_list.search(companies, query)
+            if query
+            else company_list.recent(companies, today)
+        )
         context = {
             "request": request,
-            "query": q,
-            "ready": bool(found),
-            "matches": company_list.search(found, q) if found else [],
-            "on_list": on_list,
+            "query": query,
+            "ready": bool(companies),
+            "downloading": downloading,
+            "can_download": state.lists.enabled,
+            "lists": lists,
+            "matches": matches,
+            "on_list": {
+                c.key for c in matches if company_list.on_watchlist(c, watched) is not None
+            },
+            "today": today,
         }
         return templates.TemplateResponse(request, "_watch_companies.html", context)
 
@@ -550,7 +578,7 @@ def create_app(
     def watch_preview(
         request: Request,
         session: ReadSession,
-        symbol: str,
+        company: str,
         name: str = "",
         strong: str | None = None,
         weak: str | None = None,
@@ -560,10 +588,12 @@ def create_app(
         and drop among real headlines - before it is added."""
         now = utcnow()
         found = company_list.find(
-            company_list.load_companies(request.app.state.companies_path), symbol
+            company_list.load_companies(request.app.state.companies_path), company
         )
         if found is None:
-            raise HTTPException(status_code=404, detail=f"{symbol} is not in NSE's list")
+            raise HTTPException(
+                status_code=404, detail=f"{company} is not in the NSE or BSE company lists"
+            )
         watched = current_watchlist(request)
         draft = company_list.draft(found, group if group in watched.groups else None)
         if strong is not None or weak is not None or name:
@@ -583,13 +613,17 @@ def create_app(
             live=problem is None,
             transport=request.app.state.preview_transport,
             fetch=request.app.state.ticker_fetch,
+            tickers=found.yahoo_candidates,
         )
+        if result.ticker is not None and result.ticker.symbol:
+            draft = draft.model_copy(update={"symbol": result.ticker.symbol})
         context = base_context(request, session, active="watchlist", now=now) | {
             "company": found,
             "draft": draft,
             "problem": problem,
             "result": result,
-            "on_list": any(item.symbol == draft.symbol for item in watched.watchlist),
+            "on_list": company_list.on_watchlist(found, watched.watchlist),
+            "today": now.astimezone(settings.tz).date(),
         }
         context |= _editor_context(request, now)
         return templates.TemplateResponse(request, "_watch_preview.html", context)
@@ -606,13 +640,19 @@ def create_app(
             raise HTTPException(status_code=403, detail=why)
         state = request.app.state
         found = company_list.find(
-            company_list.load_companies(state.companies_path), form.get("symbol", "")
+            company_list.load_companies(state.companies_path), form.get("company", "")
         )
         if found is None:
-            return _back(error="that company is not in NSE's list")
+            return _back(error="that company is not in the NSE or BSE company lists")
+        # The ticker the preview found Yahoo answers to; only one of the company's own.
+        yahoo = form.get("yahoo", "")
+        if yahoo not in found.yahoo_candidates:
+            return _back(error="preview the company first, so its Yahoo ticker is checked")
         watched = current_watchlist(request)
+        if (already := company_list.on_watchlist(found, watched.watchlist)) is not None:
+            return _back(error=f"{already.name or already.symbol} is already on the watchlist")
         group = form.get("group", "")
-        item = company_list.draft(found, group if group in watched.groups else None)
+        item = company_list.draft(found, group if group in watched.groups else None, yahoo)
         item = item.model_copy(
             update={
                 "name": form.get("name", "").strip() or item.name,
@@ -840,4 +880,4 @@ def create_app(
 
 def app_from_env() -> FastAPI:
     """Factory for `uvicorn --reload`, which needs an import string."""
-    return create_app()
+    return create_app(refresh_lists=True)

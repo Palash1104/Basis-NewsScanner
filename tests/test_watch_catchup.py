@@ -235,7 +235,8 @@ PEAD_SCHEMA = (
     "id TEXT NOT NULL UNIQUE, exchange TEXT, company TEXT, code TEXT, isin TEXT, "
     "category TEXT, headline TEXT, attachment_url TEXT, exchange_time TEXT, fetched_at TEXT)"
 )
-PFOCUS_ISIN = "INE367G01020"
+# BSE's ISIN for 532748 in its list of 2026-10-16, which is what the PEAD tool writes.
+PFOCUS_ISIN = "INE367G01038"
 FAR_BACK = datetime(2026, 1, 1, tzinfo=UTC)
 
 
@@ -333,6 +334,28 @@ def test_a_first_read_keeps_a_week_and_a_cursor_read_keeps_everything(tmp_path: 
     # A cursor past the end means the file was recreated: read it again from the start.
     recreated = read_bse_announcements(path, isins, 99, FAR_BACK)
     assert len(recreated.found) == 1 and recreated.position == 1
+
+
+def test_bse_rows_are_matched_on_the_scrip_code_too(tmp_path: Path) -> None:
+    """A split gives a company a new ISIN, and the PEAD tool writes BSE's current one: a
+    watchlist still holding the old ISIN finds the filing by its BSE code (2026-10-17)."""
+    path = pead_write(
+        tmp_path / "announcements.db",
+        [
+            bse_row("a", PFOCUS_ISIN, "2026-10-08T10:05:00", "2026-10-08T10:06:10+05:30"),
+            bse_row("b", None, "2026-10-08T10:07:00", "2026-10-08T10:08:00+05:30"),
+        ],
+    )
+    old = {"INE367G01020": "PFOCUS.NS"}  # the ISIN from before
+    assert read_bse_announcements(path, old, None, FAR_BACK).found == []
+    found = read_bse_announcements(path, old, None, FAR_BACK, {"532748": "PFOCUS.NS"}).found
+    assert [(symbol, a.link.rsplit("/", 1)[1]) for symbol, a in found] == [
+        ("PFOCUS.NS", "a.pdf"),
+        ("PFOCUS.NS", "b.pdf"),  # no ISIN at all, still its code
+    ]
+    only_codes = read_bse_announcements(path, {}, None, FAR_BACK, {"532748": "PFOCUS.NS"})
+    assert len(only_codes.found) == 2 and only_codes.position == 2
+    assert read_bse_announcements(path, {}, None, FAR_BACK).found == []  # nothing to match
 
 
 def test_a_missing_or_broken_shared_file_is_an_error_not_a_crash(tmp_path: Path) -> None:

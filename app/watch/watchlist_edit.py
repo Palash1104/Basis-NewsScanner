@@ -82,6 +82,8 @@ def stock_block(item: WatchItem, note: str) -> str:
         lines.append(f"    nse_name: {_q(item.nse_name)}")
     if item.isin:
         lines.append(f"    isin: {_q(item.isin)}")
+    if item.bse_code:
+        lines.append(f"    bse_code: {_q(item.bse_code)}")
     lines.append(f"    # {note}")
     lines.append("    aliases:")
     lines.append(f"      strong: {_flow(item.aliases.strong)}")

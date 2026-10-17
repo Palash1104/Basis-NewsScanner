@@ -95,7 +95,12 @@ def company_label(item: WatchItem) -> str:
     other names the news uses for it. Without them a "Brahma AI raises $150M" story read as
     not about Prime Focus at all (the gate, 2026-10-08)."""
     name = item.nse_name or item.name or item.symbol
-    label = f"{name} (NSE: {item.nse_symbol})" if item.nse_symbol else name
+    if item.nse_symbol:
+        label = f"{name} (NSE: {item.nse_symbol})"
+    elif item.bse_code:  # listed only on BSE (user, 2026-10-17)
+        label = f"{name} (BSE: {item.bse_code})"
+    else:
+        label = name
     others = [
         alias
         for alias in (*item.aliases.strong, *item.aliases.weak)

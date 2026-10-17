@@ -180,10 +180,20 @@ def _drivers(
     return found
 
 
+def exchange_of(symbol: str) -> str | None:
+    """The exchange a watchlist stock's Yahoo ticker trades on."""
+    if symbol.endswith(".NS"):
+        return "NSE"
+    if symbol.endswith(".BO"):
+        return "BSE"
+    return None
+
+
 def _kicker(item: WatchItem, watchlist: WatchlistFile, asset: AssetConfig | None) -> str:
     if item.type == "stock":
         group = watchlist.groups.get(item.group or "")
-        return " · ".join(part for part in ("NSE", group.name if group else None) if part)
+        exchange = exchange_of(item.symbol)
+        return " · ".join(part for part in (exchange, group.name if group else None) if part)
     if asset is None:
         return ""
     return " · ".join(part for part in (asset.exchange, asset.currency) if part)

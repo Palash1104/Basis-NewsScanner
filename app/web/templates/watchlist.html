@@ -1,5 +1,8 @@
 {% extends "base.html" %}
 {% block title %}BASIS · Watchlist{% endblock %}
+{# Full width like the feed (user, 2026-10-17): under a full-bleed masthead, the 1280px canvas
+   left the page stranded on the left of a wide window. #}
+{% block screen_class %}screen-wide{% endblock %}
 
 {% block content %}
 {# The design's watchlist screen (design/NOTES.md 2.4). Its "Add a commodity" button is "Add a
@@ -22,11 +25,12 @@
   </div>
 </div>
 
-{# Opened by the button (CSS :target), or after an edit, which comes back here with a message. #}
+{# Opened by the button (CSS :target), or after an edit, which comes back here with a message.
+   Left: the search, always there; right: the company picked, before anything is added. #}
 <section id="watch-add" class="watch-add{% if added or removed or error or unreadable %} open{% endif %}"
-  aria-label="Add a stock">
+  aria-labelledby="watch-add-title">
   <div class="watch-add-head">
-    <h6 class="watch-section">Add a stock</h6>
+    <h2 id="watch-add-title" class="watch-add-title">Add a stock</h2>
     <a class="btn btn-ghost" href="#">Close</a>
   </div>
   {% if added %}
@@ -38,30 +42,48 @@
   {% if unreadable %}
     <p class="watch-note">config/watchlist.yaml doesn't load ({{ unreadable }}), so the page
       won't change it. Fix it by hand; the page picks it up as soon as it loads.</p>
-  {% elif companies_age_days is none %}
-    <p class="watch-note">NSE's list of companies hasn't been downloaded yet. The watchlist
-      scanner fetches it when it starts, or run <code>uv run newsdesk companies --refresh</code>.</p>
   {% else %}
-    <div class="field watch-search">
-      <label for="watch-search">Company name or NSE symbol</label>
-      <input id="watch-search" class="input" type="search" name="q" autocomplete="off"
-        placeholder="e.g. Mazagon Dock, or MAZDOCK"
-        hx-get="/watchlist/companies" hx-trigger="input changed delay:200ms, search"
-        hx-target="#watch-suggestions" />
+    <div class="watch-add-grid">
+      <div class="watch-add-find">
+        <div class="field">
+          <label for="watch-search">Company name, NSE symbol or BSE code</label>
+          <input id="watch-search" class="input" type="search" name="q" autocomplete="off"
+            placeholder="e.g. Mazagon Dock, MAZDOCK or 543237"
+            hx-get="/watchlist/companies" hx-trigger="input changed delay:200ms, search"
+            hx-target="#watch-suggestions" hx-sync="this:replace" />
+        </div>
+        {# Filled on load with the newest listings, then with matches as you type. #}
+        <div id="watch-suggestions" class="watch-suggestions" aria-live="polite"
+          hx-get="/watchlist/companies" hx-trigger="load"></div>
+      </div>
+      <div class="watch-add-detail">
+        <p id="watch-preview-wait" class="watch-note htmx-indicator">Checking Yahoo and Google News…</p>
+        <div id="watch-preview">
+          <p class="watch-note watch-add-empty">Pick a company to see which of its headlines BASIS
+            would keep, and to check Yahoo has its prices. Nothing is added until you say so.</p>
+        </div>
+      </div>
     </div>
-    <div id="watch-suggestions" class="watch-suggestions" aria-live="polite"></div>
-    <p id="watch-preview-wait" class="watch-note htmx-indicator">Checking Yahoo and Google News…</p>
-    <div id="watch-preview"></div>
-    <p class="cell-note">From NSE's list of listed companies, downloaded
-      {{ "today" if companies_age_days == 0 else companies_age_days ~ " days ago" }}. Companies
-      listed only on BSE aren't offered.</p>
   {% endif %}
 </section>
 
 <div class="watch-cards">
   {% for card in cards %}
+    {# Five rows, laid on the grid's own rows (subgrid), so names, prices, lines and notes
+       line up across a row of cards however long a name or a note runs. #}
     <div class="watch-card">
-      <div class="kicker">{{ card.kicker or ("Stock" if card.stock else "Commodity") }}</div>
+      <div class="watch-card-head">
+        <span class="kicker">{{ card.kicker or ("Stock" if card.stock else "Commodity") }}</span>
+        {% if version %}
+          <form method="post" action="/watchlist/remove" class="watch-card-remove"
+            onsubmit='return confirm({{ ("Remove " ~ card.name ~ " from the watchlist?") | tojson }})'>
+            <input type="hidden" name="token" value="{{ token }}" />
+            <input type="hidden" name="version" value="{{ version }}" />
+            <input type="hidden" name="symbol" value="{{ card.symbol }}" />
+            <button class="btn btn-ghost" type="submit" aria-label="Remove {{ card.name }}">Remove</button>
+          </form>
+        {% endif %}
+      </div>
       <div class="watch-card-name">
         {% if card.href %}<a href="{{ card.href }}">{{ card.name }}</a>{% else %}{{ card.name }}{% endif %}
       </div>
@@ -85,15 +107,6 @@
       <div class="watch-card-driver">
         {% if card.driver %}{{ card.driver_mark }} {{ card.driver }}{% else %}No calls in the last week.{% endif %}
       </div>
-      {% if version %}
-        <form method="post" action="/watchlist/remove" class="watch-card-remove"
-          onsubmit='return confirm({{ ("Remove " ~ card.name ~ " from the watchlist?") | tojson }})'>
-          <input type="hidden" name="token" value="{{ token }}" />
-          <input type="hidden" name="version" value="{{ version }}" />
-          <input type="hidden" name="symbol" value="{{ card.symbol }}" />
-          <button class="btn btn-ghost" type="submit">Remove</button>
-        </form>
-      {% endif %}
     </div>
   {% endfor %}
 </div>

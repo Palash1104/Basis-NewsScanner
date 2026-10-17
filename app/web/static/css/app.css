@@ -259,6 +259,13 @@ a:hover {
   max-width: none;
 }
 
+/* The watchlist fills the window too (user, 2026-10-17), for the same reason: capped at the
+   canvas it sat in the left of a wide window, its "Add a stock" button mid-page. Four cards
+   grow into the width; the news column's text is capped in `ch` like the feed's. */
+.screen-wide {
+  max-width: none;
+}
+
 .screen-split {
   display: grid;
   grid-template-columns: minmax(0, 1fr) var(--rail-width);
@@ -1243,10 +1250,26 @@ a:hover {
   border-bottom: 2px solid var(--color-divider);
 }
 
+/* Each card lays its five parts on the grid's own rows (subgrid), so names, prices, lines and
+   notes line up along a row of cards however long one name or note runs. */
 .watch-card {
+  display: grid;
+  grid-row: span 5;
+  grid-template-rows: subgrid;
+  align-content: start;
+  row-gap: 0;
   min-width: 0;
   padding: 28px 24px 28px 0;
   border-right: 1px solid color-mix(in srgb, var(--color-text) 20%, transparent);
+}
+
+.watch-card-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+  margin-bottom: 8px;
 }
 
 .watch-card:not(:nth-child(4n + 1)) {
@@ -1257,19 +1280,18 @@ a:hover {
   border-right: none;
 }
 
-.watch-card .kicker {
-  margin-bottom: 8px;
-}
 
+/* A stock's name wraps rather than ending in "Apollo Micro Syste…"; the subgrid keeps the
+   prices under it level across the row. */
 .watch-card-name {
-  margin-bottom: 2px;
+  margin-bottom: 4px;
   font-family: var(--font-heading);
   font-size: 24px;
   font-weight: 800;
+  line-height: 1.12;
   letter-spacing: -0.015em;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  text-wrap: balance;
 }
 
 .watch-card-name a {
@@ -1365,6 +1387,7 @@ a:hover {
   display: flex;
   flex-direction: column;
   min-width: 0;
+  max-width: 90ch;
 }
 
 .watch-news-headline {
@@ -1483,8 +1506,10 @@ a:hover {
 }
 
 /* ---------------------------------------------------------------- watchlist editor */
-/* "Add a stock" (user, 2026-10-16): the design's own button, form fields and tags, below the
-   screen head. Hidden until the button's #watch-add is the target, or after an edit. */
+/* "Add a stock" (user, 2026-10-16; laid out again 2026-10-17): a filled panel under the screen
+   head, the search on the left - always there, whatever state the company lists are in - and
+   the company picked on the right. Hidden until the button's #watch-add is the target, or
+   after an edit, which comes back with a message. The design's own button, fields and tags. */
 
 .watch-head-side {
   display: flex;
@@ -1495,8 +1520,11 @@ a:hover {
 
 .watch-add {
   display: none;
-  padding: 8px 0 28px;
-  border-bottom: 2px solid var(--color-divider);
+  margin: 28px 0 4px;
+  padding: 24px 28px 28px;
+  background: var(--color-surface);
+  /* The jump to #watch-add stops below the sticky masthead, not under it. */
+  scroll-margin-top: 96px;
 }
 
 .watch-add:target,
@@ -1508,15 +1536,45 @@ a:hover {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
+  gap: 16px;
 }
 
-.watch-search {
-  max-width: 460px;
-  margin-top: 8px;
+.watch-add-title {
+  margin: 0;
+  font-size: 22px;
+}
+
+/* The panel is the surface colour, which is also the inputs': on it they take the page's. */
+.watch-add .input {
+  background: var(--color-bg);
+}
+
+.watch-add-grid {
+  display: grid;
+  grid-template-columns: minmax(280px, 420px) minmax(0, 1fr);
+  gap: 0 40px;
+  align-items: start;
+  margin-top: 16px;
+}
+
+.watch-add-find,
+.watch-add-detail {
+  min-width: 0;
+}
+
+.watch-add-detail {
+  min-height: 160px;
+  padding-left: 40px;
+  border-left: 1px solid var(--rule-light);
+}
+
+.watch-add-empty {
+  max-width: 46ch;
+  margin-top: 26px;
 }
 
 .watch-flash {
-  margin: 8px 0;
+  margin: 10px 0;
   font-size: 14px;
 }
 
@@ -1524,48 +1582,88 @@ a:hover {
   color: var(--color-link);
 }
 
+.watch-suggestions {
+  margin-top: 12px;
+}
+
+.watch-suggest-title {
+  margin: 0 0 6px;
+}
+
 .watch-suggest-list {
-  max-width: 460px;
-  margin: 4px 0 12px;
+  margin: 0;
   padding: 0;
   list-style: none;
+  border-bottom: 1px solid var(--rule-light);
 }
 
 .watch-suggest {
   display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 8px;
+  flex-direction: column;
+  gap: 3px;
   width: 100%;
-  padding: 8px 10px;
+  padding: 10px;
   font: inherit;
-  font-size: 14px;
   text-align: left;
   color: var(--color-text);
   background: transparent;
   border: none;
-  border-top: 1px solid color-mix(in srgb, var(--color-text) 20%, transparent);
+  border-top: 1px solid var(--rule-light);
   cursor: pointer;
 }
 
 .watch-suggest:hover,
 .watch-suggest:focus-visible {
-  background: var(--color-surface);
+  background: var(--color-bg);
 }
 
-.watch-preview {
-  max-width: 920px;
-  padding-top: 16px;
-  border-top: 1px solid color-mix(in srgb, var(--color-text) 20%, transparent);
+.watch-suggest-name {
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.watch-suggest-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  font-size: 12px;
+  color: var(--color-muted);
+}
+
+.watch-suggest-meta .tag {
+  padding: 1px 7px;
+  font-size: 10px;
+}
+
+.watch-lists {
+  margin: 14px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--color-muted);
+}
+
+.watch-list-errors {
+  margin: 4px 0 12px;
+  padding-left: 18px;
+  font-size: 12px;
+  color: var(--color-muted);
 }
 
 .watch-preview-name {
   margin: 4px 0 6px;
-  font-size: 24px;
+  font-size: 26px;
+  line-height: 1.15;
+}
+
+.watch-preview-new {
+  margin: 0 0 8px;
+  font-size: 13px;
+  color: var(--color-muted);
 }
 
 .watch-ticker {
-  margin: 0 0 12px;
+  margin: 0 0 16px;
   font-size: 14px;
   font-weight: 700;
 }
@@ -1574,7 +1672,6 @@ a:hover {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px 24px;
-  max-width: 920px;
 }
 
 .watch-add-actions {
@@ -1584,7 +1681,7 @@ a:hover {
 }
 
 .watch-counts {
-  margin: 20px 0 4px;
+  margin: 24px 0 4px;
   font-size: 15px;
 }
 
@@ -1592,12 +1689,14 @@ a:hover {
   vertical-align: top;
 }
 
+/* Remove sits quietly at the card's top right, level on every card. */
 .watch-card-remove {
-  margin-top: 8px;
+  flex: none;
+  margin: 0;
 }
 
 .watch-card-remove .btn {
-  padding-inline: 0;
+  padding: 0;
   font-size: 12px;
   color: var(--color-muted);
 }
@@ -1607,6 +1706,44 @@ a:hover {
   background: transparent;
   text-decoration: underline;
 }
+
+.htmx-indicator {
+  display: none;
+}
+
+.htmx-request.htmx-indicator,
+.htmx-request .htmx-indicator {
+  display: block;
+}
+
+@media (max-width: 900px) {
+  .watch-add {
+    padding: 20px 16px 24px;
+  }
+
+  .watch-add-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .watch-add-detail {
+    min-height: 0;
+    margin-top: 20px;
+    padding: 16px 0 0;
+    border-top: 1px solid var(--rule-light);
+    border-left: none;
+  }
+
+  .watch-add-form {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .watch-head-side {
+    align-items: flex-start;
+  }
+}
+
+/* ---------------------------------------------------------------- runs: every feed */
+/* The feed-health table's full list, folded under the problems (2026-10-16). */
 
 .feeds-all {
   margin-top: 12px;
@@ -1620,23 +1757,4 @@ a:hover {
 
 .feeds-all[open] summary {
   margin-bottom: 8px;
-}
-
-.htmx-indicator {
-  display: none;
-}
-
-.htmx-request.htmx-indicator,
-.htmx-request .htmx-indicator {
-  display: block;
-}
-
-@media (max-width: 700px) {
-  .watch-add-form {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .watch-head-side {
-    align-items: flex-start;
-  }
 }

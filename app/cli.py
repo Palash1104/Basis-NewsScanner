@@ -1366,7 +1366,7 @@ def serve(
         return
     from app.web.main import create_app
 
-    uvicorn.run(create_app(settings), host=host, port=port, log_level="info")
+    uvicorn.run(create_app(settings, refresh_lists=True), host=host, port=port, log_level="info")
 
 
 @app.command()
@@ -1618,25 +1618,58 @@ def watch(
 
 @app.command("companies")
 def companies_command(
-    query: Annotated[str, typer.Argument(help="A name or NSE symbol to look up.")] = "",
+    query: Annotated[str, typer.Argument(help="A name, NSE symbol or BSE code to look up.")] = "",
     refresh: Annotated[
-        bool, typer.Option("--refresh", help="Download NSE's company list again first.")
+        bool, typer.Option("--refresh", help="Download all three lists again first.")
     ] = False,
+    new: Annotated[bool, typer.Option("--new", help="List the newest listings.")] = False,
 ) -> None:
-    """NSE's list of listed companies, which the page's "Add a stock" searches. The watchlist
-    scanner downloads it weekly; --refresh does it now."""
+    """The NSE, NSE SME and BSE company lists that the page's "Add a stock" searches. The
+    scanner and the web server download them daily; --refresh does it now."""
     settings, _ = _bootstrap()
     path = settings.resolve_path(company_list.LIST_FILE)
-    if refresh or company_list.list_age(path, utcnow()) is None:
+    now = utcnow()
+    sources = list(company_list.SOURCES) if refresh else company_list.due(path, now)
+    if sources:
         typer.echo(
-            company_list.refresh(path, settings.http.user_agent, settings.http.timeout_seconds)
+            company_list.refresh(
+                path,
+                settings.http.user_agent,
+                now=now,
+                lock_dir=_lock_dir(settings),
+                sources=sources,
+            )
         )
-    found = company_list.load_companies(path)
-    if not query:
-        typer.echo(f"{len(found)} companies in {path}")
-        return
-    for company in company_list.search(found, query):
-        typer.echo(f"{company.symbol:<14} {company.name}  ({company.isin}, {company.series})")
+    found, lists = company_list.load(path)
+    for status in lists:
+        when = (
+            status.fetched_at.astimezone(settings.tz).strftime("%d %b %H:%M")
+            if (status.fetched_at)
+            else "never"
+        )
+        failed = f" - last try failed: {status.error}" if status.error else ""
+        typer.echo(f"{status.label:<8} {status.count:>6} companies, downloaded {when}{failed}")
+    typer.echo(f"{len(found)} companies in all, in {path}")
+    today = now.astimezone(settings.tz).date()
+    picked = (
+        company_list.recent(found, today, limit=30)
+        if new
+        else company_list.search(found, query, limit=20)
+        if query
+        else []
+    )
+    for company in picked:
+        codes = " / ".join(
+            part
+            for part in (
+                f"NSE {company.nse_symbol}" if company.nse_symbol else "",
+                f"BSE {company.bse_code}" if company.bse_code else "",
+            )
+            if part
+        )
+        added = f"  listed {company.added_on:%d %b %Y}" if company.is_new(today) else ""
+        sme = ", SME" if company.sme else ""
+        typer.echo(f"{company.yahoo_symbol:<16} {company.name}  ({codes}{sme}){added}")
 
 
 @app.command("watch-test-message")

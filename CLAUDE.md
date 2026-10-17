@@ -353,7 +353,11 @@ order (the user dropped the stops between steps 3 and 7 on 2026-10-08):
     stopped. The PEAD tool backfills after a restart: a filing from 02:00 written at 09:30 is
     simply the next seq.
     - The file is opened read-only (`mode=ro`, `watch.bse_announcements_db`); only BSE rows
-      whose ISIN is a watchlist stock's are kept (`isin` in watchlist.yaml). NSE rows are
+      of a watchlist stock are kept, matched on ISIN or BSE scrip code
+      (`companies.filing_keys`): the watchlist's own `isin` and `bse_code`, plus the ISINs and
+      code the company lists give its ticker today. The PEAD tool writes BSE's current ISIN,
+      and a split changes it: until 2026-10-17 four of the eight stocks (PFOCUS, APOLLO, HAL,
+      BDL) held their pre-split ISIN, so their BSE filings never matched. NSE rows are
       ignored: BASIS reads NSE itself.
     - With no cursor yet, or one past the file's end (the file was recreated), the file is
       read from the start and only the last `catch_up_max_days` (7) are kept. Behind a
@@ -440,14 +444,43 @@ order (the user dropped the stops between steps 3 and 7 on 2026-10-08):
     `format._fit_block` closes the quote if it cuts inside it. `newsdesk watch-test-message`
     rebuilds a stored summary in the current format, headed TEST.
   - **Watchlist editor** on `/watchlist` (user asked for add/remove with type-ahead):
-    - Type-ahead from NSE's `EQUITY_L.csv` (`app/watch/companies.py`, verified 2026-10-16),
-      cached at `data/nse_equity_list.csv`. The scanner downloads it when missing or a week
-      old; `newsdesk companies --refresh` does it now. BSE-only companies are not offered:
-      BSE's API refused this machine in October.
-    - A draft takes the name without "Limited" as a strong alias and the NSE symbol as strong
-      (6+ characters) or weak. The preview (`app/watch/preview.py`) checks Yahoo and runs the
-      matcher over 30 days of stored headlines plus one Google News search, then the user
-      edits the names and adds it. Adding is disabled until Yahoo answers.
+    - Type-ahead over three lists (`app/watch/companies.py`; user, 2026-10-17: "add bse
+      stocks as well ... make sure that it can update to include new ipo names"): NSE's
+      `EQUITY_L.csv`, NSE Emerge's `SME_EQUITY_L.csv` (underscored header, two-digit years)
+      and BSE's `ListofScripData` API (the PEAD tool's URL and headers: BSE answers 403
+      without Origin and Accept). BSE's is fetched with `requests` (`_bse_get`), the PEAD
+      tool's own call: on 2026-10-17 BSE answered httpx 403 with the same URL and headers,
+      the morning after the PEAD tool's `requests` call had downloaded it. Kept in `data/companies.json`; each list is downloaded
+      again when 20 hours old, a failed one keeps its last good copy and rests 2 hours.
+      `data/nse_equity_list.csv` (the NSE-only file of 2026-10-16) is read until the first
+      download. Both `newsdesk serve` (a background thread, `ListRefresher`; never inside a
+      request) and the scanner refresh it, under one lock (`job_lock`, "companies").
+    - Merged by ISIN; a BSE code whose ISIN NSE doesn't have joins the one NSE company with
+      the same issuer and security type (the ISIN's first nine characters) when exactly one
+      on each side has them, keeping BSE's as `bse_isin` (the exchanges update ISINs after a
+      split on different days: 36 companies differed on 2026-10-16). Rights entitlements
+      (ISIN type 20, e.g. NATCO-RE) are left out.
+    - New listings: NSE dates its listings; a BSE code is dated the day BASIS first saw it
+      (`first_seen`; nothing is dated on the very first download). The last 30 days are
+      offered under the search box before anything is typed; `newsdesk companies --new`
+      lists them.
+    - The search box is always on the page (2026-10-17: with no list yet there was nothing
+      to type in). While the lists download, the box says so and asks again every 1.5 s; a
+      failed download says which list and why, with "Try again".
+    - A company on NSE is added as `SYMBOL.NS`; one only on BSE as `.BO`, under its scrip id
+      or numeric code, whichever Yahoo answers to (the preview tries both and the form
+      carries the one that worked). Entries get `isin` (BSE's, when they differ) and
+      `bse_code`. A BSE-only stock has no `nse_symbol`/`nse_name`; the model is told
+      "Name (BSE: code)".
+    - A draft takes the name without "Limited" as a strong alias and the NSE symbol or BSE
+      scrip id as strong (6+ characters) or weak. The preview (`app/watch/preview.py`) checks
+      Yahoo and runs the matcher over 30 days of stored headlines plus one Google News
+      search, then the user edits the names and adds it. Adding is disabled until Yahoo
+      answers, and refused unless the form's ticker is one the preview checked.
+    - Layout (2026-10-17): `/watchlist` is full width (`screen-wide`); the cards are a
+      subgrid, so kicker, name, price, chart and driver line up across a row whatever the
+      name's length, and Remove sits in the card head. "Add a stock" is a panel with the
+      search on the left and the picked company on the right, stacked below 900 px.
     - Writes go through `app/watch/watchlist_edit.py`: text edits that keep every comment,
       validated before writing (exactly one entry added or gone, every other entry
       unchanged), refused if the file changed since the page loaded, previous file kept in
@@ -490,7 +523,7 @@ uv run newsdesk wake-log [--days 1]           # did the market-hours wake fire, 
 uv run newsdesk skipped-extractions [--days 30]   # stories with no event extraction (by category), for the monthly check
 uv run newsdesk lead-times [--days 30]         # which source had each watchlist story first, lead over the filing
 uv run newsdesk watch-test-message [--run ID] [--send]   # a stored "while you were away" in the current format, headed TEST
-uv run newsdesk companies [QUERY] [--refresh]   # NSE's company list behind the page's "Add a stock"
+uv run newsdesk companies [QUERY] [--refresh] [--new]   # NSE + BSE lists behind "Add a stock"
 uv run python scripts/watch_gate.py [--limit 20] [ids]   # the watchlist call, live, on stored stories -> data/watch_gate.md
 powershell -ExecutionPolicy Bypass -File scripts/install_tasks.ps1 [-Remove]   # Windows tasks
 ```

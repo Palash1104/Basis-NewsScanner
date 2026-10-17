@@ -59,7 +59,7 @@ but skips summaries and records why. The digest only includes summarized stories
 | `uv run newsdesk serve` | The web UI on http://127.0.0.1:8787 (`--port` to change it). It only reads the database, so it is safe to run while the pipeline is writing. |
 | `uv run newsdesk watch [--once] [--since TIME]` | The watchlist scanner: the market feeds in `config/watch_feeds.yaml` and NSE's announcements every 10 minutes, BSE's through the PEAD tool's shared file, Google News searches for every alias, and intraday prices in market hours. Stores every headline that names a watchlist stock, groups them into stories, calls each story with Flash-Lite (the watch lane, 120 a day) and sends the alerts. After the laptop was off or asleep it catches up from the last completed scan. `--once` does one pass and exits; `--since` forces a catch-up from that time. |
 | `uv run newsdesk watch-test-message [--run ID] [--send]` | Rebuild a past "while you were away" summary in the current format from what is stored (the latest one by default), headed TEST. Prints it; `--send` sends it to Telegram. Records nothing. |
-| `uv run newsdesk companies [QUERY] [--refresh]` | NSE's list of listed companies, which the page's "Add a stock" searches. The scanner downloads it weekly; `--refresh` does it now. |
+| `uv run newsdesk companies [QUERY] [--refresh] [--new]` | The NSE, NSE SME and BSE lists of listed companies, which the page's "Add a stock" searches. `newsdesk serve` and the scanner download them once a day, so a new listing appears within a day; `--refresh` downloads them now, `--new` lists the last 30 days' listings. |
 | `uv run newsdesk watch-report [--days 3]` | What the scanner saw: articles and stories per stock per day, stories touching several stocks, which source was first, feed health, Yahoo's lag (writes `data/watch_report.md`). |
 | `uv run newsdesk wake-log [--days 1]` | Did the market-hours wake work? For each weekday morning: whether the wake timer fired, whether the network came up and whether a scan ran. A morning it didn't fire shows what Windows says woke the laptop instead. |
 | `uv run newsdesk lead-times [--days 30]` | For the watchlist: which source had each story first, its median lead over the exchange filing, and how far behind everyone else was. |
@@ -250,7 +250,7 @@ its own page (checked by host, origin and a token). Each edit keeps the previous
 | `/story/{id}` | One story: the summary, every asset it calls with the mechanism and the move since news, every score as it comes in, any rule the model disputed, the extracted event, and all source articles. |
 | `/track-record` | Whether the calls are worth anything: hit rates by rule, event type, origin, confidence and horizon, gated so a thin record can't look like a measurement. |
 | `/assets`, `/asset/{symbol}` | Which assets get called, what keeps moving them, and how those calls turned out. |
-| `/watchlist` | Your stocks and commodities, the week's news touching them, and what was sent to Telegram. **Add a stock** searches NSE's list as you type, previews what its names would catch among real headlines (and checks Yahoo has its prices) before you add it, and **Remove** takes an entry off. Both edit `config/watchlist.yaml`; the scanner picks the change up within a minute, no restart. |
+| `/watchlist` | Your stocks and commodities, the week's news touching them, and what was sent to Telegram. **Add a stock** searches NSE's and BSE's lists as you type (with the last 30 days' new listings shown before you type), previews what its names would catch among real headlines (and checks Yahoo has its prices) before you add it, and **Remove** takes an entry off. Both edit `config/watchlist.yaml`; the scanner picks the change up within a minute, no restart. |
 | `/runs` | Whether the schedule is being kept, what the LLM cost, what broke, and feed health: which feeds are failing or stale. Feed health is shown only here, never sent to Telegram. |
 | `/design` | The style guide: tokens, both themes, and their measured contrast. Not in the nav. |
 
@@ -347,8 +347,8 @@ used to improve Google's products. On Anthropic, `claude-haiku-4-5` costs a few 
 - **Google News links** are Google redirect URLs, labelled with the real outlet's name.
 - **BSE filings arrive only while the PEAD tool runs.** BSE answers BASIS's own requests
   with 403, so BASIS reads the BSE announcements that `pead_tool.py` (in
-  `Documents/resultscanner`) appends to its `announcements.db`, matched on ISIN and opened
-  read-only (`watch.bse_announcements_db`). When that tool isn't running, BSE-only filings
+  `Documents/resultscanner`) appends to its `announcements.db`, matched on ISIN or BSE code
+  and opened read-only (`watch.bse_announcements_db`). When that tool isn't running, BSE-only filings
   reach BASIS when it next starts and catches up. BASIS reads the file in the order rows were
   written, so a filing backfilled hours late is never skipped; it arrives in one "while you
   were away" message, not as an alert of its own.

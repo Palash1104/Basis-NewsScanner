@@ -343,7 +343,11 @@ class SharedRead:
 
 
 def read_bse_announcements(
-    path: Path, isins: dict[str, str], after: int | None, floor: datetime
+    path: Path,
+    isins: dict[str, str],
+    after: int | None,
+    floor: datetime,
+    codes: dict[str, str] | None = None,
 ) -> SharedRead:
     """BSE announcements by watchlist companies from the PEAD tool's shared SQLite file
     (user, 2026-10-07: BSE's API answers BASIS with 403, the PEAD tool reads it fine).
@@ -353,12 +357,14 @@ def read_bse_announcements(
     backfills after a restart (written at 09:30, filed at 02:00) is read like any other.
     With no cursor yet, or one past the file's end (the file was recreated), the file is
     read from the start and only filings since `floor` are kept. The file is opened
-    read-only; rows are matched on ISIN (`isins`: ISIN -> symbol). Times without a zone are
-    the exchange's own clock (IST)."""
+    read-only; rows are matched on ISIN (`isins`: ISIN -> symbol) or BSE scrip code (`codes`:
+    code -> symbol; 2026-10-17, as an ISIN changes with a split and the tool writes BSE's
+    current one). Times without a zone are the exchange's own clock (IST)."""
     import sqlite3
 
     if not path.exists():
         return SharedRead([], None, f"the PEAD tool hasn't run yet: no {path.name}")
+    codes = codes or {}
     try:
         conn = sqlite3.connect(f"file:{path.as_posix()}?mode=ro", uri=True, timeout=2)
         try:
@@ -368,19 +374,23 @@ def read_bse_announcements(
             # left by a read of an empty file - keeps every row behind it, however old.
             first_read = after is None or after > top
             start = 0 if first_read else after
-            marks = ",".join("?" * len(isins))
+            wanted = " OR ".join(
+                f"{column} IN ({','.join('?' * len(keys))})"
+                for column, keys in (("isin", isins), ("code", codes))
+                if keys
+            )
             rows = conn.execute(
-                "SELECT company, category, headline, attachment_url, exchange_time, isin "
+                "SELECT company, category, headline, attachment_url, exchange_time, isin, code "
                 "FROM announcements WHERE rowid > ? AND rowid <= ? AND exchange = 'BSE' "
-                f"AND isin IN ({marks}) ORDER BY rowid",
-                [start, top, *isins],
+                f"AND ({wanted or '0'}) ORDER BY rowid",
+                [start, top, *isins, *codes],
             ).fetchall()
         finally:
             conn.close()
     except Exception as exc:
         return SharedRead([], None, f"{type(exc).__name__}: {exc}")
     found: list[tuple[str, Announcement]] = []
-    for company, category, headline, link, stamp, isin in rows:
+    for company, category, headline, link, stamp, isin, code in rows:
         try:
             filed = datetime.fromisoformat(stamp)
         except (TypeError, ValueError):
@@ -392,7 +402,7 @@ def read_bse_announcements(
             continue
         found.append(
             (
-                isins[isin],
+                codes.get(code) or isins[isin],
                 Announcement(
                     company=company or "",
                     subject=(category or "BSE announcement").strip(),

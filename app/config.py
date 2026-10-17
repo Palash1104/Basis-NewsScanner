@@ -518,12 +518,15 @@ class WatchItem(_Strict):
     """
 
     type: WatchType
-    symbol: str = Field(min_length=1)  # the Yahoo Finance ticker, e.g. PFOCUS.NS
+    symbol: str = Field(min_length=1)  # the Yahoo Finance ticker, e.g. PFOCUS.NS or 544230.BO
     name: str | None = None  # how the page writes it; commodities take assets.yaml's
     nse_symbol: str | None = None
     # Exactly as NSE names the company in its announcements feed, which carries no symbol.
     nse_name: str | None = None
     isin: str | None = None  # how BSE filings (via the PEAD tool) are matched
+    # BSE's scrip code, for the record (filings are matched by ISIN). A stock only on BSE has
+    # no nse_symbol and a .BO ticker (user, 2026-10-17).
+    bse_code: str | None = None
     aliases: WatchAliases = Field(default_factory=WatchAliases)
     vocab: list[str] = Field(default_factory=list)  # words that make a weak alias count
     exclude: list[str] = Field(default_factory=list)  # other things that share a name
@@ -557,6 +560,8 @@ class WatchItem(_Strict):
             raise ValueError(f"{self.symbol}: commodities are not news-scanned; drop the aliases")
         if self.isin and not ISIN.fullmatch(self.isin):
             raise ValueError(f"{self.symbol}: {self.isin!r} is not an ISIN")
+        if self.bse_code and not self.bse_code.isdigit():
+            raise ValueError(f"{self.symbol}: {self.bse_code!r} is not a BSE scrip code")
         for pattern in self.stop:
             try:
                 re.compile(pattern)

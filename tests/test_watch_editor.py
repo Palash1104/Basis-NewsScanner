@@ -1,10 +1,24 @@
-"""Adding and removing watchlist stocks from the BASIS page (user, 2026-10-16).
+"""Adding and removing watchlist stocks from the BASIS page (user, 2026-10-16), with BSE
+companies and new listings (user, 2026-10-17).
 
-tests/fixtures/nse_equity_list.csv is shaped like NSE's EQUITY_L.csv: its header is copied
-from the live file (the column names after the first carry a leading space)."""
+The fixtures are written the way the three company lists are:
 
+  nse_equity_list.csv  eleven real rows of NSE's EQUITY_L.csv as downloaded on 2026-10-17,
+                       header and all (the column names after the first carry a leading
+                       space). Tata Motors is TMPV there since its demerger.
+  nse_sme_list.csv     SME_EQUITY_L.csv's real header (underscores, a trailing comma, two-digit
+                       years) over two made-up companies: SMEDEMO and SMEOLD are not real.
+  bse_scrips.json      rows of BSE's ListofScripData. ABB's is the PEAD tool's real row
+                       verbatim; the other codes and ISINs are BSE's own, from its list of
+                       2026-10-16 (the PEAD tool's scrip master), with names and scrip ids
+                       written for the test. 999999 "Not A Real Company" is made up, and
+                       suspended.
+"""
+
+import json
 import shutil
-from datetime import UTC, datetime, timedelta
+import threading
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 import httpx
@@ -12,8 +26,8 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session, sessionmaker
 
-from app.assets import PriceSample
-from app.config import CONFIG_DIR, Settings, load_watchlist_file
+from app.assets import NoPriceData, PriceSample
+from app.config import CONFIG_DIR, Settings, WatchAliases, WatchItem, load_watchlist_file
 from app.db import (
     init_db,
     make_engine,
@@ -24,11 +38,16 @@ from app.db import (
 from app.models import Article
 from app.pipeline.fetch import SourceResolver
 from app.watch import companies, watchlist_edit
+from app.watch.analyse import company_label
 from app.watch.scan import Watcher
 from app.web.main import create_app
 
-FIXTURE = Path(__file__).parent / "fixtures" / "nse_equity_list.csv"
-NOW = datetime(2026, 10, 16, 13, 0, tzinfo=UTC)
+FIXTURES = Path(__file__).parent / "fixtures"
+NSE_CSV = (FIXTURES / "nse_equity_list.csv").read_bytes()
+SME_CSV = (FIXTURES / "nse_sme_list.csv").read_bytes()
+BSE_ROWS = json.loads((FIXTURES / "bse_scrips.json").read_text(encoding="utf-8"))
+NOW = datetime(2026, 10, 16, 13, 0, tzinfo=UTC)  # 18:30 IST, 16 Oct
+TODAY = date(2026, 10, 16)
 ORIGIN = "http://testserver"
 
 GOOGLE_NEWS = b"""<rss version="2.0"><channel><title>Search</title>
@@ -41,9 +60,55 @@ GOOGLE_NEWS = b"""<rss version="2.0"><channel><title>Search</title>
 </channel></rss>"""
 
 
+def exchanges(
+    nse: bytes = NSE_CSV,
+    sme: bytes = SME_CSV,
+    bse: list[dict[str, object]] | None = None,
+    refuse: tuple[str, ...] = (),
+    seen: list[httpx.Request] | None = None,
+) -> httpx.MockTransport:
+    """NSE's two files and BSE's API, answering as they do; `refuse` names the ones that
+    answer 403 the way NSE and BSE refuse a request they don't like."""
+    rows = BSE_ROWS if bse is None else bse
+
+    def answer(request: httpx.Request) -> httpx.Response:
+        if seen is not None:
+            seen.append(request)
+        if request.url.host == "api.bseindia.com":
+            source = "bse"
+        elif request.url.path.endswith("SME_EQUITY_L.csv"):
+            source = "nse_sme"
+        else:
+            source = "nse"
+        if source in refuse:
+            return httpx.Response(403, text="<html><h1>Access Denied</h1></html>")
+        if source == "bse":
+            return httpx.Response(200, json=rows)
+        return httpx.Response(200, content=nse if source == "nse" else sme)
+
+    return httpx.MockTransport(answer)
+
+
+def download(path: Path, now: datetime = NOW, **answers: object) -> str:
+    return companies.refresh(path, "test", transport=exchanges(**answers), now=now)  # type: ignore[arg-type]
+
+
 @pytest.fixture
-def listed() -> list[companies.Company]:
-    return companies.parse_equity_list(FIXTURE.read_bytes())
+def lists_path(tmp_path: Path) -> Path:
+    path = tmp_path / "companies.json"
+    download(path)
+    return path
+
+
+@pytest.fixture
+def listed(lists_path: Path) -> list[companies.Company]:
+    return companies.load_companies(lists_path)
+
+
+def company(listed: list[companies.Company], wanted: str) -> companies.Company:
+    found = companies.find(listed, wanted)
+    assert found is not None, wanted
+    return found
 
 
 @pytest.fixture
@@ -54,44 +119,265 @@ def watchlist_copy(tmp_path: Path) -> Path:
     return path
 
 
-# ---------------------------------------------------------------- NSE's list
+# ---------------------------------------------------------------- reading the lists
 
 
-def test_the_list_is_read_as_nse_writes_it(listed: list[companies.Company]) -> None:
-    bdl = companies.find(listed, "BDL")
-    assert bdl is not None and bdl.name == "Bharat Dynamics Limited"
-    assert bdl.isin == "INE171Z01018" and bdl.series == "EQ" and bdl.yahoo_symbol == "BDL.NS"
-    with pytest.raises(ValueError, match="not NSE's equity list"):
-        companies.parse_equity_list(b"a,b\n1,2\n")
+def test_nse_s_two_lists_are_read_as_nse_writes_them() -> None:
+    main = companies.parse_nse_csv(NSE_CSV)
+    assert len(main) == 11
+    assert main[4] == {
+        "symbol": "BDL",
+        "name": "Bharat Dynamics Limited",
+        "series": "EQ",
+        "listed": "23-MAR-2018",
+        "isin": "INE171Z01026",
+    }
+    sme = companies.parse_nse_csv(SME_CSV)  # underscores and a trailing comma
+    assert [row["symbol"] for row in sme] == ["SMEDEMO", "SMEOLD"]
+    assert sme[0]["series"] == "SM" and sme[0]["listed"] == "14-OCT-26"
+    with pytest.raises(ValueError, match="not an NSE equity list"):
+        companies.parse_nse_csv(b"<html><body>Please wait</body></html>")
+    with pytest.raises(ValueError, match="no companies"):
+        companies.parse_nse_csv(NSE_CSV.splitlines()[0] + b"\n")
 
 
-def test_type_ahead_finds_by_symbol_or_any_word_of_the_name(
-    listed: list[companies.Company],
-) -> None:
-    assert [c.symbol for c in companies.search(listed, "BDL")][:1] == ["BDL"]
-    assert "BDL" in [c.symbol for c in companies.search(listed, "dynam")]
-    assert [c.symbol for c in companies.search(listed, "tata")] == ["TATAMOTORS"]
-    assert companies.search(listed, "t") == []  # one letter is not a search
+def test_bse_s_list_is_read_without_its_suspended_codes() -> None:
+    rows = companies.parse_bse_json(BSE_ROWS)
+    assert rows[0] == {
+        "code": "500002",
+        "id": "ABB",
+        "name": "ABB India Limited",  # the issuer's name, not the abbreviated scrip name
+        "isin": "INE117A01022",
+    }
+    assert "999999" not in [row["code"] for row in rows] and len(rows) == 8
+    assert companies.parse_bse_json({"Table": BSE_ROWS}) == rows  # the other shape BSE uses
+    with pytest.raises(ValueError, match="no companies"):
+        companies.parse_bse_json({"Table": []})
+
+
+def test_a_company_on_both_exchanges_is_one_company(listed: list[companies.Company]) -> None:
+    # 11 on NSE's main board, 2 on SME, and ABB only on BSE; the other seven BSE codes are
+    # NSE companies too.
+    assert len(listed) == 14
+    bdl = company(listed, "BDL")
+    assert bdl.name == "Bharat Dynamics Limited" and bdl.exchanges == ["NSE", "BSE"]
+    assert bdl.bse_code == "541143" and bdl.isin == "INE171Z01026" and bdl.bse_isin is None
+    assert bdl.listed == date(2018, 3, 23)
+    assert bdl.yahoo_candidates == ["BDL.NS", "BDL.BO", "541143.BO"]
+    abb = company(listed, "ABB")
+    assert abb.exchanges == ["BSE"] and abb.symbol == "ABB"
+    assert abb.yahoo_candidates == ["ABB.BO", "500002.BO"]  # BSE's scrip id, then its code
+    sme = company(listed, "SMEDEMO")
+    assert sme.sme and sme.listed == date(2026, 10, 14) and sme.yahoo_symbol == "SMEDEMO.NS"
+    # Found by ISIN, BSE code, BSE ticker in either form, or NSE symbol.
+    for wanted in ("INE066F01020", "541154", "541154.BO", "HAL.BO", "HAL.NS", "hal"):
+        assert company(listed, wanted).nse_symbol == "HAL", wanted
+    assert companies.find(listed, "NOTREAL") is None
+
+
+def test_a_split_one_exchange_has_not_caught_up_with_is_still_one_company() -> None:
+    """360 ONE on 2026-10-16: NSE still had the ISIN from before its split, BSE the new one.
+    GATECH and its DVR share an issuer, so a third ISIN of theirs (made up) is left alone."""
+    nse = [
+        {"symbol": "360ONE", "name": "360 ONE WAM LIMITED", "series": "EQ", "isin": "INE466L01020"},
+        {"symbol": "GATECH", "name": "GACM Technologies Limited", "isin": "INE224E01028"},
+        {"symbol": "GATECHDVR", "name": "GACM Technologies Limited", "isin": "INE224E01036"},
+    ]
+    bse = [
+        {"code": "542772", "id": "360ONE", "name": "360 ONE WAM Ltd", "isin": "INE466L01038"},
+        {"code": "531723", "id": "GATECH", "name": "GACM Technologies Ltd", "isin": "INE224E01044"},
+    ]
+    merged = companies.merge({"nse": nse, "bse": bse}, {})
+    assert len(merged) == 4
+    one = company(merged, "360ONE")
+    assert (one.isin, one.bse_isin, one.bse_code) == ("INE466L01020", "INE466L01038", "542772")
+    assert company(merged, "INE466L01038") == one
+    # BSE filings come keyed by BSE's ISIN, so that is the one a watchlist entry takes.
+    assert companies.draft(one).isin == "INE466L01038"
+    assert company(merged, "531723").nse_symbol is None  # not guessed onto either
+
+
+def test_a_rights_entitlement_is_not_offered() -> None:
+    """NATCO-RE, on NSE's list of 2026-10-17 and BSE's as 751145 (its scrip id here made up):
+    it trades for a few days, then is gone."""
+    row = companies.parse_nse_csv(
+        NSE_CSV.splitlines()[0] + b"\n"
+        b"NATCO-RE,Natco Pharma Limited-RE,BE,12-OCT-2026,2,1,INE987B20018,2\n"
+    )
+    bse = [{"code": "751145", "id": "NATCORE", "name": "Natco Pharma Ltd", "isin": "INE987B20018"}]
+    assert companies.merge({"nse": row, "bse": bse}, {}) == []
+
+
+def test_type_ahead_finds_by_name_symbol_or_bse_code(listed: list[companies.Company]) -> None:
+    def symbols(query: str) -> list[str]:
+        return [c.symbol for c in companies.search(listed, query)]
+
+    assert symbols("BDL")[:1] == ["BDL"]
+    assert "BDL" in symbols("dynam")  # any word of the name
+    assert symbols("541154") == ["HAL"]  # a BSE code
+    assert symbols("tata") == ["TMPV"]
+    assert symbols("abb")[:1] == ["ABB"]
+    assert symbols("INE0IX101010") == ["DATAPATTNS"]
+    assert symbols("t") == []  # one letter is not a search
+    assert symbols("zzzz") == []
 
 
 def test_a_draft_takes_the_name_and_judges_the_symbol(listed: list[companies.Company]) -> None:
-    bdl = companies.draft(companies.find(listed, "BDL"))  # type: ignore[arg-type]
-    assert bdl.name == "Bharat Dynamics"
+    bdl = companies.draft(company(listed, "BDL"))
+    assert bdl.name == "Bharat Dynamics" and bdl.symbol == "BDL.NS"
     assert bdl.aliases.strong == ["Bharat Dynamics"] and bdl.aliases.weak == ["BDL"]
-    pfocus = companies.draft(companies.find(listed, "PFOCUS"))  # type: ignore[arg-type]
+    assert (bdl.nse_name, bdl.isin, bdl.bse_code) == (
+        "Bharat Dynamics Limited",
+        "INE171Z01026",
+        "541143",
+    )
+    pfocus = companies.draft(company(listed, "PFOCUS"))
     assert pfocus.aliases.strong == ["Prime Focus", "PFOCUS"] and pfocus.aliases.weak == []
-    assert pfocus.nse_name == "Prime Focus Limited" and pfocus.isin == "INE367G01020"
-    assert companies.draft(companies.find(listed, "360ONE")).name == "360 One Wam"  # type: ignore[arg-type]
+    assert companies.draft(company(listed, "360ONE")).name == "360 One Wam"
     assert companies.parse_aliases(" Tata Motors, , TML ,Tata Motors") == ["Tata Motors", "TML"]
 
 
-def test_a_refresh_replaces_the_list_only_with_the_list(tmp_path: Path) -> None:
-    path = tmp_path / "list.csv"
-    good = httpx.MockTransport(lambda r: httpx.Response(200, content=FIXTURE.read_bytes()))
-    assert "10 companies" in companies.refresh(path, "test", 5, transport=good)
-    bad = httpx.MockTransport(lambda r: httpx.Response(200, content=b"<html>blocked</html>"))
-    assert "not refreshed" in companies.refresh(path, "test", 5, transport=bad)
-    assert len(companies.load_companies(path)) == 10  # the good copy stays
+def test_a_company_only_on_bse_is_drafted_as_a_bse_ticker(
+    listed: list[companies.Company],
+) -> None:
+    abb = company(listed, "ABB")
+    item = companies.draft(abb)
+    assert item.symbol == "ABB.BO" and item.nse_symbol is None and item.nse_name is None
+    assert item.bse_code == "500002" and item.isin == "INE117A01022"
+    assert item.aliases.strong == ["ABB India"] and item.aliases.weak == ["ABB"]
+    # The ticker Yahoo answered to in the preview, if it is one of the company's own.
+    assert companies.draft(abb, yahoo="500002.BO").symbol == "500002.BO"
+    assert companies.draft(abb, yahoo="ABB.NS").symbol == "ABB.BO"
+    assert company_label(item) == "ABB India (BSE: 500002)"  # what the model is told
+    with pytest.raises(ValueError, match="not a BSE scrip code"):
+        WatchItem.model_validate({**item.model_dump(), "bse_code": "ABB"})
+
+
+# ---------------------------------------------------------------- keeping them fresh
+
+
+def test_each_list_keeps_its_last_good_copy(tmp_path: Path) -> None:
+    path = tmp_path / "companies.json"
+    seen: list[httpx.Request] = []
+    assert download(path, seen=seen) == "company lists: NSE 11, NSE SME 2, BSE 8"
+    bse = next(r for r in seen if r.url.host == "api.bseindia.com")
+    assert bse.headers["Origin"] == "https://www.bseindia.com"  # BSE refuses without it
+    assert "application/json" in bse.headers["Accept"]
+
+    line = download(path, NOW + timedelta(days=1), refuse=("bse",), nse=b"<html>wait</html>")
+    assert "NSE failed (ValueError: not an NSE equity list" in line
+    assert "BSE failed (RuntimeError: refused (HTTP 403))" in line and "NSE SME 2" in line
+    found, status = companies.load(path)
+    assert len(found) == 14  # nothing lost
+    by_source = {s.source: s for s in status}
+    assert by_source["bse"].count == 8 and "refused" in (by_source["bse"].error or "")
+    assert by_source["bse"].fetched_at == NOW  # the last good download
+    assert by_source["nse_sme"].error is None and by_source["nse_sme"].label == "NSE SME"
+
+
+def test_the_lists_are_downloaded_once_a_day_and_rest_after_a_failure(tmp_path: Path) -> None:
+    path = tmp_path / "companies.json"
+    assert companies.due(path, NOW) == ["nse", "nse_sme", "bse"]
+    download(path)
+    assert companies.due(path, NOW + timedelta(hours=19)) == []
+    later = NOW + timedelta(hours=21)
+    assert companies.due(path, later) == ["nse", "nse_sme", "bse"]
+    download(path, later, refuse=("bse",))
+    assert companies.due(path, later + timedelta(hours=1)) == []  # BSE rests
+    assert companies.due(path, later + timedelta(hours=2)) == ["bse"]
+    assert companies.refresh(path, "test", sources=[]) == "company lists: nothing due"
+
+
+def test_a_new_listing_is_offered_before_anything_is_typed(tmp_path: Path) -> None:
+    path = tmp_path / "companies.json"
+    without = [r for r in BSE_ROWS if r["SCRIP_CD"] not in ("500002", "544898")]
+    download(path, NOW - timedelta(days=2), bse=without)
+    # The first download dates nothing: BASIS hadn't looked before, so nothing is new.
+    assert companies.read_file(path).first_seen == {}
+    download(path)
+    assert companies.read_file(path).first_seen == {
+        "BSE:500002": "2026-10-16",
+        "BSE:544898": "2026-10-16",
+    }
+    listed = companies.load_companies(path)
+    abb = company(listed, "ABB")
+    assert abb.first_seen == TODAY and abb.added_on == TODAY and abb.is_new(TODAY)
+    # ESDS is new to BSE's list here but NSE dates its listing (4 Sep): that date wins.
+    esds = company(listed, "ESDS")
+    assert esds.added_on == date(2026, 9, 4) and not esds.is_new(TODAY)
+    assert [c.symbol for c in companies.recent(listed, TODAY)] == ["ABB", "SMEDEMO"]
+    assert companies.recent(listed, TODAY + timedelta(days=60)) == []
+
+
+def test_the_nse_list_of_the_first_version_is_used_until_the_new_file_exists(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "companies.json"
+    lines = NSE_CSV.decode().splitlines()
+    (tmp_path / "nse_equity_list.csv").write_text(
+        "\n".join(line for line in lines if not line.startswith("ESDS,")), encoding="utf-8"
+    )
+    found, status = companies.load(path)  # before any download
+    assert len(found) == 10 and [s.source for s in status] == ["nse"]
+    download(path)
+    # Seeded from the old list, so only what it lacked counts as new to NSE's.
+    assert companies.read_file(path).first_seen == {"NSE:ESDS": "2026-10-16"}
+
+
+def test_the_web_server_downloads_the_lists_in_the_background(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    gate = threading.Event()
+    calls: list[list[str]] = []
+    real = companies.refresh
+
+    def slow(path: Path, user_agent: str, **options: object) -> str:
+        calls.append(list(options["sources"]))  # type: ignore[call-overload]
+        gate.wait(5)
+        return real(path, user_agent, transport=exchanges(), lock_dir=options["lock_dir"])  # type: ignore[arg-type]
+
+    monkeypatch.setattr(companies, "refresh", slow)
+    path = tmp_path / "companies.json"
+    lists = companies.ListRefresher(path, tmp_path / "locks", "test", enabled=True)
+    assert lists.kick() is True
+    assert lists.kick() is True  # still running: not started twice
+    gate.set()
+    assert lists._thread is not None
+    lists._thread.join(5)
+    assert calls == [["nse", "nse_sme", "bse"]]
+    assert lists.last_line == "company lists: NSE 11, NSE SME 2, BSE 8"
+    assert lists.kick() is False  # nothing due
+    assert lists.kick(force=True) is True  # the page's "Try again"
+    lists._thread.join(5)
+    assert len(calls) == 2
+    off = companies.ListRefresher(tmp_path / "x.json", tmp_path / "locks", "test", enabled=False)
+    assert off.kick() is False
+
+
+# ---------------------------------------------------------------- BSE filings
+
+
+def test_bse_filings_are_matched_on_what_the_lists_say_today(
+    listed: list[companies.Company],
+) -> None:
+    """HAL's watchlist ISIN until 2026-10-17 was the one from before its split; the PEAD tool
+    keys BSE filings by BSE's current ISIN and code, so those are matched as well."""
+    aliases = WatchAliases(strong=["Hindustan Aeronautics"])
+    stale = WatchItem(
+        type="stock", symbol="HAL.NS", name="HAL", isin="INE066F01012", aliases=aliases
+    )
+    bse_only = companies.draft(company(listed, "ABB"), yahoo="500002.BO")
+    unlisted = WatchItem(
+        type="stock", symbol="XYZ.NS", name="Xyz", aliases=WatchAliases(strong=["Xyz"])
+    )
+    isins, codes = companies.filing_keys([stale, bse_only, unlisted], listed)
+    assert isins == {
+        "INE066F01012": "HAL.NS",
+        "INE066F01020": "HAL.NS",
+        "INE117A01022": "500002.BO",
+    }
+    assert codes == {"541154": "HAL.NS", "500002": "500002.BO"}
+    assert companies.filing_keys([stale], []) == ({"INE066F01012": "HAL.NS"}, {})
 
 
 # ---------------------------------------------------------------- the file
@@ -101,24 +387,23 @@ def test_adding_then_removing_leaves_the_file_as_it_was(
     watchlist_copy: Path, listed: list[companies.Company], tmp_path: Path
 ) -> None:
     original = watchlist_copy.read_text(encoding="utf-8")
-    item = companies.draft(companies.find(listed, "TATAMOTORS"))  # type: ignore[arg-type]
+    item = companies.draft(company(listed, "TMPV"))
     backups = tmp_path / "backups"
     added = watchlist_edit.add_stock(
         watchlist_copy, item, watchlist_edit.version_of(original), NOW, backup_dir=backups
     )
     symbols = [e.symbol for e in added.watchlist]
     # After the last stock, before the commodities.
-    assert symbols.index("TATAMOTORS.NS") == symbols.index("ASTRAMICRO.NS") + 1
+    assert symbols.index("TMPV.NS") == symbols.index("ASTRAMICRO.NS") + 1
     text = watchlist_copy.read_text(encoding="utf-8")
     assert "# Added from the BASIS page on 2026-10-16" in text
     assert '# Never "Astra" alone' in text  # every comment kept
-    assert load_watchlist_file(watchlist_copy).stocks[-1].aliases.strong == [
-        "Tata Motors",
-        "TATAMOTORS",
-    ]
+    entry = load_watchlist_file(watchlist_copy).stocks[-1]
+    assert entry.aliases.strong == ["Tata Motors Passenger Vehicles"]
+    assert entry.aliases.weak == ["TMPV"] and entry.bse_code == "500570"
     watchlist_edit.remove_entry(
         watchlist_copy,
-        "TATAMOTORS.NS",
+        "TMPV.NS",
         watchlist_edit.version_of(text),
         NOW.replace(minute=1),
         backup_dir=backups,
@@ -150,11 +435,11 @@ def test_an_edit_to_a_file_that_changed_since_the_page_loaded_is_refused(
 ) -> None:
     stale = watchlist_edit.version_of(watchlist_copy.read_text(encoding="utf-8"))
     watchlist_copy.write_text(watchlist_copy.read_text(encoding="utf-8") + "\n# by hand\n")
-    item = companies.draft(companies.find(listed, "TATAMOTORS"))  # type: ignore[arg-type]
+    item = companies.draft(company(listed, "TMPV"))
     with pytest.raises(watchlist_edit.EditRefused, match="changed since this page loaded"):
         watchlist_edit.add_stock(watchlist_copy, item, stale, NOW, backup_dir=watchlist_copy.parent)
     current = watchlist_edit.version_of(watchlist_copy.read_text(encoding="utf-8"))
-    bdl = companies.draft(companies.find(listed, "BDL"))  # type: ignore[arg-type]
+    bdl = companies.draft(company(listed, "BDL"))
     with pytest.raises(watchlist_edit.EditRefused, match="already on the watchlist"):
         watchlist_edit.add_stock(
             watchlist_copy, bdl, current, NOW, backup_dir=watchlist_copy.parent
@@ -164,8 +449,21 @@ def test_an_edit_to_a_file_that_changed_since_the_page_loaded_is_refused(
 # ---------------------------------------------------------------- the page
 
 
-@pytest.fixture
-def page(tmp_path: Path, settings: Settings, watchlist_copy: Path) -> TestClient:
+def yahoo(symbol: str) -> PriceSample:
+    """Yahoo as the page meets it: ABB under its BSE code only, everything else by name.
+    Yesterday's close, from the real clock the page checks it against."""
+    if symbol == "ABB.BO":
+        raise NoPriceData("No data found, symbol may be delisted")
+    exchange = "BSE" if symbol.endswith(".BO") else "NSI"
+    return PriceSample(
+        [(datetime.now(UTC) - timedelta(hours=20), 712.5)],
+        {"exchangeName": exchange, "currency": "INR"},
+    )
+
+
+def make_page(
+    tmp_path: Path, settings: Settings, watchlist_copy: Path, lists_path: Path
+) -> TestClient:
     database = tmp_path / "newsdesk.db"
     engine = make_engine(database)
     init_db(engine)
@@ -185,22 +483,33 @@ def page(tmp_path: Path, settings: Settings, watchlist_copy: Path) -> TestClient
         )
         session.commit()
     engine.dispose()
-
-    def yahoo(symbol: str) -> PriceSample:
-        return PriceSample([(NOW, 712.5)], {"exchangeName": "NSI", "currency": "INR"})
-
-    reader = make_read_only_engine(database)
     app = create_app(
         settings,
-        make_read_only_session_factory(reader),
+        make_read_only_session_factory(make_read_only_engine(database)),
         watchlist_path=watchlist_copy,
-        companies_path=FIXTURE,
+        companies_path=lists_path,
         backup_dir=tmp_path / "backups",
         allowed_hosts=frozenset({"testserver"}),
         preview_transport=httpx.MockTransport(lambda r: httpx.Response(200, content=GOOGLE_NEWS)),
         ticker_fetch=yahoo,
     )
     return TestClient(app)
+
+
+@pytest.fixture
+def page(tmp_path: Path, settings: Settings, watchlist_copy: Path, lists_path: Path) -> TestClient:
+    return make_page(tmp_path, settings, watchlist_copy, lists_path)
+
+
+class FakeLists:
+    """Stands in for the web server's background download."""
+
+    def __init__(self, running: bool, enabled: bool = True) -> None:
+        self.running, self.enabled, self.forced = running, enabled, False
+
+    def kick(self, force: bool = False) -> bool:
+        self.forced = self.forced or force
+        return self.running
 
 
 def _form(client: TestClient) -> dict[str, str]:
@@ -211,39 +520,122 @@ def _form(client: TestClient) -> dict[str, str]:
     return {"token": token, "version": version}
 
 
-def test_the_page_has_an_add_button_and_a_remove_on_every_card(page: TestClient) -> None:
+def test_the_page_has_an_add_button_a_search_box_and_a_remove_on_every_card(
+    page: TestClient,
+) -> None:
     body = page.get("/watchlist").text
     assert '<a class="btn btn-primary" href="#watch-add">Add a stock</a>' in body
     assert body.count('action="/watchlist/remove"') == 12  # 8 stocks and 4 commodities
     assert 'id="watch-search"' in body and 'hx-get="/watchlist/companies"' in body
+    assert 'class="screen screen-wide"' in body  # the full window, not a column
+
+
+def test_the_search_box_is_there_before_the_lists_are(
+    tmp_path: Path, settings: Settings, watchlist_copy: Path
+) -> None:
+    """The first complaint (2026-10-17): with no list yet there was nothing to type in."""
+    client = make_page(tmp_path, settings, watchlist_copy, tmp_path / "none.json")
+    assert 'id="watch-search"' in client.get("/watchlist").text
+    lists = FakeLists(running=True)
+    client.app.state.lists = lists  # type: ignore[attr-defined]
+    body = client.get("/watchlist/companies", params={"q": "mazdock"}).text
+    assert "Downloading the NSE and BSE company lists" in body
+    assert 'hx-include="#watch-search" hx-trigger="load delay:1500ms"' in body  # asks again
+    client.app.state.lists = FakeLists(running=False, enabled=False)  # type: ignore[attr-defined]
+    assert "uv run newsdesk companies --refresh" in client.get("/watchlist/companies").text
+
+
+def test_a_failed_download_says_why_and_offers_to_try_again(
+    tmp_path: Path, settings: Settings, watchlist_copy: Path
+) -> None:
+    path = tmp_path / "companies.json"
+    download(path, refuse=("nse", "nse_sme", "bse"))
+    client = make_page(tmp_path, settings, watchlist_copy, path)
+    lists = FakeLists(running=False)
+    client.app.state.lists = lists  # type: ignore[attr-defined]
+    body = client.get("/watchlist/companies", params={"q": "hal"}).text
+    assert "The company lists couldn't be downloaded." in body
+    assert "<li>BSE: RuntimeError: refused (HTTP 403)</li>" in body
+    assert "retry=1" in body and "Try again</button>" in body
+    client.get("/watchlist/companies", params={"retry": "1"})
+    assert lists.forced
 
 
 def test_suggestions_come_as_you_type(page: TestClient) -> None:
     body = page.get("/watchlist/companies", params={"q": "dynamics"}).text
     assert "Bharat Dynamics" in body and "on the watchlist" in body
-    assert "Tata Motors" in page.get("/watchlist/companies", params={"q": "tata"}).text
+    assert "<span>NSE BDL</span><span>BSE 541143</span>" in body
+    assert "Tata Motors Passenger Vehicles" in page.get("/watchlist/companies?q=tata").text
+    assert "Hindustan Aeronautics" in page.get("/watchlist/companies?q=541154").text
+    abb = page.get("/watchlist/companies", params={"q": "abb"}).text
+    assert "<span>BSE 500002 · ABB</span>" in abb and "NSE ABB" not in abb
     assert (
-        "No NSE-listed company matches"
+        "No company listed on NSE or BSE matches"
         in page.get("/watchlist/companies", params={"q": "zzzz"}).text
     )
+    footer = page.get("/watchlist/companies", params={"q": "zzzz"}).text
+    assert "NSE 11 · NSE SME 2 · BSE 8" in footer and "new listings appear within a day" in footer
+
+
+def test_with_nothing_typed_the_newest_listings_are_offered(
+    tmp_path: Path, settings: Settings, watchlist_copy: Path
+) -> None:
+    """Against the real clock, as the page is: one SME company listed three days ago."""
+    listed_on = datetime.now(companies.INDIA).date() - timedelta(days=3)
+    sme = SME_CSV.replace(b"14-OCT-26", listed_on.strftime("%d-%b-%y").upper().encode())
+    path = tmp_path / "companies.json"
+    download(path, sme=sme)
+    client = make_page(tmp_path, settings, watchlist_copy, path)
+    body = client.get("/watchlist/companies").text
+    assert "New listings · last 30 days" in body
+    assert "Sme Demo Industries" in body
+    assert f"New · listed {listed_on.strftime('%d %b')}" in body
+    assert "Old Sme Demo" not in body and "Bharat Dynamics" not in body
 
 
 def test_the_preview_checks_yahoo_and_shows_keeps_and_drops(page: TestClient) -> None:
-    body = page.get("/watchlist/preview", params={"symbol": "TATAMOTORS"}).text
-    assert "TATAMOTORS.NS on Yahoo: last close 712.50 INR (NSI)" in body
-    assert 'value="Tata Motors, TATAMOTORS"' in body  # editable before adding
+    first = page.get("/watchlist/preview", params={"company": "INE155A01022"}).text
+    assert 'value="Tata Motors Passenger Vehicles"' in first and 'value="TMPV"' in first
+    assert "NSE · TMPV · BSE · 500570 · INE155A01022" in first
+    # "Preview again" with the names edited.
+    body = page.get(
+        "/watchlist/preview",
+        params={"company": "INE155A01022", "strong": "Tata Motors, TMPV", "weak": ""},
+    ).text
+    assert "TMPV.NS on Yahoo: last close 712.50 INR (NSI)" in body
+    assert 'name="yahoo" value="TMPV.NS"' in body
+    assert 'value="Tata Motors, TMPV"' in body  # editable before adding
     assert "Tata Motors shares jump 4% after JLR sales beat" in body  # Google News: a keep
     assert "Tata Motors to cut EV prices" in body  # a stored headline
     assert "top auto picks" in body  # a mention
     assert "<b>2</b> keep" in body and "<b>1</b> mention" in body
     assert "Add to watchlist</button>" in body and "disabled>Add" not in body
+    assert page.get("/watchlist/preview", params={"company": "NOTREAL"}).status_code == 404
+
+
+def test_a_bse_only_company_is_previewed_under_the_ticker_yahoo_knows(page: TestClient) -> None:
+    body = page.get("/watchlist/preview", params={"company": "INE117A01022"}).text
+    assert "BSE · 500002 · INE117A01022" in body and "NSE ·" not in body
+    assert "500002.BO on Yahoo: last close 712.50 INR (BSE)" in body  # ABB.BO had nothing
+    assert 'name="yahoo" value="500002.BO"' in body
+
+
+def test_a_company_yahoo_does_not_know_cannot_be_added(page: TestClient) -> None:
+    def nothing(symbol: str) -> PriceSample:
+        raise NoPriceData("none")
+
+    page.app.state.ticker_fetch = nothing  # type: ignore[attr-defined]
+    body = page.get("/watchlist/preview", params={"company": "INE117A01022"}).text
+    assert "Yahoo has no recent prices under ABB.BO or 500002.BO" in body
+    assert 'name="yahoo" value=""' in body and "disabled>Add to watchlist" in body
 
 
 def test_adding_from_the_page_writes_the_file(page: TestClient, watchlist_copy: Path) -> None:
     form = _form(page) | {
-        "symbol": "TATAMOTORS",
+        "company": "INE155A01022",
+        "yahoo": "TMPV.NS",
         "name": "Tata Motors",
-        "strong": "Tata Motors, TATAMOTORS",
+        "strong": "Tata Motors, TMPV",
         "weak": "TML",
         "group": "",
     }
@@ -252,9 +644,59 @@ def test_adding_from_the_page_writes_the_file(page: TestClient, watchlist_copy: 
     )
     assert response.status_code == 303 and "added=Tata%20Motors" in response.headers["location"]
     entry = load_watchlist_file(watchlist_copy).stocks[-1]
-    assert entry.symbol == "TATAMOTORS.NS" and entry.aliases.weak == ["TML"]
+    assert entry.symbol == "TMPV.NS" and entry.aliases.weak == ["TML"]
+    assert entry.isin == "INE155A01022" and entry.bse_code == "500570"
     assert "Added Tata Motors" in page.get("/watchlist", params={"added": "Tata Motors"}).text
     assert "Tata Motors" in page.get("/watchlist").text  # the card, without a restart
+
+
+def test_adding_a_bse_only_stock_writes_its_bse_ticker(
+    page: TestClient, watchlist_copy: Path
+) -> None:
+    form = _form(page) | {
+        "company": "INE117A01022",
+        "yahoo": "500002.BO",
+        "name": "ABB India",
+        "strong": "ABB India",
+        "weak": "ABB",
+    }
+    response = page.post(
+        "/watchlist/add", data=form, headers={"Origin": ORIGIN}, follow_redirects=False
+    )
+    assert response.status_code == 303 and "added=ABB%20India" in response.headers["location"]
+    entry = load_watchlist_file(watchlist_copy).stocks[-1]
+    assert entry.symbol == "500002.BO" and entry.bse_code == "500002"
+    assert entry.nse_symbol is None and entry.nse_name is None
+    assert '    bse_code: "500002"' in watchlist_copy.read_text(encoding="utf-8")
+    body = page.get("/watchlist").text
+    card = body[body.index('<span class="kicker">BSE</span>') :]
+    assert '<span class="kicker">BSE</span>' in body and "ABB India" in card[:400]
+
+
+@pytest.mark.parametrize(
+    ("change", "error"),
+    [
+        ({"yahoo": ""}, "preview the company first"),  # Yahoo not checked
+        ({"yahoo": "HAL.NS"}, "preview the company first"),  # not this company's ticker
+        ({"company": "NOTREAL"}, "not in the NSE or BSE company lists"),
+        ({"company": "INE171Z01026", "yahoo": "BDL.NS"}, "already on the watchlist"),
+    ],
+    ids=["unchecked", "other-ticker", "unknown", "already-there"],
+)
+def test_an_add_the_preview_did_not_vouch_for_is_refused(
+    page: TestClient, watchlist_copy: Path, change: dict[str, str], error: str
+) -> None:
+    before = watchlist_copy.read_text(encoding="utf-8")
+    form = _form(page) | {"company": "INE155A01022", "yahoo": "TMPV.NS", "strong": "Tata"}
+    response = page.post(
+        "/watchlist/add",
+        data=form | change,
+        headers={"Origin": ORIGIN},
+        follow_redirects=False,
+    )
+    assert response.status_code == 303 and "error=" in response.headers["location"]
+    assert error in page.get(response.headers["location"]).text
+    assert watchlist_copy.read_text(encoding="utf-8") == before
 
 
 def test_removing_from_the_page_writes_the_file(page: TestClient, watchlist_copy: Path) -> None:
@@ -298,7 +740,7 @@ def test_a_write_to_a_name_other_than_localhost_is_refused(
         settings,
         make_read_only_session_factory(make_read_only_engine(database)),
         watchlist_path=watchlist_copy,
-        companies_path=FIXTURE,
+        companies_path=tmp_path / "companies.json",
     )  # the real allowed hosts: 127.0.0.1, localhost, ::1 - not "testserver"
     response = TestClient(app).post(
         "/watchlist/remove", data={"symbol": "GC=F"}, headers={"Origin": ORIGIN}
@@ -327,17 +769,16 @@ def test_the_scanner_picks_up_an_edit_without_a_restart(
     )
     assert watcher.refresh_watchlist() is False  # nothing changed yet
     text = watchlist_copy.read_text(encoding="utf-8")
-    item = companies.draft(companies.find(listed, "TATAMOTORS"))  # type: ignore[arg-type]
+    item = companies.draft(company(listed, "TMPV"))
+    item = item.model_copy(update={"aliases": WatchAliases(strong=["Tata Motors"], weak=["TMPV"])})
     watchlist_edit.add_stock(
         watchlist_copy, item, watchlist_edit.version_of(text), NOW, backup_dir=tmp_path
     )
     assert watcher.refresh_watchlist() is True
-    assert "TATAMOTORS.NS" in [s.symbol for s in watcher.stocks]
-    assert [m.symbol for m in watcher.matcher.match("Tata Motors shares jump 4%")] == [
-        "TATAMOTORS.NS"
-    ]
+    assert "TMPV.NS" in [s.symbol for s in watcher.stocks]
+    assert [m.symbol for m in watcher.matcher.match("Tata Motors shares jump 4%")] == ["TMPV.NS"]
     assert any("Tata+Motors" in q.url for q in watcher.queries)
     # A broken file keeps the list in use.
     watchlist_copy.write_text("watchlist: [oops", encoding="utf-8")
     assert watcher.refresh_watchlist() is False
-    assert "TATAMOTORS.NS" in [s.symbol for s in watcher.stocks]
+    assert "TMPV.NS" in [s.symbol for s in watcher.stocks]

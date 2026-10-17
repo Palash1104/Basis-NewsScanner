@@ -12,7 +12,7 @@ These are the only requests the web app makes, and only when the user asks for a
 """
 
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from urllib.parse import quote_plus
@@ -48,6 +48,7 @@ class PreviewRow:
 class TickerCheck:
     ok: bool
     detail: str
+    symbol: str | None = None  # the ticker Yahoo answered to
 
 
 @dataclass
@@ -81,7 +82,25 @@ def check_ticker(symbol: str, now: datetime, fetch: Callable | None = None) -> T
     age = now - at
     if age > timedelta(days=7):
         return TickerCheck(False, f"Yahoo's latest price for {symbol} is {age.days} days old")
-    return TickerCheck(True, f"{symbol} on Yahoo: last close {close:,.2f} {currency} ({exchange})")
+    return TickerCheck(
+        True, f"{symbol} on Yahoo: last close {close:,.2f} {currency} ({exchange})", symbol
+    )
+
+
+def check_tickers(
+    symbols: Sequence[str], now: datetime, fetch: Callable | None = None
+) -> TickerCheck:
+    """The first of `symbols` Yahoo has recent prices for. A company on BSE can be under its
+    scrip id or its numeric code there, so both are asked before giving up."""
+    failures = []
+    for symbol in symbols:
+        found = check_ticker(symbol, now, fetch)
+        if found.ok:
+            return found
+        failures.append(found.detail)
+    if len(failures) == 1:
+        return TickerCheck(False, failures[0])
+    return TickerCheck(False, f"Yahoo has no recent prices under {' or '.join(symbols)}")
 
 
 def search_url(item: WatchItem, settings: Settings, now: datetime) -> str:
@@ -102,6 +121,7 @@ def preview(
     live: bool = True,
     transport: httpx.BaseTransport | None = None,
     fetch: Callable | None = None,
+    tickers: Sequence[str] | None = None,
 ) -> Preview:
     """The draft's verdicts on stored and searched headlines, and its Yahoo check."""
     result = Preview()
@@ -159,5 +179,5 @@ def preview(
                 judge(article.title, "", article.source_name, article.published_at, "Google News")
         except Exception as exc:
             result.search_error = f"{type(exc).__name__}: {exc}"
-        result.ticker = check_ticker(item.symbol, now, fetch)
+        result.ticker = check_tickers(tickers or [item.symbol], now, fetch)
     return result

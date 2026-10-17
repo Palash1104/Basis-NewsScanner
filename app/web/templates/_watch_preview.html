@@ -2,9 +2,18 @@
    Yahoo check, and what its names keep and drop among real headlines. #}
 {% set blocked = on_list or problem or not version or not result.ticker or not result.ticker.ok %}
 <div class="watch-preview">
-  <div class="kicker">NSE · {{ company.symbol }}{% if company.isin %} · {{ company.isin }}{% endif %}</div>
+  <div class="kicker">
+    {%- if company.nse_symbol %}NSE · {{ company.nse_symbol }}{% if company.sme %} (SME){% endif %}{% endif -%}
+    {%- if company.nse_symbol and company.bse_code %} · {% endif -%}
+    {%- if company.bse_code %}BSE · {{ company.bse_code }}{% endif -%}
+    {%- if company.isin %} · {{ company.isin }}{% endif -%}
+  </div>
   <h3 class="watch-preview-name">{{ company.name }}</h3>
-  {% if on_list %}<p class="watch-flash">{{ draft.symbol }} is already on the watchlist.</p>{% endif %}
+  {% if company.is_new(today) %}
+    <p class="watch-preview-new">{{ "Listed" if company.listed else "New on BSE's list" }}
+      {{ company.added_on.strftime("%d %b %Y") }}.</p>
+  {% endif %}
+  {% if on_list %}<p class="watch-flash">Already on the watchlist as {{ on_list.name or on_list.symbol }} ({{ on_list.symbol }}).</p>{% endif %}
   {% if problem %}<p class="watch-flash watch-flash-error">{{ problem }}.</p>{% endif %}
   {% if result.ticker %}
     <p class="watch-ticker {{ 'up' if result.ticker.ok else 'down' }}">
@@ -14,7 +23,8 @@
   <form method="post" action="/watchlist/add" class="watch-add-form">
     <input type="hidden" name="token" value="{{ token }}" />
     <input type="hidden" name="version" value="{{ version or '' }}" />
-    <input type="hidden" name="symbol" value="{{ company.symbol }}" />
+    <input type="hidden" name="company" value="{{ company.key }}" />
+    <input type="hidden" name="yahoo" value="{{ result.ticker.symbol if result.ticker and result.ticker.symbol else '' }}" />
     <div class="field">
       <label for="watch-name">Name on the page and in alerts</label>
       <input id="watch-name" class="input" name="name" value="{{ draft.name }}" />

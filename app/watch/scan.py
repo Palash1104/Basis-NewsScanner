@@ -64,9 +64,8 @@ from app.watch.alerts import (
 from app.watch.analyse import analyse, read_replies
 from app.watch.catchup import Gap, SourceCoverage, find_gap, possible_gaps
 from app.watch.companies import LIST_FILE as COMPANY_LIST_FILE
-from app.watch.companies import REFRESH_EVERY as COMPANY_LIST_EVERY
-from app.watch.companies import RETRY_AFTER as COMPANY_LIST_RETRY
-from app.watch.companies import list_age
+from app.watch.companies import due as company_lists_due
+from app.watch.companies import filing_keys, load_companies
 from app.watch.companies import refresh as refresh_company_list
 from app.watch.events import Amount, amounts, amounts_conflict, is_order_news
 from app.watch.group import StoryGrouper
@@ -224,10 +223,9 @@ class Watcher:
         # hand), so adding a stock needs no restart. None in tests.
         self.watchlist_path = watchlist_path
         self._watchlist_mtime = _mtime(watchlist_path) if watchlist_path else None
-        # NSE's company list for the page's "Add a stock" (app/watch/companies.py), kept
-        # fresh here because the web app never makes requests of its own. None in tests.
+        # The NSE and BSE company lists behind the page's "Add a stock"
+        # (app/watch/companies.py), kept a day fresh here and by the web server. None in tests.
         self.companies_path = companies_path
-        self._companies_tried_at: datetime | None = None
         self.resolver = resolver
         self.embedder = embedder
         self.snapshots = snapshots
@@ -291,19 +289,21 @@ class Watcher:
         return True
 
     def refresh_companies(self, now: datetime) -> str | None:
-        """Download NSE's company list when it is missing or a week old, at most every few
-        hours if it fails. Returns what happened, or None when nothing was due."""
+        """Download the NSE, NSE SME and BSE company lists that are a day old (or missing), so
+        the page's "Add a stock" offers yesterday's listings; a list that failed is tried
+        again after a couple of hours (app/watch/companies.py). Returns what happened, or None
+        when nothing was due."""
         if self.companies_path is None:
             return None
-        age = list_age(self.companies_path, now)
-        if age is not None and age < COMPANY_LIST_EVERY:
+        sources = company_lists_due(self.companies_path, now)
+        if not sources:
             return None
-        tried = self._companies_tried_at
-        if tried is not None and now - tried < COMPANY_LIST_RETRY:
-            return None
-        self._companies_tried_at = now
         line = refresh_company_list(
-            self.companies_path, self.settings.http.user_agent, self.settings.http.timeout_seconds
+            self.companies_path,
+            self.settings.http.user_agent,
+            now=now,
+            lock_dir=self.settings.resolve_path(self.settings.paths.lock_dir),
+            sources=sources,
         )
         log.info(line)
         return line
@@ -414,16 +414,18 @@ class Watcher:
     def _read_bse(self, now: datetime) -> SharedRead | None:
         """The rows the PEAD tool wrote since the last one processed (`watch_cursors`). It
         catches up on its own after a restart, so BASIS needs no BSE catch-up of its own: what
-        it backfills is simply read on the next pass."""
+        it backfills is simply read on the next pass. Matched on the watchlist's ISINs and BSE
+        codes and on what the company lists give each ticker (a split changes the ISIN)."""
         path = self.settings.watch.bse_announcements_db
-        isins = {stock.isin: stock.symbol for stock in self.stocks if stock.isin}
-        if not path or not isins:
+        listed = load_companies(self.companies_path) if self.companies_path else []
+        isins, codes = filing_keys(self.stocks, listed)
+        if not path or not (isins or codes):
             return None
         with self.session_factory() as session:
             cursor = session.get(WatchCursor, BSE_CURSOR)
             after = cursor.position if cursor else None
         floor = now - timedelta(days=self.settings.watch.catch_up_max_days)
-        shared = read_bse_announcements(Path(path), isins, after, floor)
+        shared = read_bse_announcements(Path(path), isins, after, floor, codes)
         if shared.error != self._bse_error:  # said once, not every pass
             if shared.error:
                 log.warning("BSE filings unavailable: %s", shared.error)
