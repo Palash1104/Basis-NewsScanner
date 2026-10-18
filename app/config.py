@@ -16,6 +16,9 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
 CONFIG_DIR = ROOT_DIR / "config"
+# The one watchlist. Read through this name at call time, so the tests can point it at
+# their own copy (tests/conftest.py): the real file changes whenever a stock is added.
+WATCHLIST_FILE = CONFIG_DIR / "watchlist.yaml"
 
 Region = Literal["US", "IN", "GLOBAL"]
 REGIONS: tuple[Region, ...] = ("US", "IN", "GLOBAL")
@@ -604,7 +607,7 @@ def load_watchlist_file(
 ) -> WatchlistFile:
     """config/watchlist.yaml, checked against the asset universe: a commodity must be one
     BASIS already prices and runs the playbook on, or its card would have nothing to show."""
-    return watchlist_from_data(_read_yaml(path or CONFIG_DIR / "watchlist.yaml"), assets)
+    return watchlist_from_data(_read_yaml(path or WATCHLIST_FILE), assets)
 
 
 def watchlist_from_data(data: object, assets: Sequence[AssetConfig] | None = None) -> WatchlistFile:

@@ -38,9 +38,9 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from app import config as app_config
 from app import health
 from app.config import (
-    CONFIG_DIR,
     AssetConfig,
     Settings,
     WatchAliases,
@@ -390,7 +390,7 @@ def create_app(
     web.state.settings = settings
     web.state.session_factory = session_factory
     web.state.assets = {asset.symbol: asset for asset in load_assets()}
-    web.state.watchlist_path = watchlist_path or CONFIG_DIR / "watchlist.yaml"
+    web.state.watchlist_path = watchlist_path or app_config.WATCHLIST_FILE
     web.state.watchlist = _load_watchlist(web.state.watchlist_path)
     web.state.watchlist_mtime = _file_mtime(web.state.watchlist_path)
     web.state.companies_path = companies_path or settings.resolve_path(company_list.LIST_FILE)

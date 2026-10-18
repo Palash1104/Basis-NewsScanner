@@ -36,6 +36,7 @@ from app.models import (
     utcnow,
 )
 from app.pipeline.rank import RERANK_FALLBACK_NOTE
+from app.schedule import start_of_news_day
 from app.web import palette, queries
 from app.web.main import create_app, ticker_items
 
@@ -728,13 +729,20 @@ def test_the_first_page_holds_the_whole_day(database: Path, settings: Settings) 
     """The home screen is one scroll through today; "Earlier stories" is the step back into
     yesterday (user, 2026-09-23)."""
     engine = make_engine(database)
-    today = utcnow().astimezone(ZoneInfo(settings.timezone)).replace(hour=1, minute=0, second=0)
+    # Just after the news day began (22:00 the night before), whatever the hour it runs at: at
+    # 23:42 a fixed 01:00 was yesterday's news day.
+    today = start_of_news_day(settings, utcnow())
+    assert today is not None
     with make_session_factory(engine)() as session:
+        # The fixture's own stories are a few hours old: today's unless it is just past 22:00.
+        fixture_today = len(
+            session.scalars(select(Story.id).where(Story.first_seen_at >= today)).all()
+        )
         for index in range(20):  # more than the old fixed page of 12
             session.add(
                 Story(
-                    first_seen_at=today + timedelta(minutes=index),
-                    updated_at=today + timedelta(minutes=index),
+                    first_seen_at=today + timedelta(seconds=10 + index),
+                    updated_at=today + timedelta(seconds=10 + index),
                     headline=f"Story number {index}",
                     summary="Something happened.",
                     status="summarized",
@@ -766,8 +774,8 @@ def test_the_first_page_holds_the_whole_day(database: Path, settings: Settings) 
     assert all(f"Story number {index}" in body for index in range(20))
     assert "Yesterday evening" not in body  # that is what the button is for
     # "Earlier stories" skips past everything shown, not a fixed twelve: the 20 above plus
-    # the fixture's two, which also broke today.
-    assert '"offset": 22' in body and "Earlier stories" in body
+    # whichever of the fixture's stories also broke today.
+    assert f'"offset": {20 + fixture_today}' in body and "Earlier stories" in body
 
 
 def test_a_quiet_morning_still_fills_the_page(client: TestClient) -> None:

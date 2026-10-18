@@ -27,7 +27,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.assets import NoPriceData, PriceSample
-from app.config import CONFIG_DIR, Settings, WatchAliases, WatchItem, load_watchlist_file
+from app.config import Settings, WatchAliases, WatchItem, load_watchlist_file
 from app.db import (
     init_db,
     make_engine,
@@ -126,7 +126,7 @@ def company(listed: list[companies.Company], wanted: str) -> companies.Company:
 def watchlist_copy(tmp_path: Path) -> Path:
     path = tmp_path / "config" / "watchlist.yaml"
     path.parent.mkdir()
-    shutil.copy(CONFIG_DIR / "watchlist.yaml", path)
+    shutil.copy(FIXTURES / "watchlist.yaml", path)
     return path
 
 
@@ -1000,7 +1000,7 @@ def test_a_shut_market_shows_its_last_session_not_no_price(settings: Settings) -
                 )
             )
         session.commit()
-        watched = load_watchlist_file(CONFIG_DIR / "watchlist.yaml")
+        watched = load_watchlist_file(FIXTURES / "watchlist.yaml")
         saturday = datetime(2026, 10, 17, 11, 30, tzinfo=UTC)
         card = next(
             c
