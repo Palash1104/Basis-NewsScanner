@@ -134,7 +134,7 @@ from app.watch.alerts import digest_section, rebuild_away
 from app.watch.power import keep_awake, on_ac_power, recent_resumes
 from app.watch.prices import YahooSnapshots, price_symbols
 from app.watch.report import wake_section, watch_report
-from app.watch.scan import Watcher, build_watcher, run_forever
+from app.watch.scan import Watcher, build_watcher, run_forever, start_heartbeat
 from app.watch.scoring import (
     WatchScoreReport,
     lead_times,
@@ -1608,12 +1608,17 @@ def watch(
         typer.echo(
             f"watching {len(watcher.stocks)} stocks: {len(watcher.feeds)} feeds + NSE every "
             f"{settings.watch.feeds_every_minutes} min, {len(watcher.queries)} Google News "
-            "searches, prices in market hours. Ctrl+C stops it."
+            "searches, prices in market hours, and scans asked for from /watchlist. Ctrl+C "
+            "stops it."
         )
+        # The page tells "not running" from "busy" by this (app/watch/ondemand.py).
+        stop_heartbeat = start_heartbeat(watcher)
         try:
             run_forever(watcher, time.sleep)
         except KeyboardInterrupt:
             typer.echo("stopped")
+        finally:
+            stop_heartbeat()
 
 
 @app.command("companies")

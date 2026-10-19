@@ -1,6 +1,7 @@
 """Watchlist alerts (step 4): what is sent, once, and the digest's watchlist section."""
 
 from datetime import UTC, date, datetime, timedelta
+from itertools import count
 from pathlib import Path
 
 import pytest
@@ -395,3 +396,200 @@ def test_the_digest_section_lists_todays_stories_most_material_first(
     assert text is not None and text.startswith("<b>WATCHLIST</b> · 2 stories today")
     assert text.index("Prime Focus raid") < text.index("HAL director appointed")
     assert "Options chart" not in text and "Yesterday's BDL story" not in text
+
+
+# ---------------------------------------------------------------- news in a story BASIS had
+# A high call that lands in a story begun days ago (user, 2026-10-19): Zen's Cogknit
+# acquisition inside a 13 Oct share-price note, Astra Microwave's Q1 results inside a 9 Oct
+# multibagger list.
+
+ZEN = {"ZENTEC.NS": "Zen Technologies"}
+URLS = count(1)
+
+
+def add_article(
+    session: Session,
+    story: WatchStory,
+    title: str,
+    published: datetime,
+    seen: datetime,
+    verdict: str = "keep",
+) -> WatchArticle:
+    article = WatchArticle(
+        url=f"https://news.example.com/zen/{next(URLS)}",
+        source_name="Business Standard",
+        title=title,
+        snippet="",
+        published_at=published,
+        first_seen_at=seen,
+        story=story,
+    )
+    article.matches = [WatchMatch(symbol="ZENTEC.NS", verdict=verdict, reason="named")]
+    session.add(article)
+    session.flush()
+    return article
+
+
+def add_zen_call(
+    session: Session, story: WatchStory, at: datetime, materiality: str, trigger: str
+) -> None:
+    session.add(
+        WatchCall(
+            story_id=story.id,
+            symbol="ZENTEC.NS",
+            relevance="primary",
+            sentiment="positive" if materiality != "low" else "neutral",
+            materiality=materiality,
+            event_type="acquisition" if materiality != "low" else "other",
+            reason="It is buying a majority stake in Cogknit Semantics.",
+            summary="Zen Technologies is buying Cogknit.",
+            article_count=len(story.articles),
+            filing_count=len(story.filings),
+            read_reply=False,
+            trigger=trigger,
+            model="m",
+            prompt_version="watch-v1",
+            created_at=at,
+        )
+    )
+    session.commit()
+
+
+def share_price_note(session: Session, seen: datetime) -> WatchStory:
+    """#101 as it began: a share-price note, called low and neutral."""
+    story = WatchStory(first_seen_at=seen, headline="Zen Technologies Share Price Rises 5.39%")
+    session.add(story)
+    add_article(session, story, story.headline, seen, seen)
+    add_zen_call(session, story, seen, "low", "new")
+    return story
+
+
+def cogknit(session: Session, story: WatchStory, published: datetime, seen: datetime) -> None:
+    """The acquisition joining it: NSE's filing, then a report."""
+    session.add(
+        WatchFiling(
+            key=f"cogknit-{story.id}",
+            exchange="NSE",
+            symbol="ZENTEC.NS",
+            company="Zen Technologies Limited",
+            subject="Acquisition",
+            description="Zen Technologies Limited has informed the Exchange about Acquisition",
+            link="https://nsearchives.example/cogknit.pdf",
+            filed_at=published - timedelta(minutes=5),
+            first_seen_at=seen - timedelta(minutes=5),
+            kind="filing",
+            story=story,
+        )
+    )
+    add_article(session, story, "Zen Technologies to acquire 52% stake in Cogknit", published, seen)
+
+
+def test_news_that_raises_an_old_story_to_high_alerts_led_by_that_news(
+    db: sessionmaker[Session], settings: Settings
+) -> None:
+    with db() as session:
+        story = share_price_note(session, NOW - timedelta(days=4))
+        cogknit(session, story, NOW - timedelta(minutes=20), NOW - timedelta(minutes=10))
+        add_zen_call(session, story, NOW - timedelta(minutes=5), "high", "filing")
+        out = news_alerts(session, settings, ZEN, NOW)
+    assert [o.key for o in out] == [f"news:{story.id}"]
+    text = out[0].messages[0]
+    # The acquisition's own headline and times, not the share-price note's.
+    assert ">To acquire 52% stake in Cogknit</a>" in text
+    assert "Share Price Rises" not in text
+    assert "<i>NSE filing 10:05 · first media report 10:10</i>" in text
+    deliver(db, out, lambda messages: None, NOW)
+    with db() as session:
+        assert news_alerts(session, settings, ZEN, NOW + timedelta(minutes=1)) == []
+
+
+def test_no_alert_when_the_news_behind_the_rise_is_old_or_the_stock_was_high_already(
+    db: sessionmaker[Session], settings: Settings
+) -> None:
+    with db() as session:
+        stale = share_price_note(session, NOW - timedelta(days=4))
+        # Came out eight hours ago; BASIS only now saw it (not in a catch-up).
+        add_article(
+            session,
+            stale,
+            "Zen Technologies to acquire Cogknit",
+            NOW - timedelta(hours=8),
+            NOW - timedelta(minutes=10),
+        )
+        add_zen_call(session, stale, NOW - timedelta(minutes=5), "high", "articles")
+        high_already = share_price_note(session, NOW - timedelta(days=3))
+        add_zen_call(session, high_already, NOW - timedelta(days=2), "high", "articles")
+        cogknit(session, high_already, NOW - timedelta(minutes=20), NOW - timedelta(minutes=10))
+        add_zen_call(session, high_already, NOW - timedelta(minutes=5), "high", "filing")
+        assert news_alerts(session, settings, ZEN, NOW) == []
+
+
+def test_a_first_call_on_a_story_begun_by_a_mention_is_judged_by_its_news(
+    db: sessionmaker[Session], settings: Settings
+) -> None:
+    """#59: a multibagger list naming the company only in passing began the story the evening
+    before; the Q1 results joined it three hours after they came out, and the story's first
+    call rated them high. Judged by when the story began, no alert was sent."""
+    with db() as session:
+        began = NOW - timedelta(hours=18)
+        story = WatchStory(first_seen_at=began, headline="6 Defence stocks turn multibaggers")
+        session.add(story)
+        add_article(session, story, story.headline, began, began, "mention")
+        add_article(
+            session,
+            story,
+            "Zen Technologies Q1 Results: Net Profit Declines; MD Steps Down",
+            NOW - timedelta(hours=3),
+            NOW - timedelta(minutes=10),
+        )
+        add_zen_call(session, story, NOW - timedelta(minutes=5), "high", "new")
+        out = news_alerts(session, settings, ZEN, NOW)
+    assert [o.key for o in out] == [f"news:{story.id}"]
+    assert ">Q1 Results: Net Profit Declines; MD Steps Down</a>" in out[0].messages[0]
+    assert "multibaggers" not in out[0].messages[0]
+
+
+def test_the_digest_lists_news_that_raised_an_older_story_today(
+    db: sessionmaker[Session], settings: Settings, watchlist: WatchlistFile
+) -> None:
+    with db() as session:
+        raised = share_price_note(session, NOW - timedelta(days=4))
+        cogknit(session, raised, NOW - timedelta(hours=1), NOW - timedelta(minutes=50))
+        add_zen_call(session, raised, NOW - timedelta(minutes=45), "medium", "filing")
+        same = share_price_note(session, NOW - timedelta(days=3))
+        for title in ("Zen Technologies among 3 stocks crossing VWAP", "Zen shares end flat"):
+            add_article(session, same, title, NOW - timedelta(hours=1), NOW - timedelta(minutes=50))
+        add_zen_call(session, same, NOW - timedelta(minutes=45), "low", "articles")
+        text = digest_section(session, watchlist, settings, NOW)
+    assert text is not None and text.startswith("<b>WATCHLIST</b> · 1 story today")
+    assert "<b>MEDIUM</b>" in text and ">To acquire 52% stake in Cogknit</a>" in text
+    assert "VWAP" not in text and "Share Price Rises" not in text
+
+
+def test_the_away_summary_lists_news_a_catch_up_added_to_an_older_story(
+    db: sessionmaker[Session], settings: Settings, watchlist: WatchlistFile
+) -> None:
+    """Read in a catch-up three hours after it came out: in the summary under its own
+    headline and time, and no alert of its own."""
+    gap = {"start": (NOW - timedelta(hours=10)).isoformat(), "end": NOW.isoformat()}
+    with db() as session:
+        session.add(
+            WatchRun(
+                job="catchup",
+                started_at=NOW,
+                finished_at=NOW,
+                errors=[],
+                details={"gap": gap, "sources": [], "possible_gaps": [], "summary_sent": False},
+            )
+        )
+        story = share_price_note(session, NOW - timedelta(days=2))
+        title = "Zen Technologies to acquire 52% stake in Cogknit"
+        add_article(session, story, title, NOW - timedelta(hours=3), NOW)
+        add_zen_call(session, story, NOW + timedelta(minutes=1), "high", "articles")
+        assert news_alerts(session, settings, ZEN, NOW + timedelta(minutes=2)) == []
+        out, empty = away_summaries(session, watchlist, None, settings, NOW + timedelta(minutes=2))
+    assert empty == [] and len(out) == 1
+    text = "\n".join(out[0].messages)
+    assert "<b>HIGH</b>" in text and ">To acquire 52% stake in Cogknit</a>" in text
+    assert "<i>07:30 · media only, not filed</i>" in text
+    assert "Share Price Rises" not in text

@@ -16,12 +16,12 @@ pinned, 2026-10-07). A scanned reply has no text layer, and is noted rather than
 import io
 import logging
 import re
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Collection, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
 import httpx
-from sqlalchemy import select
+from sqlalchemy import ColumnElement, or_, select
 from sqlalchemy.orm import Session, selectinload, sessionmaker
 
 from app.config import Settings, WatchItem
@@ -86,6 +86,7 @@ class AnalyseResult:
     calls_written: int = 0
     failed: list[tuple[int, str]] = field(default_factory=list)
     stopped: str | None = None  # the watch lane's budget, or no LLM at all
+    quota_spent: bool = False  # stopped because the watch lane's budget is used up
     notes: list[str] = field(default_factory=list)
 
 
@@ -124,6 +125,50 @@ def kept_articles(story: WatchStory) -> list[WatchArticle]:
     return [a for a in story.articles if any(m.verdict == "keep" for m in a.matches)]
 
 
+# ---------------------------------------------------------------- when a story happened
+# When a story happened is when it was first reported, never when BASIS first saw it (user,
+# 2026-10-19). A Google News search for a stock returns old pages too - a 2020 price page, a
+# 2024 results story - whatever window it is asked for, and those were stored with
+# first_seen_at = the day they turned up. The scanner no longer stores an article published
+# more than `watch.catch_up_max_days` before it first sees it; among those stored before that,
+# an old page grouped into a current story doesn't date the story.
+
+
+def stale_after(settings: Settings) -> timedelta:
+    """How old an article can be when BASIS first sees it and still be news."""
+    return timedelta(days=settings.watch.catch_up_max_days)
+
+
+def stale_article(article: WatchArticle, max_age: timedelta) -> bool:
+    """Published more than `max_age` before BASIS first saw it: old news a search turned up."""
+    return article.published_at < article.first_seen_at - max_age
+
+
+def reporting_articles(story: WatchStory, max_age: timedelta) -> list[WatchArticle]:
+    """The kept articles that report the story: those that were news when BASIS saw them.
+    An old page grouped in counts only when the story has nothing else - no current article
+    and no filing - and the story is then old news itself."""
+    kept = kept_articles(story)
+    current = [a for a in kept if not stale_article(a, max_age)]
+    if current or story.filings:
+        return current
+    return kept
+
+
+def first_reported(story: WatchStory, max_age: timedelta) -> datetime:
+    """When the news first came out: the earliest reporting article's publication or filing
+    time, and never later than when BASIS saw it."""
+    times = [a.published_at for a in reporting_articles(story, max_age)]
+    times += [f.filed_at for f in story.filings]
+    return min([*times, story.first_seen_at])
+
+
+def stale_story(story: WatchStory, max_age: timedelta) -> bool:
+    """First reported more than `max_age` before BASIS first saw it: never called, never
+    scored, never shown as this week's news."""
+    return first_reported(story, max_age) < story.first_seen_at - max_age
+
+
 def trigger_for(story: WatchStory, calls: Sequence[WatchCall]) -> str | None:
     """Why the story needs a call now, or None if its current call still stands."""
     if not kept_symbols(story):
@@ -140,10 +185,11 @@ def trigger_for(story: WatchStory, calls: Sequence[WatchCall]) -> str | None:
     return None
 
 
-def choose_articles(story: WatchStory) -> list[WatchArticle]:
-    """Up to MAX_ARTICLES kept articles, one per outlet first, earliest first: the first
-    reports carry the news, later ones mostly repeat it."""
-    ordered = sorted(kept_articles(story), key=lambda a: (a.first_seen_at, a.id))
+def choose_articles(story: WatchStory, max_age: timedelta) -> list[WatchArticle]:
+    """Up to MAX_ARTICLES of the articles reporting the story (never an old page grouped
+    in), one per outlet first, earliest first: the first reports carry the news, later ones
+    mostly repeat it."""
+    ordered = sorted(reporting_articles(story, max_age), key=lambda a: (a.first_seen_at, a.id))
     chosen: list[WatchArticle] = []
     outlets: set[str] = set()
     for article in ordered:
@@ -156,7 +202,9 @@ def choose_articles(story: WatchStory) -> list[WatchArticle]:
     return chosen[:MAX_ARTICLES]
 
 
-def story_input(story: WatchStory, stocks: dict[str, WatchItem], trigger: str) -> StoryInput | None:
+def story_input(
+    story: WatchStory, stocks: dict[str, WatchItem], trigger: str, max_age: timedelta
+) -> StoryInput | None:
     symbols = [symbol for symbol in stocks if symbol in kept_symbols(story)]
     if not symbols:
         return None
@@ -166,7 +214,7 @@ def story_input(story: WatchStory, stocks: dict[str, WatchItem], trigger: str) -
         companies=[(symbol, company_label(stocks[symbol])) for symbol in symbols],
         articles=[
             ArticleView(a.source_name, a.title, a.snippet, a.published_at)
-            for a in choose_articles(story)
+            for a in choose_articles(story, max_age)
         ],
         filings=[
             FilingView(f.exchange, f.subject, f.description, f.filed_at)
@@ -267,15 +315,47 @@ def read_replies(
 # ---------------------------------------------------------------- the pass
 
 
+def open_since(since: datetime) -> ColumnElement[bool]:
+    """Stories still taking news: begun since `since`, or with an article or a filing first
+    seen since then - the stories the grouper still adds to."""
+    return or_(
+        WatchStory.first_seen_at >= since,
+        WatchStory.id.in_(
+            select(WatchArticle.story_id).where(
+                WatchArticle.first_seen_at >= since, WatchArticle.story_id.is_not(None)
+            )
+        ),
+        WatchStory.id.in_(
+            select(WatchFiling.story_id).where(
+                WatchFiling.first_seen_at >= since, WatchFiling.story_id.is_not(None)
+            )
+        ),
+    )
+
+
 def stories_to_call(
-    session: Session, stocks: dict[str, WatchItem], settings: Settings, now: datetime
+    session: Session,
+    stocks: dict[str, WatchItem],
+    settings: Settings,
+    now: datetime,
+    only: Collection[str] | None = None,
 ) -> list[StoryInput]:
     """Stories in the window that need a call, most urgent first: filings, then stories
-    named outright in a headline, then the newest."""
+    named outright in a headline, then the newest. `only`: just the stories about these
+    companies (a scan of one stock, app/watch/ondemand.py). A story that was old news when
+    BASIS first saw it is never called.
+
+    "In the window" is the grouper's own test (scan._window_members): a story is open while
+    any of its articles or filings was first seen within `story_window_hours`, however long ago
+    it began. Judged by the story's own first_seen_at instead, a story that kept taking news
+    dropped out of the calls 72 hours after it began, and nothing that joined it later was
+    called: Zen's Cogknit acquisition - a filing, a press release and 12 reports from 17 Oct -
+    joined a 13 Oct share-price story and kept that story's 15 Oct call, neutral and low."""
+    max_age = stale_after(settings)
     since = now - timedelta(hours=settings.watch.story_window_hours)
     stories = session.scalars(
         select(WatchStory)
-        .where(WatchStory.first_seen_at >= since)
+        .where(open_since(since))
         .options(
             selectinload(WatchStory.articles).selectinload(WatchArticle.matches),
             selectinload(WatchStory.filings),
@@ -288,11 +368,15 @@ def stories_to_call(
         calls.setdefault(call.story_id, []).append(call)
     pending: list[tuple[tuple[int, int, float], StoryInput]] = []
     for story in stories:
+        if stale_story(story, max_age):
+            continue
         trigger = trigger_for(story, calls.get(story.id, []))
         if trigger is None:
             continue
-        given = story_input(story, stocks, trigger)
+        given = story_input(story, stocks, trigger, max_age)
         if given is None:
+            continue
+        if only is not None and not {symbol for symbol, _ in given.companies} & set(only):
             continue
         named = any(
             m.verdict == "keep" and m.reason == "named in the headline"
@@ -316,6 +400,7 @@ def analyse(
     now: datetime | None = None,
     skip: set[tuple[int, int, int]] | None = None,
     limit: int = CALLS_PER_PASS,
+    only: Collection[str] | None = None,
 ) -> AnalyseResult:
     """Call every story that needs it, up to `limit`. Never holds a write across a call:
     the stories are read, the session closed, and each call's rows written on their own.
@@ -327,7 +412,7 @@ def analyse(
         return result
     now = now or utcnow()
     with session_factory() as session:
-        pending = stories_to_call(session, stocks, settings, now)
+        pending = stories_to_call(session, stocks, settings, now, only)
     skip = skip if skip is not None else set()
     provenance = settings.llm.provenance(settings.llm.summary_model, WATCH_PROMPT_VERSION)
     for given in pending:
@@ -340,6 +425,7 @@ def analyse(
             output = request_watch_call(llm, given, settings)
         except (LLMQuotaError, LLMConfigError) as exc:
             result.stopped = str(exc)
+            result.quota_spent = isinstance(exc, LLMQuotaError)
             log.warning("watchlist calls stopped for now: %s", exc)
             break
         except LLMCallError as exc:  # transient: next pass tries again

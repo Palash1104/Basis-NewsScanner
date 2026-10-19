@@ -634,7 +634,8 @@ def test_the_page_has_an_add_button_a_search_box_and_a_remove_on_every_card(
     page: TestClient,
 ) -> None:
     body = page.get("/watchlist").text
-    assert '<a class="btn btn-primary" href="#watch-add">Add a stock</a>' in body
+    assert '<a class="btn btn-primary watch-head-add" href="#watch-add">' in body
+    assert "Add a stock</a>" in body
     assert body.count('action="/watchlist/remove"') == 12  # 8 stocks and 4 commodities
     assert 'id="watch-search"' in body and 'hx-get="/watchlist/companies"' in body
     assert 'class="screen screen-wide"' in body  # the full window, not a column
@@ -891,7 +892,8 @@ def test_removing_from_the_page_writes_the_file(page: TestClient, watchlist_copy
     assert "GC=F" not in [e.symbol for e in load_watchlist_file(watchlist_copy).watchlist]
     assert response.headers["location"] == "/watchlist?removed=Gold"  # said on the page
     body = page.get(response.headers["location"]).text
-    assert '<p class="watch-page-flash" role="status">Removed Gold.</p>' in body
+    assert '<p role="status">Removed Gold.</p>' in body  # a banner, with its ×
+    assert 'class="watch-page-flash" data-flash>' in body and "data-flash-close" in body
     assert '<section id="watch-add" class="watch-add"' in body  # the dialog stays shut
 
 

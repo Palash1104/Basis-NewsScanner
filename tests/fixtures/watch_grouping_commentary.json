@@ -1,0 +1,386 @@
+{
+ "_note": "Real items from three stories a share-price-commentary headline seeded and events then joined (live database, 2026-10-19). #101 'Zen Technologies Share Price Rises 5.39% on Valuation View' (13 Oct) took the Cogknit acquisition - NSE's Acquisition filing of 17 Oct 14:24, its press release and 12 reports - so the acquisition was never called or alerted on its own. #93 'Bharat Dynamics Ltd. Share Price Rise Streak' took the Rs 1,307 crore torpedo order and the Rs 56.8 crore tender. #59, a multibagger list, took Astra Microwave's Q1 results. 'event' is what each item is really about; the old IIFL price page that also sat in #101 (article 593) is left out, as the intake rule no longer stores it.",
+ "articles": [
+  {
+   "source": "The Economic Times",
+   "title": "Astra Microwave Products - 6 Defence stocks turn multibaggers in H1 FY27, rally up to 600%",
+   "snippet": "",
+   "published_at": "2026-10-09T09:01:08.000000+00:00",
+   "first_seen_at": "2026-10-09T15:27:58.086570+00:00",
+   "matches": {
+    "ASTRAMICRO.NS": "mention"
+   },
+   "event": "share-price commentary",
+   "stored_story": 59
+  },
+  {
+   "source": "scanx.trade",
+   "title": "Astra Microwave Q1FY27 Results: Net Profit Declines YoY; MD Steps Down",
+   "snippet": "",
+   "published_at": "2026-10-10T06:13:00.000000+00:00",
+   "first_seen_at": "2026-10-10T09:28:02.868245+00:00",
+   "matches": {
+    "ASTRAMICRO.NS": "keep"
+   },
+   "event": "Q1 results",
+   "stored_story": 59
+  },
+  {
+   "source": "Univest",
+   "title": "Bharat Dynamics Ltd. Share Price Rise Streak, BDL gains",
+   "snippet": "",
+   "published_at": "2026-10-12T05:09:00.000000+00:00",
+   "first_seen_at": "2026-10-12T16:41:25.574051+00:00",
+   "matches": {
+    "BDL.NS": "mention"
+   },
+   "event": "share-price commentary",
+   "stored_story": 93
+  },
+  {
+   "source": "Univest",
+   "title": "Zen Technologies Share Price Rises 5.39% on Valuation View",
+   "snippet": "",
+   "published_at": "2026-10-12T10:06:00.000000+00:00",
+   "first_seen_at": "2026-10-13T08:16:32.438799+00:00",
+   "matches": {
+    "ZENTEC.NS": "mention"
+   },
+   "event": "share-price commentary",
+   "stored_story": 101
+  },
+  {
+   "source": "Trade Brains",
+   "title": "BDL Bags a ₹1,307 Crore Torpedo Order From the Navy as Quarterly Profit Jumps More Than Sixfold",
+   "snippet": "",
+   "published_at": "2026-10-15T11:12:46.000000+00:00",
+   "first_seen_at": "2026-10-15T13:37:02.331021+00:00",
+   "matches": {
+    "BDL.NS": "keep"
+   },
+   "event": "torpedo order",
+   "stored_story": 93
+  },
+  {
+   "source": "The420.in",
+   "title": "BDL Gives ₹56.8 Crore Single Tender to Firm Set Up by Former CMD and Wife",
+   "snippet": "",
+   "published_at": "2026-10-15T13:01:44.000000+00:00",
+   "first_seen_at": "2026-10-15T13:37:02.331021+00:00",
+   "matches": {
+    "BDL.NS": "keep"
+   },
+   "event": "56.8 tender",
+   "stored_story": 93
+  },
+  {
+   "source": "Equitymaster",
+   "title": "Better Drone Stock: Zen Technologies vs Ideaforge Technology",
+   "snippet": "",
+   "published_at": "2026-10-15T00:30:01.000000+00:00",
+   "first_seen_at": "2026-10-15T13:37:02.331021+00:00",
+   "matches": {
+    "ZENTEC.NS": "mention"
+   },
+   "event": "share-price commentary",
+   "stored_story": 101
+  },
+  {
+   "source": "TradingView",
+   "title": "Bharat Dynamics Says Bdl Signs Contract For Heavyweight Torpedoes Valued At 13.07 Billion Rupees Plus Taxes",
+   "snippet": "",
+   "published_at": "2026-10-15T10:48:08.000000+00:00",
+   "first_seen_at": "2026-10-15T13:37:02.331021+00:00",
+   "matches": {
+    "BDL.NS": "keep"
+   },
+   "event": "torpedo order",
+   "stored_story": 93
+  },
+  {
+   "source": "HDFC Sky",
+   "title": "Bharat Dynamics Wins ₹1,307 Crore Navy Order; Shares Rise 0.13%",
+   "snippet": "",
+   "published_at": "2026-10-15T09:58:42.000000+00:00",
+   "first_seen_at": "2026-10-15T13:37:02.331021+00:00",
+   "matches": {
+    "BDL.NS": "keep"
+   },
+   "event": "torpedo order",
+   "stored_story": 93
+  },
+  {
+   "source": "Business Today",
+   "title": "Bharat Dynamics wins order worth Rs 1,307 crore from Indian Navy",
+   "snippet": "Shares of Bharat Dynamics ended 0.10% lower at Rs 1126.90 on BSE today. Market cap of the firm fell to Rs 41,307 crore.",
+   "published_at": "2026-10-15T10:56:44.000000+00:00",
+   "first_seen_at": "2026-10-15T13:37:02.331021+00:00",
+   "matches": {
+    "BDL.NS": "keep"
+   },
+   "event": "torpedo order",
+   "stored_story": 93
+  },
+  {
+   "source": "Univest",
+   "title": "Is Zen Technologies the Best Stock in Its Sector? A Look at the Numbers",
+   "snippet": "",
+   "published_at": "2026-10-15T08:08:13.000000+00:00",
+   "first_seen_at": "2026-10-15T13:37:02.331021+00:00",
+   "matches": {
+    "ZENTEC.NS": "keep"
+   },
+   "event": "share-price commentary",
+   "stored_story": 101
+  },
+  {
+   "source": "Investment Guru India",
+   "title": "Bharat Dynamics rises on signing contract with Indian Navy",
+   "snippet": "",
+   "published_at": "2026-10-16T05:40:24.000000+00:00",
+   "first_seen_at": "2026-10-16T11:15:57.658911+00:00",
+   "matches": {
+    "BDL.NS": "keep"
+   },
+   "event": "torpedo order",
+   "stored_story": 93
+  },
+  {
+   "source": "Udaipur Kiran",
+   "title": "Bharat Dynamics rises on signing contract with Indian Navy",
+   "snippet": "",
+   "published_at": "2026-10-16T06:07:58.000000+00:00",
+   "first_seen_at": "2026-10-16T11:15:57.658911+00:00",
+   "matches": {
+    "BDL.NS": "keep"
+   },
+   "event": "torpedo order",
+   "stored_story": 93
+  },
+  {
+   "source": "The Economic Times",
+   "title": "Zen Technologies among 3 stocks that closed crossing above VWAP",
+   "snippet": "Zen Technologies, HDFC Asset Management Company, and Signatureglobal recorded closing prices above their volume-weighted average prices on October 15, reflecting intraday trading strength across these three Nifty 500 stocks.",
+   "published_at": "2026-10-16T03:16:28.000000+00:00",
+   "first_seen_at": "2026-10-16T11:15:57.658911+00:00",
+   "matches": {
+    "ZENTEC.NS": "mention"
+   },
+   "event": "share-price commentary",
+   "stored_story": 101
+  },
+  {
+   "source": "Univest",
+   "title": "Drone Stocks 2026: Astra Microwave, Zen Technologies",
+   "snippet": "",
+   "published_at": "2026-10-15T11:48:00.000000+00:00",
+   "first_seen_at": "2026-10-16T11:16:04.758962+00:00",
+   "matches": {
+    "ZENTEC.NS": "keep",
+    "ASTRAMICRO.NS": "keep"
+   },
+   "event": "share-price commentary",
+   "stored_story": 101
+  },
+  {
+   "source": "scanx.trade",
+   "title": "Zen Technologies to acquire 52% stake in Cogknit for ₹135.15 crore",
+   "snippet": "",
+   "published_at": "2026-10-17T14:45:07.000000+00:00",
+   "first_seen_at": "2026-10-17T14:51:52.133850+00:00",
+   "matches": {
+    "ZENTEC.NS": "keep"
+   },
+   "event": "Cogknit acquisition",
+   "stored_story": 101
+  },
+  {
+   "source": "Business Upturn",
+   "title": "Zen Technologies to acquire majority stake in Cogknit Semantics for Rs. 135.15 crore",
+   "snippet": "",
+   "published_at": "2026-10-17T14:42:49.000000+00:00",
+   "first_seen_at": "2026-10-17T14:51:52.133850+00:00",
+   "matches": {
+    "ZENTEC.NS": "keep"
+   },
+   "event": "Cogknit acquisition",
+   "stored_story": 101
+  },
+  {
+   "source": "InvestyWise",
+   "title": "Zen Technologies: Acquires 51.98% Stake in Cogknit Semantics for ₹135 Crore",
+   "snippet": "",
+   "published_at": "2026-10-17T14:31:05.000000+00:00",
+   "first_seen_at": "2026-10-17T14:51:52.133850+00:00",
+   "matches": {
+    "ZENTEC.NS": "keep"
+   },
+   "event": "Cogknit acquisition",
+   "stored_story": 101
+  },
+  {
+   "source": "Dealroom",
+   "title": "Zen Technologies to buy control of defence AI startup Cogknit for $14.2M",
+   "snippet": "",
+   "published_at": "2026-10-17T15:27:09.000000+00:00",
+   "first_seen_at": "2026-10-17T15:52:06.348077+00:00",
+   "matches": {
+    "ZENTEC.NS": "keep"
+   },
+   "event": "Cogknit acquisition",
+   "stored_story": 101
+  },
+  {
+   "source": "Whalesbook",
+   "title": "Zen Technologies to Acquire 51.98% Stake in Cogknit Semantics for Rs 135 Crore",
+   "snippet": "",
+   "published_at": "2026-10-17T14:28:49.000000+00:00",
+   "first_seen_at": "2026-10-17T18:52:30.514866+00:00",
+   "matches": {
+    "ZENTEC.NS": "keep"
+   },
+   "event": "Cogknit acquisition",
+   "stored_story": 101
+  },
+  {
+   "source": "Business Upturn",
+   "title": "Zen Technologies invests ₹135.15 crore for majority stake in Cogknit Semantics",
+   "snippet": "",
+   "published_at": "2026-10-18T05:58:58.000000+00:00",
+   "first_seen_at": "2026-10-18T06:07:03.146842+00:00",
+   "matches": {
+    "ZENTEC.NS": "keep"
+   },
+   "event": "Cogknit acquisition",
+   "stored_story": 101
+  },
+  {
+   "source": "CNBC-TV18",
+   "title": "Zen Technologies to acquire majority stake in defence tech firm Cogknit Semantics for ₹135.15 crore",
+   "snippet": "Zen Technologies has announced a 135.15 crore investment to acquire a 51.98 percent stake in defence tech company Cogknit Semantics Pvt Ltd, making it a subsidiary.",
+   "published_at": "2026-10-18T08:36:19.000000+00:00",
+   "first_seen_at": "2026-10-18T08:47:49.162735+00:00",
+   "matches": {
+    "ZENTEC.NS": "keep"
+   },
+   "event": "Cogknit acquisition",
+   "stored_story": 101
+  },
+  {
+   "source": "Kalkine India",
+   "title": "Zen Technologies (NSE:ZENTEC): Why Did It Agree to Acquire a Majority Stake in Cogknit Semantics?",
+   "snippet": "",
+   "published_at": "2026-10-18T05:50:00.000000+00:00",
+   "first_seen_at": "2026-10-18T09:07:23.517206+00:00",
+   "matches": {
+    "ZENTEC.NS": "keep"
+   },
+   "event": "Cogknit acquisition",
+   "stored_story": 101
+  },
+  {
+   "source": "NewsBytes",
+   "title": "Zen Technologies buys 51.98% of Cogknit Semantics for ₹135.15cr",
+   "snippet": "",
+   "published_at": "2026-10-18T08:58:17.000000+00:00",
+   "first_seen_at": "2026-10-18T09:07:23.517206+00:00",
+   "matches": {
+    "ZENTEC.NS": "keep"
+   },
+   "event": "Cogknit acquisition",
+   "stored_story": 101
+  },
+  {
+   "source": "ET Manufacturing",
+   "title": "Zen Technologies to acquire 51.98% stake in Cogknit Semantics for ₹135 crore",
+   "snippet": "",
+   "published_at": "2026-10-18T06:52:37.000000+00:00",
+   "first_seen_at": "2026-10-18T11:07:45.563293+00:00",
+   "matches": {
+    "ZENTEC.NS": "keep"
+   },
+   "event": "Cogknit acquisition",
+   "stored_story": 101
+  },
+  {
+   "source": "Equitymaster",
+   "title": "Better Drone Stock: Zen Technologies vs Ideaforge Technology",
+   "snippet": "",
+   "published_at": "2026-10-15T00:30:01.000000+00:00",
+   "first_seen_at": "2026-10-18T19:03:17.516709+00:00",
+   "matches": {
+    "ZENTEC.NS": "mention"
+   },
+   "event": "share-price commentary",
+   "stored_story": 101
+  },
+  {
+   "source": "The Economic Times",
+   "title": "Zen Technologies among 3 stocks that closed crossing above VWAP - Trend Tracker",
+   "snippet": "",
+   "published_at": "2026-10-16T03:29:10.000000+00:00",
+   "first_seen_at": "2026-10-18T19:03:17.516709+00:00",
+   "matches": {
+    "ZENTEC.NS": "mention"
+   },
+   "event": "share-price commentary",
+   "stored_story": 101
+  },
+  {
+   "source": "Sahi",
+   "title": "Zen Technologies to Buy 51.98% Share in CogniKnit Semantics for ₹135.15 Crore",
+   "snippet": "",
+   "published_at": "2026-10-19T04:38:19.000000+00:00",
+   "first_seen_at": "2026-10-19T04:46:49.344031+00:00",
+   "matches": {
+    "ZENTEC.NS": "keep"
+   },
+   "event": "Cogknit acquisition",
+   "stored_story": 101
+  },
+  {
+   "source": "VCCircle",
+   "title": "Zen Technologies to acquire majority stake in Cogknit Semantics",
+   "snippet": "",
+   "published_at": "2026-10-19T06:17:14.000000+00:00",
+   "first_seen_at": "2026-10-19T07:16:35.510016+00:00",
+   "matches": {
+    "ZENTEC.NS": "keep"
+   },
+   "event": "Cogknit acquisition",
+   "stored_story": 101
+  }
+ ],
+ "filings": [
+  {
+   "key": "511e93781cb6cab017fe5ab13c45545a5b7ffd38",
+   "exchange": "NSE",
+   "symbol": "ZENTEC.NS",
+   "company": "Zen Technologies Limited",
+   "subject": "Acquisition",
+   "description": "Zen Technologies Limited has informed the Exchange about Acquisition",
+   "filed_at": "2026-10-17T14:24:56.000000+00:00",
+   "first_seen_at": "2026-10-17T14:31:46.965612+00:00",
+   "kind": "filing",
+   "link": "https://nsearchives.nseindia.com/corporate/ZENTEC_17102026195446_Cogknit_Reg30_Board_Outcome_17Oct2026__Clean_.pdf",
+   "event": "Cogknit acquisition",
+   "stored_story": 101,
+   "quoted_headline": null
+  },
+  {
+   "key": "af7394b6f4164c9f084747864b4cddbc7e54f95f",
+   "exchange": "NSE",
+   "symbol": "ZENTEC.NS",
+   "company": "Zen Technologies Limited",
+   "subject": "Press Release",
+   "description": "Zen Technologies Limited has informed the Exchange regarding a press release dated October 18, 2026, titled \"Zen Technologies to acquire majority stake in Cogknit Semantics, an indigenous developer of Battlefield Management Systems.\".",
+   "filed_at": "2026-10-18T05:50:44.000000+00:00",
+   "first_seen_at": "2026-10-18T06:07:03.146842+00:00",
+   "kind": "filing",
+   "link": "https://nsearchives.nseindia.com/corporate/ZENTEC_18102026112012_PressRelease18102026.pdf",
+   "event": "Cogknit acquisition",
+   "stored_story": 101,
+   "quoted_headline": null
+  }
+ ]
+}

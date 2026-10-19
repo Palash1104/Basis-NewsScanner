@@ -14,10 +14,14 @@ stored. Articles and filings are grouped into stories across stocks (app/watch/g
 Step 2 of the watchlist: no LLM call is made here. It writes only the watch_* tables and
 feed_checks, in one short transaction per job: everything slow - the network, the embedding
 model - happens before the write begins, so the pipeline is never kept waiting.
+
+It also scans one stock when its card is opened on /watchlist (app/watch/ondemand.py): the
+page leaves a request in an inbox folder, and `serve_scan_requests` runs it between jobs.
 """
 
 import asyncio
 import logging
+import threading
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
@@ -27,10 +31,10 @@ from typing import Any
 import httpx
 import numpy as np
 from rapidfuzz import fuzz
-from sqlalchemy import select
+from sqlalchemy import distinct, func, select
 from sqlalchemy.orm import Session, sessionmaker
 
-from app.config import FeedConfig, Settings, WatchlistFile
+from app.config import FeedConfig, Settings, WatchItem, WatchlistFile
 from app.llm.client import LLMClient
 from app.models import (
     FeedCheck,
@@ -40,6 +44,7 @@ from app.models import (
     WatchMatch,
     WatchPrice,
     WatchRun,
+    WatchScan,
     WatchSighting,
     WatchStory,
     utcnow,
@@ -61,20 +66,40 @@ from app.watch.alerts import (
     news_alerts,
     retry_pending,
 )
-from app.watch.analyse import analyse, read_replies
+from app.watch.analyse import analyse, kept_symbols, read_replies, stale_after
 from app.watch.catchup import Gap, SourceCoverage, find_gap, possible_gaps
 from app.watch.companies import LIST_FILE as COMPANY_LIST_FILE
 from app.watch.companies import due as company_lists_due
 from app.watch.companies import filing_keys, load_companies, pead_master_path
 from app.watch.companies import refresh as refresh_company_list
-from app.watch.events import Amount, amounts, amounts_conflict, is_order_news
+from app.watch.events import (
+    Amount,
+    amounts,
+    amounts_conflict,
+    is_commentary,
+    is_event,
+    is_order_news,
+)
 from app.watch.group import StoryGrouper
 from app.watch.match import Match, Matcher
 from app.watch.moves import Typical, typical_moves
+from app.watch.ondemand import (
+    HEARTBEAT_EVERY,
+    ScanRequest,
+    clear_heartbeat,
+    new_steps,
+    pending_requests,
+    profile_to_json,
+    remove_request,
+    with_step,
+    write_heartbeat,
+)
 from app.watch.power import keep_awake, on_ac_power
+from app.watch.preview import Profile
 from app.watch.prices import (
     MINUTE_HISTORY,
     HistoryProvider,
+    Snapshot,
     SnapshotProvider,
     YahooHistory,
     backfill_rows,
@@ -183,6 +208,9 @@ class JobResult:
     prices: int = 0
     calls: int = 0  # watch_calls rows written (analyse)
     errors: list[dict[str, Any]] = field(default_factory=list)
+    # Articles not stored because they were old news when this pass first saw them, by
+    # source ("Google News" for every search) - see `_store_articles`.
+    stale: dict[str, int] = field(default_factory=dict)
 
     def line(self) -> str:
         if self.job == "prices":
@@ -194,6 +222,9 @@ class JobResult:
                 f"{self.job}: {self.entries} entries, {self.new_articles} new watchlist articles, "
                 f"{self.new_filings} new filings, {self.stories_created} new stories"
             )
+        if self.stale:
+            sources = ", ".join(f"{n} from {source}" for source, n in sorted(self.stale.items()))
+            text += f", {sum(self.stale.values())} older than a week skipped ({sources})"
         return text + (f", {len(self.errors)} errors" if self.errors else "")
 
 
@@ -214,6 +245,8 @@ class Watcher:
         sender: Sender | None = None,
         watchlist_path: Path | None = None,
         companies_path: Path | None = None,
+        scan_inbox: Path | None = None,
+        profile_fetch: Callable[[str], Profile] | None = None,
     ) -> None:
         self.settings = settings
         self.session_factory = session_factory
@@ -247,6 +280,12 @@ class Watcher:
         self._bse_error: str | None = None
         # Set by `newsdesk watch --since`: catch up from here on the next feed scan.
         self.force_since: datetime | None = None
+        # The page's requests to scan one stock (app/watch/ondemand.py), and Yahoo's profile
+        # for the dialog it opens. None in tests that don't scan on demand.
+        self.scan_inbox = scan_inbox
+        self.profile_fetch = profile_fetch
+        # What the scanner is doing, for its heartbeat: a job, a scan, or idle - and since when.
+        self.activity: tuple[str, datetime] = ("idle", clock())
 
     def _use_watchlist(self, watchlist: WatchlistFile) -> None:
         """Everything that depends on the list of stocks."""
@@ -341,6 +380,7 @@ class Watcher:
         results = []
         self.refresh_watchlist()
         self.refresh_companies(self.clock())
+        self.serve_scan_requests()
         for job in JOBS:
             now = self.clock()
             if job == "prices" and not in_market_hours(now, self.settings):
@@ -348,7 +388,11 @@ class Watcher:
             if not force and not self.due(job, now):
                 continue
             self.last_run[job] = now
+            self.activity = (job, now)
             result = self.run_job(job, now)
+            self.activity = ("idle", self.clock())
+            # A scan the page asked for waits for no more than the job in hand.
+            self.serve_scan_requests()
             if job in ("analyse", "alerts") and not result.entries and not result.errors:
                 continue  # checked every minute; a pass that found nothing to do is quiet
             results.append(result)
@@ -384,6 +428,8 @@ class Watcher:
         run.new_articles = result.new_articles
         run.new_filings = result.new_filings
         run.errors = result.errors
+        if result.stale:
+            run.details = {"stale_skipped": result.stale}
         run.finished_at = self.clock()
         with self.session_factory() as session:
             session.add(run)
@@ -407,7 +453,7 @@ class Watcher:
         if gap is not None:
             history = asyncio.run(self._nse_history(gap, now))
         shared = self._read_bse(now)
-        result = self._process("feeds", reads, nse, now, history, shared, gap is not None)
+        result = self._process("feeds", reads, nse, now, history, shared, record_late=gap is None)
         if gap is not None:
             self._record_catch_up(gap, reads, searches, nse, history, result, now)
         return result
@@ -568,24 +614,313 @@ class Watcher:
                 rows.append(WatchPrice(symbol=symbol, polled_at=polled, error=error))
                 result.errors.append({"stage": "prices", "symbol": symbol, "error": error})
                 continue
-            rows.append(
-                WatchPrice(
-                    symbol=symbol,
-                    polled_at=polled,
-                    price=snap.price,
-                    previous_close=snap.previous_close,
-                    last_trade_at=snap.last_trade_at,
-                    newest_bar_at=snap.newest_bar_at,
-                    day_open=snap.day_open,
-                    day_high=snap.day_high,
-                    day_low=snap.day_low,
-                )
-            )
+            rows.append(_price_row(symbol, polled, snap))
             result.prices += 1
         with self.session_factory() as session:
             session.add_all(rows)
             session.commit()
         return result
+
+    # ------------------------------------------------------------ one stock, on demand
+
+    def serve_scan_requests(self) -> int:
+        """Run every scan the /watchlist page has asked for (app/watch/ondemand.py), oldest
+        first; returns how many ran.
+
+        Called only from the scanner's own loop - between its jobs, and every couple of
+        seconds while it waits for the next tick - and never from a thread of its own. That is
+        deliberate: a scan stores, groups and moves the BSE cursor exactly as a regular pass
+        does, and two passes writing at once would race on both (each reads a story's members
+        and the cursor, then writes on top of what it read)."""
+        if self.scan_inbox is None:
+            return 0
+        return sum(self.scan_stock(request) for request in pending_requests(self.scan_inbox))
+
+    def scan_stock(self, request: ScanRequest) -> bool:
+        """One requested scan: its row opened `running` before the request file goes (so a
+        second click finds one or the other), each step written as it ends, then done or
+        failed. False when the request was dropped instead."""
+        inbox = self.scan_inbox
+        assert inbox is not None
+        now = self.clock()
+        with self.session_factory() as session:
+            opened = session.scalar(select(WatchScan.id).where(WatchScan.request_id == request.id))
+        if opened is not None:  # only its file was left behind
+            remove_request(inbox, request)
+            return False
+        stock = next((s for s in self.stocks if s.symbol == request.symbol), None)
+        max_age = timedelta(minutes=self.settings.watch.scan_request_max_age_minutes)
+        if stock is None or now - request.requested_at > max_age:
+            log.info(
+                "scan of %s dropped: %s",
+                request.symbol,
+                "not a stock on the watchlist" if stock is None else "asked too long ago",
+            )
+            remove_request(inbox, request)
+            return False
+        self.activity = (f"scan {stock.symbol}", now)
+        with self.session_factory() as session:
+            scan = WatchScan(
+                request_id=request.id,
+                symbol=stock.symbol,
+                requested_at=request.requested_at,
+                started_at=now,
+                updated_at=now,
+                status="running",
+                steps=new_steps(),
+                errors=[],
+            )
+            session.add(scan)
+            session.commit()
+            progress = _ScanProgress(self.session_factory, scan.id, self.clock)
+        remove_request(inbox, request)
+        try:
+            outcome = self._on_demand_pass(stock, now, progress)
+            progress.finish("done", outcome)
+        except Exception as exc:  # the scanner outlives any one scan
+            log.exception("scan of %s failed", stock.symbol)
+            outcome = _ScanOutcome(
+                errors=[{"stage": "scan", "error": f"{type(exc).__name__}: {exc}"}]
+            )
+            progress.finish("failed", outcome)
+        finally:
+            self.activity = ("idle", self.clock())
+        with self.session_factory() as session:
+            # A pass of its own on the runs page, and a backlog for the lead-time table: what it
+            # "first saw" may have been out for days.
+            session.add(
+                WatchRun(
+                    job="on_demand",
+                    started_at=now,
+                    finished_at=self.clock(),
+                    on_ac=on_ac_power(),
+                    entries=outcome.entries,
+                    new_articles=outcome.new_articles,
+                    new_filings=outcome.new_filings,
+                    errors=outcome.errors,
+                    details={
+                        "symbol": stock.symbol,
+                        "request_id": request.id,
+                        "scan": progress.scan_id,
+                    }
+                    | ({"stale_skipped": outcome.stale} if outcome.stale else {}),
+                )
+            )
+            session.commit()
+        log.info("scan of %s: %s", stock.symbol, outcome.line())
+        return True
+
+    def _on_demand_pass(
+        self, stock: WatchItem, now: datetime, progress: "_ScanProgress"
+    ) -> "_ScanOutcome":
+        """Google News and NSE's API for this one stock over the last few days, what the PEAD
+        tool has written for BSE, a fresh price with Yahoo's profile, then the usual call on
+        its stories. Stored and grouped exactly as a regular pass stores and groups."""
+        since = now - timedelta(days=self.settings.watch.on_demand_days)
+        outcome = _ScanOutcome()
+
+        progress.step("google_news", "running")
+        queries = google_news_queries([stock], self.settings, google_news_window(since, now))
+        reads, _ = asyncio.run(self._fetch(queries, include_nse=False, now=now))
+        found = sum(len(read.articles) for read in reads)
+        failed = [read.fetched.error for read in reads if read.fetched.error]
+        outcome.entries += found
+        progress.step(
+            "google_news",
+            "failed" if failed and not found else "done",
+            f"{found} results over {self.settings.watch.on_demand_days} days"
+            + (f"; {len(failed)} of {len(reads)} searches failed: {failed[0]}" if failed else ""),
+        )
+
+        history: dict[str, tuple[list[Announcement], str | None]] = {}
+        if stock.nse_symbol:
+            progress.step("nse", "running")
+            announced, error = asyncio.run(self._nse_for(stock.nse_symbol, since, now))
+            history[stock.symbol] = (announced, error)
+            progress.step(
+                "nse",
+                "failed" if error else "done",
+                error or f"{len(announced)} announcements since {self._day(since)}",
+            )
+        else:
+            progress.step("nse", "skipped", "not listed on NSE")
+
+        progress.step("bse", "running")
+        shared = self._read_bse(now)
+        if shared is None:
+            progress.step("bse", "skipped", "BSE filings are off (no PEAD file or codes)")
+        elif shared.error:
+            progress.step("bse", "skipped", shared.error)
+        else:
+            mine = sum(1 for symbol, _ in shared.found if symbol == stock.symbol)
+            wrote = (
+                f"; the PEAD tool last wrote at {self._local(shared.last_write)}"
+                if shared.last_write
+                else ""
+            )
+            progress.step("bse", "done", f"{mine} new for it from the PEAD tool{wrote}")
+
+        # BSE first, exactly as a regular pass stores it: what the PEAD tool backfilled late
+        # gets its usual summary. Then this stock's own finds, which never start one: opening a
+        # card sends nothing to Telegram that wouldn't have been sent anyway (the alerts job
+        # applies the usual rules to what is stored here, keyed so nothing goes twice).
+        if shared is not None and shared.error is None:
+            outcome.errors += self._process("on_demand", [], None, now, shared=shared).errors
+        own = self._process("on_demand", reads, None, now, history=history, record_late=False)
+        outcome.errors += own.errors
+        outcome.stale = own.stale
+        if skipped := sum(own.stale.values()):
+            progress.step(
+                "google_news",
+                "failed" if failed and not found else "done",
+                f"{found} results over {self.settings.watch.on_demand_days} days; {skipped} "
+                f"older than a week skipped"
+                + (
+                    f"; {len(failed)} of {len(reads)} searches failed: {failed[0]}"
+                    if failed
+                    else ""
+                ),
+            )
+
+        progress.step("price", "running")
+        state, detail, profile = self._price_now(stock, outcome)
+        if profile is not None:
+            progress.update(profile=profile_to_json(profile))
+        progress.step("price", state, detail)
+
+        self._call_for(stock, now, progress, outcome)
+        outcome.new_articles, outcome.new_filings, outcome.new_stories = self._found_at(stock, now)
+        return outcome
+
+    async def _nse_for(
+        self, nse_symbol: str, since: datetime, now: datetime
+    ) -> tuple[list[Announcement], str | None]:
+        async with make_client(self.settings.http, transport=self.transport) as client:
+            return await fetch_nse_history(client, nse_symbol, since, now, self.settings)
+
+    def _price_now(
+        self, stock: WatchItem, outcome: "_ScanOutcome"
+    ) -> tuple[str, str, Profile | None]:
+        """A fresh quote, stored like the prices job's, and Yahoo's profile - a year of daily
+        closes, sector, industry, market cap - which the dialog shows without asking Yahoo
+        itself."""
+        parts, state = [], "done"
+        if self.snapshots is not None:
+            polled = self.clock()
+            try:
+                snap = self.snapshots.snapshot(stock.symbol)
+                row = _price_row(stock.symbol, polled, snap)
+                if snap.price is not None:
+                    parts.append(f"last {snap.price:,.2f}")
+            except Exception as exc:
+                error = f"{type(exc).__name__}: {exc}"
+                row = WatchPrice(symbol=stock.symbol, polled_at=polled, error=error)
+                outcome.errors.append({"stage": "price", "error": error})
+                parts.append(f"no quote ({error})")
+                state = "failed"
+            with self.session_factory() as session:
+                session.add(row)
+                session.commit()
+        else:
+            parts.append("no quote source")
+        profile = None
+        if self.profile_fetch is not None:
+            try:
+                profile = self.profile_fetch(stock.symbol)
+                parts.append(
+                    f"{len(profile.closes)} daily closes"
+                    + (f"; profile incomplete ({profile.error})" if profile.error else "")
+                )
+            except Exception as exc:
+                outcome.errors.append({"stage": "profile", "error": f"{type(exc).__name__}: {exc}"})
+                parts.append("no Yahoo profile")
+        return state, "; ".join(parts), profile
+
+    def _call_for(
+        self, stock: WatchItem, now: datetime, progress: "_ScanProgress", outcome: "_ScanOutcome"
+    ) -> None:
+        """The usual watch-lane call on this stock's stories, through the same limiter. With
+        the lane's budget spent, the headlines stay stored and nothing is called."""
+        if self.llm is None:
+            progress.step("analyse", "skipped", "no LLM key, so nothing is called")
+            return
+        if self._calls_paused_until is not None and now < self._calls_paused_until:
+            outcome.note = self._lane_spent()
+            progress.step("analyse", "skipped", "the watch lane's budget is spent")
+            return
+        progress.step("analyse", "running")
+        for note in read_replies(self.session_factory, self.settings):
+            log.info("watch reply: %s", note)
+        result = analyse(
+            self.session_factory,
+            self.llm,
+            self.settings,
+            {item.symbol: item for item in self.stocks},
+            now,
+            self._bad_inputs,
+            only={stock.symbol},
+        )
+        outcome.calls = len(result.called)
+        outcome.errors += [
+            {"stage": "analyse", "story_id": story_id, "error": error}
+            for story_id, error in result.failed
+        ]
+        if result.stopped:
+            if result.quota_spent and self.llm.limiter is not None:
+                self._calls_paused_until = self.llm.limiter.next_reset()
+            outcome.note = (
+                self._lane_spent() if result.quota_spent else f"Not called: {result.stopped}"
+            )
+            progress.step("analyse", "skipped", outcome.note)
+            return
+        stories = len(result.called)
+        progress.step(
+            "analyse", "done", f"{stories} {'story' if stories == 1 else 'stories'} called"
+        )
+
+    def _lane_spent(self) -> str:
+        resume = (
+            f" Calls resume at {self._local(self._calls_paused_until)}."
+            if self._calls_paused_until
+            else ""
+        )
+        return (
+            "The watch lane's daily budget is spent, so nothing was called; the headlines are "
+            f"stored and will be called once it resets.{resume}"
+        )
+
+    def _found_at(self, stock: WatchItem, now: datetime) -> tuple[int, int, int]:
+        """What this scan stored for the stock: articles naming it (never a drop), its
+        filings, and the stories it is in, all first seen at `now`."""
+        with self.session_factory() as session:
+            articles = session.scalar(
+                select(func.count(distinct(WatchArticle.id)))
+                .join(WatchMatch)
+                .where(
+                    WatchMatch.symbol == stock.symbol,
+                    WatchMatch.verdict != "drop",
+                    WatchArticle.first_seen_at == now,
+                )
+            )
+            filings = session.scalar(
+                select(func.count(WatchFiling.id)).where(
+                    WatchFiling.symbol == stock.symbol, WatchFiling.first_seen_at == now
+                )
+            )
+            stories = [
+                story
+                for story in session.scalars(
+                    select(WatchStory).where(WatchStory.first_seen_at == now)
+                )
+                if stock.symbol in kept_symbols(story)
+            ]
+        return articles or 0, filings or 0, len(stories)
+
+    def _day(self, moment: datetime) -> str:
+        return moment.astimezone(self.settings.tz).strftime("%d %b")
+
+    def _local(self, moment: datetime | None) -> str:
+        return moment.astimezone(self.settings.tz).strftime("%H:%M") if moment else ""
 
     # ------------------------------------------------------------ fetching
 
@@ -617,8 +952,11 @@ class Watcher:
         now: datetime,
         history: dict[str, tuple[list[Announcement], str | None]] | None = None,
         shared: SharedRead | None = None,
-        catch_up: bool = False,
+        record_late: bool = True,
     ) -> JobResult:
+        """Match, store and group what a pass read. `record_late`: filings that arrived late
+        get a "while you were away" summary of their own (`_record_late`). A catch-up's summary
+        already takes them, and a scan of one stock never starts one."""
         result = JobResult(job)
         checks = [
             self._feed_check(read.feed, read.fetched, read.articles, now)
@@ -683,7 +1021,7 @@ class Watcher:
             )
 
             session.add_all(checks)
-            new_articles = self._store_articles(session, candidates, now)
+            new_articles = self._store_articles(session, candidates, now, result.stale)
             new_filings = [
                 WatchFiling(
                     key=found.key,
@@ -708,7 +1046,8 @@ class Watcher:
                 session.merge(
                     WatchCursor(source=BSE_CURSOR, position=shared.position, updated_at=now)
                 )
-            self._record_late(session, new_filings, now, catch_up)
+            if record_late:
+                self._record_late(session, new_filings, now)
             session.commit()
         result.new_articles = len(new_articles)
         result.new_filings = len(new_filings)
@@ -748,12 +1087,30 @@ class Watcher:
         )
 
     def _store_articles(
-        self, session: Session, candidates: Sequence[_Candidate], now: datetime
+        self,
+        session: Session,
+        candidates: Sequence[_Candidate],
+        now: datetime,
+        stale: dict[str, int] | None = None,
     ) -> list[WatchArticle]:
+        """Store what a pass read, or add a sighting to what it already had. An article
+        published more than `watch.catch_up_max_days` before BASIS first sees it is not stored
+        (user, 2026-10-19): a Google News search returns old pages whatever window it asks for -
+        a 2020 price page, a 2024 results story - and stored, each was a story first seen today.
+        It applies to every source and path - the feeds, the searches, a catch-up, a scan of
+        one stock - and is counted, by source, in `stale`. Filings are not affected."""
         created: list[WatchArticle] = []
+        oldest = now - stale_after(self.settings)
+        turned_away: set[tuple[str, str]] = set()  # an article in several searches counts once
         for candidate in candidates:
             entry = candidate.entry
             article = self._existing(session, entry, now)
+            if article is None and entry.published_at < oldest:
+                source = "Google News" if candidate.feed.is_google_news else candidate.feed.name
+                if stale is not None and (source, entry.url) not in turned_away:
+                    turned_away.add((source, entry.url))
+                    stale[source] = stale.get(source, 0) + 1
+                continue
             if article is None:
                 article = WatchArticle(
                     url=entry.url,
@@ -847,9 +1204,7 @@ class Watcher:
         # Oldest first, so a story's seed is the earliest filing.
         return sorted(fresh.values(), key=lambda pair: pair[1].filed_at)
 
-    def _record_late(
-        self, session: Session, filings: Sequence[WatchFiling], now: datetime, catch_up: bool
-    ) -> None:
+    def _record_late(self, session: Session, filings: Sequence[WatchFiling], now: datetime) -> None:
         """Filings that reached BASIS more than an hour after they were filed - the PEAD
         tool backfilling BSE after it was started, typically - go into a "while you were
         away" summary, never an alert of their own (user, 2026-10-08). A catch-up's own
@@ -858,7 +1213,7 @@ class Watcher:
         filings; nobody was away)."""
         away = timedelta(minutes=self.settings.watch.away_after_minutes)
         late = [filing for filing in filings if arrived_late(filing, away)]
-        if not late or catch_up:
+        if not late:
             return
         earlier = session.scalar(
             select(WatchRun.id).where(WatchRun.job == "feeds", WatchRun.started_at < now).limit(1)
@@ -1029,12 +1384,16 @@ class Watcher:
     # ------------------------------------------------------------ grouping
 
     def _window_members(self, session: Session, now: datetime) -> list[_Member]:
-        """Every grouped article and filing still inside the story window, oldest first."""
+        """Every grouped article and filing still inside the story window, oldest first.
+        Nothing first seen after `now`: a live pass has nothing newer, and a replay of a past
+        pass (scripts/split_commentary_stories.py) must not see the future."""
         since = now - timedelta(hours=self.settings.watch.story_window_hours)
         members: list[_Member] = []
         for article in session.scalars(
             select(WatchArticle).where(
-                WatchArticle.story_id.is_not(None), WatchArticle.first_seen_at >= since
+                WatchArticle.story_id.is_not(None),
+                WatchArticle.first_seen_at >= since,
+                WatchArticle.first_seen_at <= now,
             )
         ):
             members.append(
@@ -1050,7 +1409,9 @@ class Watcher:
             )
         for filing in session.scalars(
             select(WatchFiling).where(
-                WatchFiling.story_id.is_not(None), WatchFiling.first_seen_at >= since
+                WatchFiling.story_id.is_not(None),
+                WatchFiling.first_seen_at >= since,
+                WatchFiling.first_seen_at <= now,
             )
         ):
             members.append(
@@ -1088,29 +1449,47 @@ class Watcher:
     ) -> int:
         """Place each new article and filing in a story; returns how many stories it made.
 
-        Embedding similarity decides, as in the pipeline, with two additions
-        (app/watch/events.py): items stating different money amounts never share a story,
-        and order news about one stock within `order_attach_hours` of an order story joins
-        the one reported closest to it, before similarity is asked (an NSE order filing's
-        text is the same for every order)."""
+        Embedding similarity decides, as in the pipeline, with three additions
+        (app/watch/events.py): items stating different money amounts never share a story;
+        order news about one stock within `order_attach_hours` of an order story joins the one
+        reported closest to it, before similarity is asked (an NSE order filing's text is the
+        same for every order); and a story begun by share-price commentary - its headline is
+        its first item's - takes no event: no filing, no article that `is_event` (user,
+        2026-10-19). Commentary may still join an event's story."""
         grouper: StoryGrouper[int] = StoryGrouper(
             self.settings.grouping.embedding_threshold,
             self.settings.grouping.seed_threshold,
             timedelta(hours=self.settings.watch.story_window_hours),
         )
         orders = _OrderStories(timedelta(hours=self.settings.watch.order_attach_hours))
+        begun = session.execute(
+            select(WatchStory.id, WatchStory.headline).where(
+                WatchStory.id.in_({member.story_id for member in window})
+            )
+        ).all()
+        commentary = {story_id for story_id, headline in begun if is_commentary(headline)}
         for member in window:
             stated = amounts(member.headline)
             if self.embedder is not None:
                 grouper.add(
-                    member.story_id, self._vectors[member.text], member.symbols, member.seen, stated
+                    member.story_id,
+                    self._vectors[member.text],
+                    member.symbols,
+                    member.seen,
+                    stated,
+                    commentary=member.story_id in commentary,
                 )
-            if is_order_news(member.headline):
+            if is_order_news(member.headline) and member.story_id not in commentary:
                 orders.add(member.story_id, member.symbols, member.published, stated)
         created = 0
 
         def place(
-            text: str, symbols: set[str], headline: str, seen: datetime, published: datetime
+            text: str,
+            symbols: set[str],
+            headline: str,
+            seen: datetime,
+            published: datetime,
+            event: bool,
         ) -> WatchStory:
             nonlocal created
             stated = amounts(headline)
@@ -1121,7 +1500,7 @@ class Watcher:
             # filing has no words of its own at all.
             story_id = orders.find(symbols, published, stated) if order else None
             if story_id is None and self.embedder is not None:
-                story_id = grouper.match(self._vectors[text], symbols, seen, stated)
+                story_id = grouper.match(self._vectors[text], symbols, seen, stated, event)
             story = session.get(WatchStory, story_id) if story_id is not None else None
             if story is None:
                 story = WatchStory(first_seen_at=seen, headline=headline)
@@ -1129,7 +1508,14 @@ class Watcher:
                 session.flush()
                 created += 1
             if self.embedder is not None:
-                grouper.add(story.id, self._vectors[text], symbols, seen, stated)
+                grouper.add(
+                    story.id,
+                    self._vectors[text],
+                    symbols,
+                    seen,
+                    stated,
+                    commentary=is_commentary(story.headline),
+                )
             if order:
                 orders.add(story.id, symbols, published, stated)
             return story
@@ -1147,6 +1533,7 @@ class Watcher:
                 article.title,
                 article.first_seen_at,
                 min(article.published_at, article.first_seen_at),
+                is_event(article.title),
             )
         for filing in filings:
             story = self._quoted_story(session, filing, now)
@@ -1157,6 +1544,7 @@ class Watcher:
                     f"{filing.company}: {filing.subject}",
                     filing.first_seen_at,
                     filing.filed_at,
+                    True,  # a filing is the company's own event, whatever it says
                 )
             filing.story = story
         return created
@@ -1178,6 +1566,7 @@ class Watcher:
             .where(
                 WatchMatch.symbol == filing.symbol,
                 WatchArticle.first_seen_at >= since,
+                WatchArticle.first_seen_at <= now,
                 WatchArticle.story_id.is_not(None),
             )
             .order_by(WatchArticle.first_seen_at)
@@ -1192,6 +1581,7 @@ class Watcher:
                 WatchFiling.quoted_headline == filing.quoted_headline,
                 WatchFiling.story_id.is_not(None),
                 WatchFiling.id != filing.id,
+                WatchFiling.first_seen_at <= now,
             )
             .order_by(WatchFiling.filed_at)
         )
@@ -1212,6 +1602,7 @@ class Watcher:
             .where(
                 WatchMatch.symbol == filing.symbol,
                 WatchArticle.first_seen_at >= since,
+                WatchArticle.first_seen_at <= now,
                 WatchArticle.story_id.is_not(None),
             )
             .order_by(WatchArticle.first_seen_at)
@@ -1224,6 +1615,8 @@ class Watcher:
 
 WATCH_FEEDS = "watch_feeds.yaml"
 TICK_SECONDS = 15  # short, so a laptop waking from sleep is noticed quickly
+SCAN_CHECK_SECONDS = 2  # how often an idle scanner looks for a scan the page asked for
+PROFILE_TIMEOUT = 20  # seconds, for each of Yahoo's two profile requests
 
 
 def build_watcher(
@@ -1236,6 +1629,7 @@ def build_watcher(
     are passed to the resolver too, so a Google News outlet is named as its own feed names
     it ("CNBC TV18" is CNBC-TV18)."""
     from app.config import CONFIG_DIR, load_feeds, load_watchlist_file
+    from app.watch.preview import yahoo_profile
 
     watch_feeds = load_feeds(CONFIG_DIR / WATCH_FEEDS)
     resolver = SourceResolver([*load_feeds(include_disabled=True), *watch_feeds])
@@ -1252,6 +1646,8 @@ def build_watcher(
         sender=_telegram(settings),
         watchlist_path=CONFIG_DIR / "watchlist.yaml",
         companies_path=settings.resolve_path(COMPANY_LIST_FILE),
+        scan_inbox=settings.resolve_path(settings.watch.scan_requests_dir),
+        profile_fetch=yahoo_profile(PROFILE_TIMEOUT),
     )
 
 
@@ -1289,7 +1685,9 @@ def run_forever(
     sleep: Callable[[float], None],
     should_stop: Callable[[], bool] = lambda: False,
 ) -> None:
-    """Run due jobs until stopped. A job's failure is logged and recorded, never fatal."""
+    """Run due jobs until stopped. A job's failure is logged and recorded, never fatal.
+    Between ticks it looks for scans the /watchlist page asked for every couple of seconds,
+    so one starts within moments of the click, not at the next tick."""
     while not should_stop():
         try:
             # Held only while jobs run: a scan that starts finishes before the laptop sleeps.
@@ -1298,7 +1696,47 @@ def run_forever(
                     log.info("watch %s", result.line())
         except Exception:  # anything tick itself didn't catch: log it and keep going
             log.exception("watch tick failed")
-        sleep(TICK_SECONDS)
+        waited = 0.0
+        while waited < TICK_SECONDS and not should_stop():
+            try:
+                if watcher.scan_inbox is not None and pending_requests(watcher.scan_inbox):
+                    with keep_awake():
+                        watcher.serve_scan_requests()
+            except Exception:
+                log.exception("scan request failed")
+            sleep(SCAN_CHECK_SECONDS)
+            waited += SCAN_CHECK_SECONDS
+
+
+def start_heartbeat(watcher: Watcher, every: float = HEARTBEAT_EVERY) -> Callable[[], None]:
+    """Write the scanner's heartbeat (app/watch/ondemand.py) every `every` seconds from a
+    thread of its own, so the page can tell a scanner that isn't running from one in the middle
+    of a long job. The thread writes that one file and nothing else - never the database.
+    Returns a function that stops it and removes the file, so the page knows at once."""
+    inbox = watcher.scan_inbox
+    if inbox is None:
+        return lambda: None
+    stop = threading.Event()
+
+    def beat() -> None:
+        while True:
+            activity, since = watcher.activity
+            try:
+                write_heartbeat(inbox, activity, since, utcnow())
+            except OSError as exc:
+                log.warning("scanner heartbeat not written: %s", exc)
+            if stop.wait(every):
+                return
+
+    thread = threading.Thread(target=beat, name="heartbeat", daemon=True)
+    thread.start()
+
+    def finish() -> None:
+        stop.set()
+        thread.join(timeout=5)
+        clear_heartbeat(inbox)
+
+    return finish
 
 
 def _mtime(path: Path | None) -> float | None:
@@ -1306,6 +1744,97 @@ def _mtime(path: Path | None) -> float | None:
         return path.stat().st_mtime if path is not None else None
     except OSError:
         return None
+
+
+def _price_row(symbol: str, polled: datetime, snap: Snapshot) -> WatchPrice:
+    return WatchPrice(
+        symbol=symbol,
+        polled_at=polled,
+        price=snap.price,
+        previous_close=snap.previous_close,
+        last_trade_at=snap.last_trade_at,
+        newest_bar_at=snap.newest_bar_at,
+        day_open=snap.day_open,
+        day_high=snap.day_high,
+        day_low=snap.day_low,
+    )
+
+
+@dataclass
+class _ScanOutcome:
+    """What one scan of one stock found, for its row, its run and the log."""
+
+    entries: int = 0
+    new_articles: int = 0
+    new_filings: int = 0
+    new_stories: int = 0
+    calls: int = 0
+    errors: list[dict[str, Any]] = field(default_factory=list)
+    note: str | None = None
+    stale: dict[str, int] = field(default_factory=dict)  # old news not stored, by source
+
+    def line(self) -> str:
+        skipped = sum(self.stale.values())
+        return (
+            f"{self.new_articles} new articles, {self.new_filings} filings, "
+            f"{self.new_stories} new stories, {self.calls} calls"
+            + (f", {skipped} older than a week skipped" if skipped else "")
+            + (f", {len(self.errors)} errors" if self.errors else "")
+            + (f" ({self.note})" if self.note else "")
+        )
+
+
+class _ScanProgress:
+    """A scan's row, written as the scan goes: one short transaction per step, never held
+    across a fetch or a call, so the page's status poll sees each step end."""
+
+    def __init__(
+        self, session_factory: sessionmaker[Session], scan_id: int, clock: Callable[[], datetime]
+    ) -> None:
+        self.session_factory = session_factory
+        self.scan_id = scan_id
+        self.clock = clock
+
+    def step(self, key: str, state: str, detail: str = "") -> None:
+        with self.session_factory() as session:
+            scan = session.get(WatchScan, self.scan_id)
+            if scan is not None:
+                scan.steps = with_step(scan.steps, key, state, detail)
+                scan.updated_at = self.clock()
+                session.commit()
+
+    def update(self, **fields: Any) -> None:
+        with self.session_factory() as session:
+            scan = session.get(WatchScan, self.scan_id)
+            if scan is not None:
+                for name, value in fields.items():
+                    setattr(scan, name, value)
+                scan.updated_at = self.clock()
+                session.commit()
+
+    def finish(self, status: str, outcome: _ScanOutcome) -> None:
+        with self.session_factory() as session:
+            scan = session.get(WatchScan, self.scan_id)
+            if scan is None:
+                return
+            # A step a failure cut short reads as failed, not as still running.
+            steps = scan.steps
+            for step in steps:
+                if step["state"] in ("running", "pending") and status == "failed":
+                    steps = with_step(
+                        steps, step["key"], "failed" if step["state"] == "running" else "skipped"
+                    )
+            scan.steps = steps
+            scan.status = status
+            scan.new_articles = outcome.new_articles
+            scan.new_filings = outcome.new_filings
+            scan.new_stories = outcome.new_stories
+            scan.calls = outcome.calls
+            scan.skipped_stale = sum(outcome.stale.values())
+            scan.errors = outcome.errors
+            scan.note = outcome.note
+            scan.finished_at = scan.updated_at = self.clock()
+            session.commit()
 
 
 def _match_row(match: Match) -> WatchMatch:

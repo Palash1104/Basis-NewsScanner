@@ -64,7 +64,7 @@
     <tbody>
       {% for day in view.slots %}
         <tr>
-          <td>{{ day.day.strftime("%a %d %b") }}</td>
+          <td>{{ day.day | day("%a %d %b") }}</td>
           <td>{{ day.ran | length }}/{{ day.expected }}</td>
           <td>
             {% if day.missed %}

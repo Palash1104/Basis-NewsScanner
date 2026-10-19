@@ -444,7 +444,8 @@ def test_the_header_links_the_watchlist(client: TestClient) -> None:
 
 def test_the_watchlist_page_has_a_card_for_every_entry(client: TestClient) -> None:
     body = client.get("/watchlist").text
-    assert body.count('<div class="watch-card">') == 12
+    assert body.count("data-card-symbol=") == 12
+    assert body.count('<div class="watch-card watch-card-stock"') == 8  # the stocks open a scan
     words = " ".join(body.split())
     assert "8 stocks · 4 commodities ·" in words
     assert "The list is config/watchlist.yaml." in words
@@ -538,7 +539,8 @@ def test_watchlist_news_shows_real_calls_and_playbook_stories_not_passing_mentio
     assert "Houthi attacks close the Red Sea to tankers" in body
     assert '<span class="tag tag-neutral">playbook</span>' in body
     assert "<b>▲ Brent crude</b>" in body  # followed, so bold
-    row = body.split(f'href="/watchlist/story/{story_id}"')[1].split("</a>")[0]
+    row = body.split(f'<a class="watch-news" href="/watchlist/story/{story_id}"')[1]
+    row = row.split("</a>")[0]
     assert ">+1.0%<" in row  # HAL since the story broke: 4600 -> 4646
 
 
@@ -1646,3 +1648,21 @@ def test_htmx_gets_the_body_alone(database: Path, settings: Settings) -> None:
 
 def test_runs_are_in_the_nav(client: TestClient) -> None:
     assert 'href="/runs"' in client.get("/").text
+
+
+def test_a_card_shows_its_latest_story_in_bold_with_the_call_under_it(
+    database: Path, settings: Settings
+) -> None:
+    """The user's design (2026-10-19): the headline, then the reason when it adds something."""
+    story_id = _watch_story(database, "Defence ministry signs Rs 2,000 crore Tejas deal", "primary")
+    body = _client(database, settings).get("/watchlist").text
+    hal = body.split('data-card-symbol="HAL.NS"')[1].split("data-card-symbol=")[0]
+    driver = hal.partition('class="watch-card-driver ')[2]
+    assert "watch-tone-up" in driver.split(">")[0]  # a positive call
+    title = driver.split('<p class="watch-card-driver-title">')[1].split("</p>")[0]
+    assert title == "Defence ministry signs Rs 2,000 crore Tejas deal"
+    detail = driver.split('<p class="watch-card-driver-detail">')[1].split("</p>")[0]
+    assert detail == "HAL won an order worth Rs 2,000 crore."
+    assert f'<a href="/watchlist/story/{story_id}">Open the latest story</a>' in hal
+    quiet = body.split('data-card-symbol="BDL.NS"')[1].split("data-card-symbol=")[0]
+    assert "No calls in the last week." in quiet

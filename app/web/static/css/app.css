@@ -151,6 +151,28 @@ a.btn-primary:visited {
 
 .masthead-nav a[aria-current="page"] {
   color: var(--color-link);
+  text-decoration: underline 2px;
+  text-underline-offset: 8px;
+}
+
+/* The theme button names the choice beside a mark for it: a sun, a moon, or half of each for
+   "auto". theme.js sets data-choice; the markup ships "auto". */
+[data-theme-toggle] {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Two classes, to outrank the system's `.btn svg { display: block }`. */
+[data-theme-toggle] .theme-icon {
+  display: none;
+  flex: none;
+}
+
+[data-theme-toggle][data-choice="auto"] .theme-icon-auto,
+[data-theme-toggle][data-choice="light"] .theme-icon-light,
+[data-theme-toggle][data-choice="dark"] .theme-icon-dark {
+  display: block;
 }
 
 .masthead-nav .pending {
@@ -1253,14 +1275,45 @@ a.btn-primary:visited {
   text-align: right;
 }
 
+/* The watchlist page as the user drew it (2026-10-19): each card a tile of its own, lighter
+   than the page, with rounded corners and a soft shadow, four to a row with a gutter between;
+   a move that rose in green and one that fell in red, on this page and its ticker. The tokens
+   are scoped to the page (base.html's body class), so the rest of the app keeps its ink-up. */
+.page-watchlist {
+  --color-up: #1b7a3f;
+  --watch-tile: #ffffff;
+  --watch-tile-shadow: 0 1px 2px rgba(45, 43, 43, 0.06), 0 4px 16px rgba(45, 43, 43, 0.07);
+  --watch-tile-shadow-hover: 0 2px 4px rgba(45, 43, 43, 0.08), 0 10px 28px rgba(45, 43, 43, 0.12);
+  --watch-tile-radius: 8px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .page-watchlist {
+    --color-up: #5cc488;
+    --watch-tile: var(--color-surface);
+    --watch-tile-shadow: 0 1px 2px rgba(0, 0, 0, 0.5), 0 0 0 1px var(--rule-faint);
+    --watch-tile-shadow-hover: 0 6px 20px rgba(0, 0, 0, 0.55), 0 0 0 1px var(--rule-medium);
+  }
+}
+
+:root[data-theme="dark"] .page-watchlist {
+  --color-up: #5cc488;
+  --watch-tile: var(--color-surface);
+  --watch-tile-shadow: 0 1px 2px rgba(0, 0, 0, 0.5), 0 0 0 1px var(--rule-faint);
+  --watch-tile-shadow-hover: 0 6px 20px rgba(0, 0, 0, 0.55), 0 0 0 1px var(--rule-medium);
+}
+
 .watch-cards {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  border-bottom: 2px solid var(--color-divider);
+  column-gap: 20px;
+  row-gap: 0;
+  padding-bottom: 12px;
 }
 
 /* Each card lays its five parts on the grid's own rows (subgrid), so names, prices, lines and
-   notes line up along a row of cards however long one name or note runs. */
+   notes line up along a row of cards however long one name or note runs. The gutter under a
+   row is the card's bottom margin: a subgrid's margin and padding size its edge tracks. */
 .watch-card {
   display: grid;
   grid-row: span 5;
@@ -1268,37 +1321,46 @@ a.btn-primary:visited {
   align-content: start;
   row-gap: 0;
   min-width: 0;
-  padding: 28px 24px 28px 0;
-  border-right: 1px solid color-mix(in srgb, var(--color-text) 20%, transparent);
+  margin-bottom: 20px;
+  padding: 18px 20px 20px;
+  background: var(--watch-tile);
+  border-radius: var(--watch-tile-radius);
+  box-shadow: var(--watch-tile-shadow);
+  transition: box-shadow 0.15s ease;
 }
 
 .watch-card-head {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
   gap: 12px;
   min-width: 0;
-  margin-bottom: 8px;
+  margin-bottom: 10px;
 }
 
-.watch-card:not(:nth-child(4n + 1)) {
-  padding-left: 24px;
+.watch-card-head .kicker {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.watch-card:nth-child(4n) {
-  border-right: none;
+.watch-card-tools {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
 }
-
 
 /* A stock's name wraps rather than ending in "Apollo Micro Syste…"; the subgrid keeps the
    prices under it level across the row. */
 .watch-card-name {
-  margin-bottom: 4px;
+  margin-bottom: 8px;
   font-family: var(--font-heading);
-  font-size: 24px;
+  font-size: 20px;
   font-weight: 800;
-  line-height: 1.12;
-  letter-spacing: -0.015em;
+  line-height: 1.15;
+  letter-spacing: -0.01em;
   overflow-wrap: anywhere;
   text-wrap: balance;
 }
@@ -1312,23 +1374,68 @@ a.btn-primary:visited {
   text-decoration: underline;
 }
 
+/* The price, the move in its colour, a thin rule, and what the move is measured from. */
 .watch-card-price {
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
-  gap: 10px;
-  margin-bottom: 16px;
-  font-size: 16px;
+  column-gap: 10px;
+  row-gap: 2px;
+  margin-bottom: 14px;
+  font-size: 15px;
   font-variant-numeric: tabular-nums;
+}
+
+.watch-card-now {
+  font-weight: 600;
 }
 
 .watch-card-change {
   font-weight: 800;
 }
 
+.watch-card-change.up {
+  color: var(--color-up);
+}
+
+.watch-card-change.down {
+  color: var(--color-down);
+}
+
+.watch-card-since {
+  padding-left: 10px;
+  font-size: 12px;
+  color: var(--color-muted);
+  border-left: 1px solid var(--rule-medium);
+}
+
+/* The week's line over a filled area, in the move's colour, on a faint wash of it. */
 .watch-card .spark-card {
   display: block;
-  background: var(--color-surface);
+  overflow: hidden;
+  border-radius: 4px;
+}
+
+.watch-card .spark-card.up {
+  color: var(--color-up);
+}
+
+.watch-card .spark-card.down {
+  color: var(--color-down);
+}
+
+.watch-card svg.spark-card {
+  background: color-mix(in srgb, currentColor 6%, transparent);
+}
+
+.spark-card-area {
+  fill: currentColor;
+  fill-opacity: 0.16;
+  stroke: none;
+}
+
+.spark-card-line {
+  stroke: currentColor;
 }
 
 .spark-empty {
@@ -1338,12 +1445,56 @@ a.btn-primary:visited {
   height: 72px;
   font-size: 11px;
   color: var(--color-muted);
+  background: var(--color-surface);
 }
 
+/* The latest story: its headline in bold, the reason under it, a document mark beside it. */
 .watch-card-driver {
-  margin-top: 10px;
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  align-items: start;
+  gap: 10px;
+  margin-top: 16px;
   font-size: 12px;
-  line-height: 1.5;
+  line-height: 1.45;
+}
+
+.watch-card-driver-icon {
+  margin-top: 1px;
+  color: var(--color-accent-500);
+}
+
+.watch-card-driver-icon path {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.watch-card-driver-title {
+  display: -webkit-box;
+  margin: 0;
+  overflow: hidden;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.35;
+  color: var(--color-text);
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+
+.watch-card-driver-detail {
+  display: -webkit-box;
+  margin: 4px 0 0;
+  overflow: hidden;
+  color: var(--color-muted);
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+
+.watch-card-driver.watch-card-driver-none {
+  display: block;
   color: var(--color-muted);
 }
 
@@ -1476,19 +1627,11 @@ a.btn-primary:visited {
 @media (max-width: 900px) {
   .watch-cards {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+    column-gap: 16px;
   }
 
-  .watch-card:not(:nth-child(4n + 1)) {
-    padding-left: 0;
-  }
-
-  .watch-card:nth-child(odd) {
-    padding-right: 16px;
-  }
-
-  .watch-card:nth-child(even) {
-    padding-left: 16px;
-    border-right: none;
+  .watch-card {
+    margin-bottom: 16px;
   }
 
   .watch-split {
@@ -1522,21 +1665,85 @@ a.btn-primary:visited {
 
 .watch-head-side {
   display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 12px;
+  align-items: center;
+  gap: 20px;
 }
 
+/* The title and the side share a row while they fit; on a narrow window the side goes under. */
+.page-watchlist .screen-head {
+  flex-wrap: wrap;
+  row-gap: 16px;
+}
+
+.watch-head-add {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+
+.watch-head-add svg {
+  flex: none;
+}
+
+/* What the last add or remove did, as a banner (user's design, 2026-10-19): a document mark,
+   the message, and a × that puts it away (a link back to the plain page without
+   JavaScript; watch-add.js just removes it and tidies the address). */
 .watch-page-flash {
-  margin: 0 0 20px;
-  padding: 12px 16px;
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 14px;
+  margin: 0 0 24px;
+  padding: 14px 14px 14px 18px;
   font-size: 14px;
-  background: var(--color-surface);
-  border-left: 3px solid var(--color-text);
+  line-height: 1.45;
+  background: var(--watch-tile);
+  border-left: 3px solid var(--color-accent-500);
+  border-radius: 6px;
+  box-shadow: var(--watch-tile-shadow);
+}
+
+.watch-page-flash p {
+  margin: 0;
+}
+
+.watch-page-flash .watch-flash-icon {
+  color: var(--color-accent-500);
+}
+
+.watch-page-flash .watch-flash-icon path {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 .watch-page-flash.watch-flash-error {
   border-left-color: var(--color-link);
+}
+
+.watch-page-flash.watch-flash-error .watch-flash-icon {
+  color: var(--color-link);
+}
+
+.watch-flash-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  font-size: 20px;
+  line-height: 1;
+  color: var(--color-muted);
+  text-decoration: none;
+  border-radius: 4px;
+}
+
+.watch-flash-close:hover {
+  color: var(--color-text);
+  background: var(--color-surface);
 }
 
 .watch-add {
@@ -2607,7 +2814,13 @@ html:has(.watch-add:target:not(.closed)) {
   }
 
   .watch-head-side {
-    align-items: flex-start;
+    flex-direction: row-reverse;
+    justify-content: flex-end;
+    gap: 16px;
+  }
+
+  .watch-page-note {
+    text-align: left;
   }
 }
 
@@ -2632,4 +2845,441 @@ html:has(.watch-add:target:not(.closed)) {
    dialog's ground: give it the medium rule there. */
 .watch-pv .btn-secondary {
   border-color: var(--rule-medium);
+}
+
+/* ---------------------------------------------------------------- a stock's dialog */
+/* Opening a stock's card scans it (user, 2026-10-18): the "Add a stock" dialog's frame, wait
+   and tabs, in one column. The card itself is the control - a button stretched over it takes
+   the click and the keyboard, and Remove sits above it - so it stays a separate control. */
+
+.watch-card {
+  position: relative;
+}
+
+.watch-card-open {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  padding: 0;
+  cursor: pointer;
+  background: transparent;
+  border: none;
+}
+
+.watch-card-open:focus-visible {
+  outline: 2px solid var(--color-link);
+  outline-offset: -2px;
+}
+
+.watch-card-open:focus-visible {
+  border-radius: var(--watch-tile-radius);
+}
+
+.watch-card-stock:hover {
+  box-shadow: var(--watch-tile-shadow-hover);
+}
+
+.watch-card-stock:hover .watch-card-name {
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+
+/* Remove and the menu sit above the stretched button, so each stays its own control; a card
+   whose menu is open sits above its neighbours, so the list is never under the next card. */
+.watch-card-remove,
+.watch-card-tools {
+  position: relative;
+  z-index: 2;
+}
+
+.watch-card:has(.watch-card-menu[open]) {
+  z-index: 3;
+}
+
+/* The design's "⋮". A <details>: it opens without JavaScript, and watch-add.js closes it on a
+   click elsewhere, on Escape, and when one of its items opens the stock's dialog. */
+.watch-card-menu {
+  position: relative;
+}
+
+.watch-card-menu summary {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  color: var(--color-muted);
+  cursor: pointer;
+  list-style: none;
+  border-radius: 4px;
+}
+
+.watch-card-menu summary::-webkit-details-marker {
+  display: none;
+}
+
+.watch-card-menu summary svg {
+  fill: currentColor;
+}
+
+.watch-card-menu summary:hover,
+.watch-card-menu[open] summary {
+  color: var(--color-text);
+  background: var(--color-surface);
+}
+
+.watch-card-menu summary:focus-visible {
+  outline: 2px solid var(--color-link);
+  outline-offset: 1px;
+}
+
+.watch-card-menu-list {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  display: flex;
+  flex-direction: column;
+  min-width: 200px;
+  padding: 6px;
+  background: var(--watch-tile);
+  border: 1px solid var(--rule-faint);
+  border-radius: 6px;
+  box-shadow: var(--shadow-md);
+}
+
+.watch-card-menu-list a,
+.watch-card-menu-list button {
+  display: block;
+  width: 100%;
+  padding: 8px 10px;
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  color: var(--color-text);
+  text-decoration: none;
+  cursor: pointer;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+}
+
+.watch-card-menu-list a:hover,
+.watch-card-menu-list button:hover,
+.watch-card-menu-list a:focus-visible,
+.watch-card-menu-list button:focus-visible {
+  color: var(--color-link);
+  background: var(--color-surface);
+  outline: none;
+}
+
+.watch-card-menu-empty {
+  padding: 8px 10px;
+  font-size: 13px;
+  color: var(--color-muted);
+}
+
+.watch-stock .watch-add-dialog {
+  width: min(1040px, 100%);
+}
+
+.watch-stock-detail {
+  flex: 1;
+  min-height: 0;
+  margin-top: 22px;
+  padding-left: 0;
+}
+
+.watch-scan-asset {
+  margin-left: 14px;
+  font-weight: 700;
+  color: var(--color-link);
+  text-decoration: none;
+}
+
+.watch-scan-asset:hover {
+  text-decoration: underline;
+}
+
+.watch-scan-when {
+  margin: 0;
+  font-size: 13px;
+  color: var(--color-muted);
+}
+
+.watch-scan-wait {
+  display: flex;
+}
+
+/* The scan's steps, ticking off as the scanner reports them. */
+.watch-scan-step {
+  flex-wrap: wrap;
+}
+
+.watch-scan-mark {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1;
+  border: 2px solid var(--rule-medium);
+  border-radius: 50%;
+}
+
+.watch-scan-step.is-pending .watch-scan-label {
+  color: var(--color-muted);
+}
+
+.watch-scan-step.is-running .watch-scan-mark {
+  background: var(--color-link);
+  border-color: var(--color-link);
+  animation: watch-wait-dot 1.2s ease-in-out infinite;
+}
+
+.watch-scan-step.is-done .watch-scan-mark {
+  color: var(--color-bg);
+  background: var(--color-text);
+  border-color: var(--color-text);
+}
+
+.watch-scan-step.is-done .watch-scan-mark::before {
+  content: "✓";
+}
+
+.watch-scan-step.is-failed .watch-scan-mark {
+  color: var(--color-bg);
+  background: var(--color-link);
+  border-color: var(--color-link);
+}
+
+.watch-scan-step.is-failed .watch-scan-mark::before {
+  content: "✕";
+}
+
+.watch-scan-step.is-skipped .watch-scan-mark::before {
+  content: "–";
+  color: var(--color-muted);
+}
+
+.watch-scan-detail {
+  flex-basis: 100%;
+  margin-left: 30px;
+  font-size: 13px;
+  color: var(--color-muted);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .watch-scan-step.is-running .watch-scan-mark {
+    animation: none;
+  }
+}
+
+/* Why a scan hasn't started, or didn't finish. */
+.watch-scan-notice {
+  margin: 6px 0 20px;
+  padding: 12px 16px;
+  font-size: 14px;
+  background: var(--color-surface);
+  border-left: 3px solid var(--color-text);
+}
+
+.watch-scan-notice.is-problem {
+  border-left-color: var(--color-link);
+}
+
+.watch-scan-notice p {
+  margin: 0 0 6px;
+}
+
+.watch-scan-notice p:last-child {
+  margin-bottom: 0;
+}
+
+.watch-scan-notice code {
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.watch-scan-notice .btn {
+  margin-top: 6px;
+}
+
+/* Latest: the week's stories about the stock. */
+.watch-latest,
+.watch-filings {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.watch-latest-row {
+  display: grid;
+  gap: 5px;
+  padding: 14px 0;
+  color: inherit;
+  text-decoration: none;
+  border-bottom: 1px solid var(--rule-light);
+}
+
+/* Ink, as every headline is: the hover underlines the headline and tints nothing. */
+.watch-latest-row:hover {
+  color: inherit;
+}
+
+.watch-latest-row:hover .watch-latest-headline {
+  text-decoration: underline;
+}
+
+.watch-latest-meta,
+.watch-filing-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 12px;
+  font-size: 12px;
+  color: var(--color-muted);
+}
+
+.watch-latest-headline,
+.watch-filing-subject {
+  font-size: 17px;
+  font-weight: 800;
+  line-height: 1.3;
+}
+
+.watch-latest-call {
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.watch-call-negative b {
+  color: var(--color-down);
+}
+
+.watch-latest-sources,
+.watch-filing-text {
+  font-size: 13px;
+  color: var(--color-muted);
+}
+
+.watch-filing {
+  display: grid;
+  gap: 5px;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--rule-light);
+}
+
+.watch-filing-link {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--color-link);
+}
+
+/* What the scan found stays in view at the dialog's foot, as "Add a stock"'s footer does,
+   however long the list above it. */
+.watch-scan-foot {
+  position: sticky;
+  bottom: -24px;
+  z-index: 1;
+  flex-wrap: wrap;
+  margin-top: 20px;
+  padding-bottom: 22px;
+  background: var(--color-bg);
+}
+
+.watch-scan-found {
+  margin: 0;
+  font-size: 14px;
+}
+
+.watch-scan-found.is-problem {
+  color: var(--color-link);
+}
+
+.watch-scan-errors {
+  font-size: 13px;
+  color: var(--color-muted);
+}
+
+.watch-scan-errors ul {
+  margin: 6px 0 0;
+  padding-left: 18px;
+}
+
+@media (max-width: 900px) {
+  .watch-stock-detail {
+    margin-top: 16px;
+    padding-top: 0;
+    border-top: none;
+  }
+
+  .watch-scan-asset {
+    margin-left: 0;
+  }
+}
+
+/* Three to a row on a narrow laptop window: four left the kicker cut and the move's
+   "since the last close" on a line of its own. */
+@media (max-width: 1200px) and (min-width: 901px) {
+  .watch-cards {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+/* One card to a row on a phone: two left each name about 120px. */
+@media (max-width: 600px) {
+  .watch-cards {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* ---------------------------------------------------------------- the masthead on a phone */
+/* On a phone the masthead's one row - wordmark, nav, the feed's search and the theme button -
+   was 710px wide on /watchlist and 983px on the feed, so every page was laid out wider than
+   the screen: the browser zoomed out, a fixed dialog spanned the wider page, and a tap landed
+   on another card than the one under the finger (found 2026-10-19). The nav gets a row of its
+   own that scrolls sideways, as the ticker does; the tools wrap under the wordmark. */
+@media (max-width: 700px) {
+  .masthead {
+    flex-wrap: wrap;
+    gap: 12px 16px;
+  }
+
+  .masthead-divider {
+    display: none;
+  }
+
+  .masthead-nav {
+    flex-basis: 100%;
+    order: 3;
+    gap: 20px;
+    padding-bottom: 12px;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .masthead-nav::-webkit-scrollbar {
+    display: none;
+  }
+
+  .masthead-nav a,
+  .masthead-nav .pending {
+    white-space: nowrap;
+  }
+
+  .masthead-tools {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    min-width: 0;
+  }
+
+  .masthead-tools .search {
+    flex: 1 1 100%;
+    width: auto;
+    min-width: 0;
+  }
 }

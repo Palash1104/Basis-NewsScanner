@@ -24,8 +24,8 @@ from datetime import datetime
 from html import escape
 
 from app.config import Settings
-from app.models import WatchCall, WatchFiling, WatchStory
-from app.watch.analyse import kept_articles, kept_symbols
+from app.models import WatchArticle, WatchCall, WatchFiling, WatchStory
+from app.watch.analyse import kept_articles, kept_symbols, reporting_articles, stale_after
 from app.watch.moves import MoveEvent
 
 MARK = {"positive": "▲", "negative": "▼", "neutral": "●"}
@@ -148,22 +148,52 @@ def status_line(story: WatchStory, settings: Settings, ref: datetime) -> str:
     """When it came out and how far it has got: "NSE filing 14:56 · first media report
     14:59", "07:26 · media only, not filed", "first media report 10:23 · NSE asked for
     clarification 11:05 · company replied 15:33"."""
+    return _status(reporting_articles(story, stale_after(settings)), story.filings, settings, ref)
+
+
+def _status(
+    articles: Sequence[WatchArticle],
+    filings: Sequence[WatchFiling],
+    settings: Settings,
+    ref: datetime,
+) -> str:
     steps: list[tuple[datetime, str]] = []
-    articles = kept_articles(story)
     if articles:
         first = min(min(a.published_at, a.first_seen_at) for a in articles)
         steps.append((first, "first media report"))
     seen_exchanges: set[tuple[str, str]] = set()
-    for filing in sorted(story.filings, key=lambda f: f.filed_at):
+    for filing in sorted(filings, key=lambda f: f.filed_at):
         label = _filing_step(filing)
         if (filing.exchange, filing.kind) in seen_exchanges:
             continue
         seen_exchanges.add((filing.exchange, filing.kind))
         steps.append((filing.filed_at, label))
     steps.sort(key=lambda step: step[0])
-    if articles and not story.filings:
+    if articles and not filings:
         return f"{local(steps[0][0], settings, ref)} · media only, not filed"
     return " · ".join(f"{label} {local(at, settings, ref)}" for at, label in steps)
+
+
+# Some of a story's articles and filings: news that came into a story BASIS already had.
+Items = tuple[Sequence[WatchArticle], Sequence[WatchFiling]]
+
+
+def _parts(
+    story: WatchStory, settings: Settings, ref: datetime, items: Items | None
+) -> tuple[str, str | None, str]:
+    """An item's headline, link and status line: the story's own, or - for news that came
+    into a story BASIS already had (app/watch/alerts.py `new_news`) - its first report's (the
+    filing's, when there is no report), with a status line from those items alone."""
+    if items is None:
+        return story.headline, story_link(story), status_line(story, settings, ref)
+    articles, filings = items
+    if articles:
+        first = min(articles, key=lambda a: (min(a.published_at, a.first_seen_at), a.id or 0))
+        headline, link = first.title, first.url
+    else:
+        filing = min(filings, key=lambda f: f.filed_at)
+        headline, link = f"{filing.company}: {filing.subject}", filing.link or None
+    return headline, link, _status(articles, filings, settings, ref)
 
 
 def _filing_step(filing: WatchFiling) -> str:
@@ -185,15 +215,17 @@ def story_item(
     settings: Settings,
     ref: datetime,
     reason: bool = True,
+    items: Items | None = None,
 ) -> str:
-    """Two lines, three when the reason adds something."""
-    headline = short_headline(story.headline, story_names(story, names))
+    """Two lines, three when the reason adds something. `items`: only these of the story's
+    articles and filings (`_parts`)."""
+    full, link, status = _parts(story, settings, ref, items)
+    headline = short_headline(full, story_names(story, names))
     lines = [
-        f"{lead(calls, story, names)}: {_linked(headline, story_link(story))}",
-        f"<i>{status_line(story, settings, ref)}</i>"
-        + ("" if calls else " · <i>not analysed yet</i>"),
+        f"{lead(calls, story, names)}: {_linked(headline, link)}",
+        f"<i>{status}</i>" + ("" if calls else " · <i>not analysed yet</i>"),
     ]
-    if reason and calls and adds_information(calls[0].reason, story.headline):
+    if reason and calls and adds_information(calls[0].reason, full):
         lines.append(t(calls[0].reason))
     return "\n".join(lines)
 
@@ -205,13 +237,12 @@ def low_item(
     settings: Settings,
     ref: datetime,
     when: datetime,
+    items: Items | None = None,
 ) -> str:
     """One line, for the folded LOW block."""
-    headline = short_headline(story.headline, story_names(story, names))
-    return (
-        f"{lead(calls, story, names)}: {_linked(headline, story_link(story))} · "
-        f"{local(when, settings, ref)}"
-    )
+    full, link, _ = _parts(story, settings, ref, items)
+    headline = short_headline(full, story_names(story, names))
+    return f"{lead(calls, story, names)}: {_linked(headline, link)} · {local(when, settings, ref)}"
 
 
 def move_lines(

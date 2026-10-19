@@ -242,6 +242,15 @@ watch:
   # which appends every one it reads to this SQLite file; BASIS only reads it (user,
   # 2026-10-07). BSE is covered only while that tool runs.
   bse_announcements_db: "C:/Users/tralp/Documents/resultscanner/announcements.db"
+  # Opening a stock's card on /watchlist scans that one stock now (user, 2026-10-18). The web
+  # server can't write the database, so it leaves a request in scan_requests_dir and the
+  # scanner runs it between its jobs (app/watch/ondemand.py).
+  scan_requests_dir: data/scan_requests
+  on_demand_days: 3 # Google News and NSE's API, this far back
+  scan_reuse_seconds: 120 # a click on the same stock this soon shows the last scan
+  scan_pickup_seconds: 20 # not picked up by then: the dialog says why (stopped, or busy)
+  scan_give_up_seconds: 180 # and stops asking after this
+  scan_request_max_age_minutes: 10 # a request the scanner finds older than this is dropped
   benchmark: "^NSEI"
   # Feed health, as the warning would judge it (reported only at this step).
   feed_failing_after: 3 # failed checks in a row

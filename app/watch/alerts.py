@@ -3,7 +3,9 @@
 What reaches Telegram, and when:
 
   news       a story the call rates high for any watchlist company it is about: one alert
-             for the story, listing every company (user, 2026-10-08), as soon as it is called
+             for the story, listing every company (user, 2026-10-08), as soon as it is called.
+             A story BASIS already had alerts too when news that just came out raises a stock
+             to high; the alert leads with that news, not the story's old headline (`new_news`)
   followup   once, when NSE asks the company to clarify, the company replies, or a filing
              attaches to a story already alerted - after the reply has been read and the
              story called again, or after FOLLOWUP_WAIT
@@ -45,7 +47,15 @@ from app.models import (
     WatchStory,
 )
 from app.schedule import start_of_news_day
-from app.watch.analyse import kept_articles, kept_symbols, trigger_for
+from app.watch.analyse import (
+    first_reported,
+    kept_articles,
+    kept_symbols,
+    open_since,
+    reporting_articles,
+    stale_after,
+    trigger_for,
+)
 from app.watch.moves import MoveEvent, Snapshot, Typical, detect
 from app.watch.render import (
     MARK,
@@ -116,13 +126,6 @@ def arrived_late(filing: WatchFiling, away: timedelta) -> bool:
     return filing.first_seen_at - filing.filed_at > away
 
 
-def first_reported(story: WatchStory) -> datetime:
-    """When the news first came out: the earliest kept article's publication or filing time,
-    and never later than when BASIS saw it."""
-    times = [a.published_at for a in kept_articles(story)] + [f.filed_at for f in story.filings]
-    return min([*times, story.first_seen_at])
-
-
 def story_state(story: WatchStory, settings: Settings) -> str:
     """Media report, not yet filed -> NSE asked -> the company responded / filed."""
     by_kind: dict[str, list[WatchFiling]] = {}
@@ -168,9 +171,9 @@ def _marks(calls: Sequence[WatchCall], names: Mapping[str, str]) -> str:
     )
 
 
-def _sources(story: WatchStory) -> str:
+def _sources(articles: Sequence[WatchArticle]) -> str:
     links, seen = [], set()
-    for article in sorted(kept_articles(story), key=lambda a: a.first_seen_at):
+    for article in sorted(articles, key=lambda a: a.first_seen_at):
         if article.source_name in seen:
             continue
         seen.add(article.source_name)
@@ -186,9 +189,11 @@ def news_message(
     names: Mapping[str, str],
     settings: Settings,
     now: datetime | None = None,
+    news: "NewNews | None" = None,
 ) -> str:
     """An instant alert: the item as everywhere else (app/watch/render.py), then the
-    summary, each company's call and the sources folded underneath."""
+    summary, each company's call and the sources folded underneath. `news`: the news that
+    came into a story BASIS already had, which the item then leads with."""
     ref = now or story.first_seen_at
     details = [_t(calls[0].summary)] if calls else []
     details += [
@@ -196,15 +201,131 @@ def news_message(
         f"{c.event_type.replace('_', ' ')} — {_t(c.reason)}"
         for c in calls
     ]
-    if sources := _sources(story):
+    if sources := _sources(news.articles if news else kept_articles(story)):
         details.append(f"Sources: {sources}")
     level = calls[0].materiality.upper() if calls else ""
+    items = (news.articles, news.filings) if news else None
     return "\n".join(
         [
             f"<b>BASIS · watchlist alert{' · ' + level if level else ''}</b>",
-            story_item(story, calls, names, settings, ref),
+            story_item(story, calls, names, settings, ref, items=items),
             "<blockquote expandable>" + "\n".join(details) + "</blockquote>",
         ]
+    )
+
+
+# ---------------------------------------------------------------- news in a story BASIS had
+# A story stays open while news keeps joining it (scan._window_members), so a call can rise
+# on news that came out days after the story began: Astra Microwave's Q1 results (10 Oct, rated
+# high) inside a 9 Oct multibagger list, Zen's Cogknit acquisition (17 Oct) inside a 13 Oct
+# share-price note. Judged by when the story began, neither was alerted nor in a digest. The
+# alert, the digest and the away summary judge a story by the news behind its call instead
+# (user, 2026-10-19).
+
+
+@dataclass(frozen=True)
+class NewNews:
+    """The news behind a call that rated a stock higher than before."""
+
+    articles: tuple[WatchArticle, ...]  # those that came out in the period asked about
+    filings: tuple[WatchFiling, ...]
+    raised: tuple[WatchCall, ...]  # the calls that rose, most material first
+    when: datetime  # when the earliest of them came out
+
+
+def came_out(item: WatchArticle | WatchFiling) -> datetime:
+    """When the publisher or the exchange put it out (never later than BASIS saw it)."""
+    if isinstance(item, WatchFiling):
+        return item.filed_at
+    return min(item.published_at, item.first_seen_at)
+
+
+def call_history(session: Session, story_ids: Sequence[int]) -> dict[int, list[WatchCall]]:
+    """Every call on these stories, oldest first."""
+    found: dict[int, list[WatchCall]] = {}
+    if not story_ids:
+        return found
+    for call in session.scalars(
+        select(WatchCall)
+        .where(WatchCall.story_id.in_(list(story_ids)))
+        .order_by(WatchCall.created_at, WatchCall.id)
+    ):
+        found.setdefault(call.story_id, []).append(call)
+    return found
+
+
+def raised_calls(history: Sequence[WatchCall], since: datetime) -> list[WatchCall]:
+    """Each stock's latest call made since `since`, when it rates the stock above every call
+    on it before then (a first call always does) and isn't a passing mention. Most material
+    first."""
+    before: dict[str, int] = {}
+    latest: dict[str, WatchCall] = {}
+    for call in sorted(history, key=lambda c: (c.created_at, c.id)):
+        if call.created_at >= since:
+            latest[call.symbol] = call
+        elif call.relevance != "passing":
+            before[call.symbol] = min(before.get(call.symbol, len(RANK)), RANK[call.materiality])
+    raised = [
+        call
+        for call in latest.values()
+        if call.relevance != "passing"
+        and RANK[call.materiality] < before.get(call.symbol, len(RANK))
+    ]
+    return sorted(raised, key=lambda c: (RANK[c.materiality], c.symbol))
+
+
+def new_news(
+    story: WatchStory,
+    history: Sequence[WatchCall],
+    called_since: datetime,
+    period: tuple[datetime, datetime | None],
+    max_age: timedelta,
+    skip: Callable[[WatchArticle | WatchFiling], bool] | None = None,
+) -> NewNews | None:
+    """The news behind a call made since `called_since` that rates a stock higher than any
+    call before then, when it came out in `period` ([start, end), end None for open); None
+    otherwise. The news is the kept articles and filings that arrived since the story's
+    previous call - all of them for its first.
+
+    A re-call needs one of them to have come out in the period. A story's first call needs
+    its earliest to: the old rule for a new story, "first reported in the last 6 hours". `skip`
+    leaves items out - one read in a catch-up long after it came out, which the away summary
+    has (for a first call, the story is left out when its earliest is such an item)."""
+    raised = raised_calls(history, called_since)
+    if not raised:
+        return None
+    previous = max((c.created_at for c in history if c.created_at < called_since), default=None)
+    latest = max(c.created_at for c in history)
+    items: list[WatchArticle | WatchFiling] = [
+        item
+        for item in [*reporting_articles(story, max_age), *story.filings]
+        if (previous is None or item.first_seen_at > previous) and item.first_seen_at <= latest
+    ]
+    if not items:
+        return None
+    start, end = period
+
+    def inside(item: WatchArticle | WatchFiling) -> bool:
+        return start <= came_out(item) and (end is None or came_out(item) < end)
+
+    if previous is None:
+        earliest = min(items, key=came_out)
+        if not inside(earliest) or (skip is not None and skip(earliest)):
+            return None
+    fresh = [i for i in items if inside(i) and (skip is None or not skip(i))]
+    if not fresh:
+        return None
+    return NewNews(
+        articles=tuple(i for i in fresh if isinstance(i, WatchArticle)),
+        filings=tuple(i for i in fresh if isinstance(i, WatchFiling)),
+        raised=tuple(raised),
+        when=min(came_out(i) for i in fresh),
+    )
+
+
+def _called_since(session: Session, since: datetime) -> list[int]:
+    return sorted(
+        set(session.scalars(select(WatchCall.story_id).where(WatchCall.created_at >= since)))
     )
 
 
@@ -244,27 +365,40 @@ def _load_stories(
 def news_alerts(
     session: Session, settings: Settings, names: Mapping[str, str], now: datetime
 ) -> list[Outgoing]:
-    stories = _load_stories(session, now - NEWS_MAX_AGE)
+    """One alert per story, when a call made in the last NEWS_MAX_AGE raises a stock to high
+    on news that came out in that time (`new_news`): a new story's news first reported then,
+    or news that came into a story BASIS already had. Never news read in a catch-up long after
+    it came out, nor a filing that arrived late: a "while you were away" summary has those."""
+    since = now - NEWS_MAX_AGE
+    max_age = stale_after(settings)
+    stories = _load_stories(session, ids=_called_since(session, since))
     calls = current_calls(session, [s.id for s in stories])
+    history = call_history(session, [s.id for s in stories])
     already = _sent_keys(session, [f"news:{s.id}" for s in stories])
     away = timedelta(minutes=settings.watch.away_after_minutes)
-    backlog = {run.started_at for run in _catch_up_passes(session, now - NEWS_MAX_AGE)}
+    backlog = {run.started_at for run in _catch_up_passes(session, since)}
+
+    def read_late(item: WatchArticle | WatchFiling) -> bool:
+        if isinstance(item, WatchFiling):
+            return arrived_late(item, away)
+        return item.first_seen_at in backlog and came_out(item) < item.first_seen_at - away
+
     out: list[Outgoing] = []
     for story in sorted(stories, key=lambda s: s.first_seen_at):
         key = f"news:{story.id}"
+        if key in already:
+            continue
+        news = new_news(story, history.get(story.id, []), since, (since, None), max_age, read_late)
+        if news is None or news.raised[0].materiality != "high":
+            continue
         visible = shown(calls.get(story.id, {}), list(names))
-        if key in already or not visible or visible[0].materiality != "high":
-            continue
-        reported = first_reported(story)
-        if reported < now - NEWS_MAX_AGE:
-            continue
-        if story.first_seen_at in backlog and reported < story.first_seen_at - away:
-            continue  # read in a catch-up, long after it broke: the away summary has it
+        # A story that began before the window is led by the news that just came out.
+        older = first_reported(story, max_age) < since
         out.append(
             Outgoing(
                 "news",
                 key,
-                (news_message(story, visible, names, settings, now),),
+                (news_message(story, visible, names, settings, now, news if older else None),),
                 story.id,
                 tuple(c.symbol for c in visible),
             )
@@ -390,13 +524,40 @@ def latest_snapshots(
     return found
 
 
-def stories_since(session: Session, symbols: Sequence[str], since: datetime) -> dict[str, bool]:
-    """Which stocks have a story (a keep or a filing) first seen since `since`."""
+def news_since(
+    session: Session, since: datetime, max_age: timedelta
+) -> list[tuple[str, datetime, datetime]]:
+    """(stock, when it came out, when BASIS first saw it) for every kept article and filing
+    first reported since `since`, in any story: one begun today, or one BASIS already had that
+    the news joined (user, 2026-10-19). The story counts for all its stocks. An old page
+    stored today is never news, so it can't silence a real move."""
+    found: list[tuple[str, datetime, datetime]] = []
+    stories = session.scalars(
+        select(WatchStory)
+        .where(open_since(since))  # an item reported since then was first seen since then
+        .options(
+            selectinload(WatchStory.articles).selectinload(WatchArticle.matches),
+            selectinload(WatchStory.filings),
+        )
+    )
+    for story in stories:
+        symbols = kept_symbols(story)
+        for item in [*reporting_articles(story, max_age), *story.filings]:
+            if came_out(item) >= since:
+                found += [(symbol, came_out(item), item.first_seen_at) for symbol in symbols]
+    return found
+
+
+def stories_since(
+    session: Session, symbols: Sequence[str], since: datetime, max_age: timedelta
+) -> dict[str, bool]:
+    """Which stocks have a story since `since`: one with any item (a kept article, a filing)
+    first reported since then - not only a story that began then. News that joins an older
+    story silences "moved, no story yet" as much as a new story does."""
     found = dict.fromkeys(symbols, False)
-    for story in _load_stories(session, since):
-        for symbol in kept_symbols(story):
-            if symbol in found:
-                found[symbol] = True
+    for symbol, _, _ in news_since(session, since, max_age):
+        if symbol in found:
+            found[symbol] = True
     return found
 
 
@@ -424,7 +585,10 @@ def detect_now(
     snaps = latest_snapshots(session, symbols, now, settings)
     fresh = {s: snap for s, snap in snaps.items() if now - snap.at <= timedelta(minutes=15)}
     has_story = stories_since(
-        session, [s.symbol for s in watchlist.stocks], last_session_close(now, settings)
+        session,
+        [s.symbol for s in watchlist.stocks],
+        last_session_close(now, settings),
+        stale_after(settings),
     )
     return detect(fresh, typical, groups, ungrouped, has_story, now.astimezone(settings.tz).date())
 
@@ -452,8 +616,9 @@ def moves_in_period(
     end: datetime,
 ) -> list[MoveEvent]:
     """Replay the price rows of a period (the catch-up's backfill) through the same rules,
-    moment by moment, with only the stories BASIS had by each moment; the first time each
-    key fires is its event."""
+    moment by moment, with only the news BASIS had by each moment (`news_since`: an item
+    reported since that moment's last close and first seen by then); the first time each key
+    fires is its event."""
     groups, ungrouped = group_layout(watchlist)
     stocks = [s.symbol for s in watchlist.stocks]
     symbols = stocks + [i for i, _ in groups.values() if i]
@@ -479,11 +644,7 @@ def moves_in_period(
     if not by_moment:
         return []
     earliest = last_session_close(min(by_moment), settings)
-    seen = [
-        (symbol, story.first_seen_at)
-        for story in _load_stories(session, earliest)
-        for symbol in kept_symbols(story)
-    ]
+    news = news_since(session, earliest, stale_after(settings))
     events: dict[str, MoveEvent] = {}
     latest: dict[str, Snapshot] = {}
     for moment in sorted(by_moment):
@@ -494,7 +655,7 @@ def moves_in_period(
         }
         close = last_session_close(moment, settings)
         has_story = {
-            symbol: any(s == symbol and close <= at <= moment for s, at in seen)
+            symbol: any(s == symbol and out >= close and seen <= moment for s, out, seen in news)
             for symbol in stocks
         }
         for event in detect(current, typical, groups, ungrouped, has_story, day):
@@ -544,9 +705,20 @@ def away_summaries(
             for s in _load_stories(session, run.started_at - timedelta(seconds=1))
             if s.first_seen_at == run.started_at and kept_symbols(s)
         ]
-        if missing := late_story_ids - {s.id for s in stories}:
+        # And stories BASIS already had that this pass added articles to: listed when a call
+        # made on them rates a stock higher than before (`new_news`, user, 2026-10-19).
+        grown_ids = set(
+            session.scalars(
+                select(WatchArticle.story_id).where(
+                    WatchArticle.first_seen_at == run.started_at,
+                    WatchArticle.story_id.is_not(None),
+                )
+            )
+        )
+        if missing := (late_story_ids | grown_ids) - {s.id for s in stories}:
             stories += _load_stories(session, ids=sorted(missing))
         calls = current_calls(session, [s.id for s in stories])
+        history = call_history(session, [s.id for s in stories])
         alerted = news_alert_times(session, [s.id for s in stories], run.started_at)
         unfinished = [s for s in stories if trigger_for(s, list(calls.get(s.id, {}).values()))]
         finished_at = run.finished_at or run.started_at
@@ -554,7 +726,7 @@ def away_summaries(
             continue  # its stories are still being called
         sections = Sections.empty()
         for story in stories:
-            reported = first_reported(story)
+            reported = first_reported(story, stale_after(settings))
             late = [
                 f
                 for f in story.filings
@@ -568,6 +740,30 @@ def away_summaries(
                     story, late, story_calls, alerted[story.id], names, settings, gap_end
                 )
                 sections.add("high", when, text)  # only a high story was alerted
+                continue
+            if story.first_seen_at < run.started_at and not late:
+                # News this pass read into a story BASIS already had, under its own headline.
+                started = run.started_at
+                news = new_news(
+                    story,
+                    history.get(story.id, []),
+                    started,
+                    (gap_start, cutoff),
+                    stale_after(settings),
+                    lambda item, started=started: item.first_seen_at != started,  # type: ignore[misc]
+                )
+                if news is None:
+                    continue
+                visible = shown(story_calls, list(names))
+                items = (news.articles, news.filings)
+                section = section_for(list(news.raised))
+                if section == "low":
+                    text = low_item(
+                        story, visible, names, settings, gap_end, news.when, items=items
+                    )
+                else:
+                    text = story_item(story, visible, names, settings, gap_end, items=items)
+                sections.add(section, news.when, text)
                 continue
             if story.first_seen_at == run.started_at and (gap_start <= reported < cutoff or late):
                 when = reported
@@ -831,23 +1027,48 @@ def digest_section(
     nothing."""
     names = {s.symbol: s.name or s.symbol for s in watchlist.stocks}
     since = start_of_news_day(settings, now) or now - timedelta(hours=24)
+    max_age = stale_after(settings)
     stories = _load_stories(session, since)
     calls = current_calls(session, [s.id for s in stories])
     sections = Sections.empty()
     count = 0
+    listed: set[int] = set()
     for story in stories:
         visible = shown(calls.get(story.id, {}), list(names))
         # Today's news, as for the rest of the digest: what broke since the day began, not
         # what BASIS happened to read today.
-        reported = first_reported(story)
+        reported = first_reported(story, max_age)
         if not visible or reported < since:
             continue
         count += 1
+        listed.add(story.id)
         section = section_for(visible)
         if section == "low":
             sections.add("low", reported, low_item(story, visible, names, settings, now, reported))
         else:
             sections.add(section, reported, story_item(story, visible, names, settings, now))
+    # News that came out today in a story BASIS already had, when a call made today rates a
+    # stock higher than before: under that news's own headline, at its own time.
+    older = [i for i in _called_since(session, since) if i not in listed]
+    history = call_history(session, older)
+    for story in _load_stories(session, ids=older):
+        news = new_news(story, history.get(story.id, []), since, (since, None), max_age)
+        if news is None:
+            continue
+        visible = shown(current_calls(session, [story.id]).get(story.id, {}), list(names))
+        count += 1
+        items = (news.articles, news.filings)
+        section = section_for(list(news.raised))
+        if section == "low":
+            sections.add(
+                "low",
+                news.when,
+                low_item(story, visible, names, settings, now, news.when, items=items),
+            )
+        else:
+            sections.add(
+                section, news.when, story_item(story, visible, names, settings, now, items=items)
+            )
     moves = session.scalars(
         select(WatchAlert)
         .where(WatchAlert.kind.in_(["price", "sector"]), WatchAlert.created_at >= since)

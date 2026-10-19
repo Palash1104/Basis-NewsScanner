@@ -272,7 +272,9 @@ order (the user dropped the stops between steps 3 and 7 on 2026-10-08):
   - **What is sent.** Each item is a `watch_alerts` row whose key makes it happen once. A
     row is written before sending; a failed send is retried for 30 min, three tries.
     - `news`: one per story, when the call rates any of its stocks high and the news was
-      first reported in the last 6 hours. It lists every stock the story is about.
+      first reported in the last 6 hours. It lists every stock the story is about. Since
+      2026-10-19 also news that came into a story BASIS already had (`alerts.new_news`, see
+      "News in a story BASIS already had" below).
     - `followup`: once, when a filing attaches after the alert. It waits for the reply to
       be read and the story called again, or 15 min.
     - `price` / `sector`: "moved, no story yet", see below.
@@ -287,7 +289,8 @@ order (the user dropped the stops between steps 3 and 7 on 2026-10-08):
     - Defence names are judged net of NIFTY_IND_DEFENCE.NS (2.1-3.3 a month at 2×).
     - A sector move is the index past 2× its own typical day, or 60% of the group past
       1.5× in one direction. It sends one "defence sector move" instead of one per stock.
-    - Nothing for a stock with a story since the last close. At most one per stock a day.
+    - Nothing for a stock with a story since the last close: any story with an item first
+      reported since then (2026-10-19). At most one per stock a day.
     - Typical moves are computed once a day from hourly bars (`hourly_bars`).
   - **The away summary.**
     - Contents: everything a catch-up read that was first reported between the gap's start
@@ -311,7 +314,15 @@ order (the user dropped the stops between steps 3 and 7 on 2026-10-08):
   - **What is scored.** The first positive or negative call per story and stock: the call
     as made, not a re-call. Neutral calls and passing mentions are not scored.
   - **From when.** The first hourly bar at or after BASIS *first saw* the story, priced at
-    the bar before (Phase 3's rule).
+    the bar before (Phase 3's rule). A call that came on a re-call (the story's first call was
+    neutral or passing, or didn't name the stock) is judged from when BASIS first saw what set
+    it off: the earliest first_seen_at among the kept articles and filings added since the
+    story's previous call (`scoring.judged_from`; user, 2026-10-19), as a first call made late
+    is judged from when BASIS first saw the story. Judged from the story's start, #101's call
+    on the Cogknit acquisition would have been priced from a 13 October share-price note;
+    judged from when it was made, the calls a restart makes on news that waited would count
+    none of it. A re-call set off by reading the company's reply: the reply's first_seen_at.
+    Nothing new at all: when the call was made. No stored score was affected.
   - **Against what.** The Nifty, and the group index for a defence name. Each benchmark is
     its own `watch_scores` row, so a sector rally shows as a hit against the Nifty and no
     move against NIFTY_IND_DEFENCE.NS.
@@ -526,6 +537,237 @@ order (the user dropped the stops between steps 3 and 7 on 2026-10-08):
   - HAL's `noise` gained Halliburton's words (Halliburton, SLB, Baker Hughes, BKR, NYSE...):
     HAL is also Halliburton's NYSE ticker, and 16 of 277 stored HAL matches were Halliburton.
 
+- **A stock's card scans it (2026-10-19; plan approved by the user 2026-10-18).** Clicking a
+  stock card on /watchlist (anywhere but Remove; Enter or Space on the focused card) opens a
+  dialog like "Add a stock", asks the scanner to scan that one company now, shows the scan as it
+  goes, then what is stored. `app/watch/ondemand.py` holds the handoff.
+  - **The web app still never writes the database.** `POST /watchlist/scan` (Host, Origin or
+    Referer, Sec-Fetch-Site and the page token, like Add and Remove) writes only
+    `data/scan_requests/<SYMBOL>.json` (`watch.scan_requests_dir`), a temporary file renamed
+    into place. The file is only an inbox; the record is `watch_scans`, which the scanner
+    writes and the page reads.
+  - **The scanner takes requests in its own loop, never in a thread of its own** (user,
+    2026-10-18): between jobs (`tick`) and every 2 s while it waits for the next tick
+    (`run_forever`, `SCAN_CHECK_SECONDS`). A scan stores, groups and moves the BSE cursor as a
+    regular pass does, and two passes writing at once would race on both. It opens the row
+    `running` *before* removing the request file, so a second click always finds one of the
+    two. A request older than `scan_request_max_age_minutes` (10), for a symbol that isn't a
+    stock on the list, or whose row already exists, is dropped.
+  - **The pass** (`Watcher.scan_stock`), each step committed to the row as it ends: Google News
+    for that stock's aliases over `on_demand_days` (3); NSE's per-company API (the catch-up's);
+    the normal PEAD cursor read for BSE (with when the tool last wrote); a fresh quote plus
+    Yahoo's profile and a year of daily closes (`preview.yahoo_profile`, stored in the row, so
+    the web makes no Yahoo call when a card opens); then `analyse(only={symbol})` through the
+    same watch lane and limiter. A `watch_runs` row with `job = 'on_demand'` records it.
+  - **Storing it.** BSE goes through `_process` exactly as in a regular pass (late filings get
+    their usual summary). The stock's own finds go through `_process(record_late=False)`: old
+    filings found on demand never start a "while you were away" summary. The scan sends
+    nothing itself; the alerts job applies the usual rules (high, first reported within 6 h),
+    keyed, so a story found on demand alerts once if it would have anyway.
+  - **A spent watch lane**: headlines are stored, nothing is called, and the dialog says when
+    calls resume (`AnalyseResult.quota_spent` pauses the scanner's calls, as a regular pass
+    does).
+  - **On-demand passes are a backlog for lead times** (`backlog_times`), like catch-ups.
+  - **What the page shows** (`scan_state`):
+    - `queued` and `running` draw the designed wait with the five steps and poll every 1.5 s.
+    - `waiting` (alive but busy past `scan_pickup_seconds`, 20, naming the job) and
+      `not_running` (no heartbeat for 30 s, with the commands to start it) show what is stored,
+      and only their note polls, every 5 s.
+    - `gave_up` after `scan_give_up_seconds` (180) stops asking.
+    - `done`/`failed` show the results and poll nothing.
+    - `unavailable` (no `watch_scans` table: the scanner hasn't restarted on this version) says
+      "Restart the scanner to enable scans" instead of a 500, and writes no request.
+    - A finished body carries no hx-trigger, and the script empties the body when the dialog
+      closes, so no poll outlives it.
+  - **The heartbeat** is `data/scan_requests/_scanner.json`, written every 10 s by a thread
+    that writes only that file (`start_heartbeat`, started by `newsdesk watch`, removed on a
+    clean stop). It says what the scanner is doing, so the page can tell "not running" from
+    "busy".
+  - **Reuse**: a click within `scan_reuse_seconds` (120) of a finished scan shows it ("Scanned
+    40 s ago"); **Scan again** asks anew, never while one is asked for or running.
+  - **The dialog's tabs**: Latest (stories about the stock first *reported* this week, with
+    its call, never a passing mention, newest report first; "new" = stored since its previous
+    scan - or found by this one on the first - *and* first reported within `on_demand_days`),
+    Headlines (every keep, mention and drop *published* this week, source filter), Filings (NSE
+    and BSE, 30 days), Price History (the stored profile). The footer, pinned at the bottom,
+    says what was found: "Found 3 new articles, 1 filing, 1 new story · 1 LLM call · 2 results
+    older than a week skipped", or the error.
+  - **The card**: a button stretched over a stock card takes the click and the keyboard;
+    Remove sits above it. It ships `hidden` and `watch-add.js` reveals it (no dead control
+    without JS). A stock card's name no longer links to `/asset/…`; the dialog's header has
+    "Price page →" for the stocks the universe prices (HAL, BEL). A commodity card is
+    unchanged. Closing the dialog redraws that card and the news list (`GET /watchlist/card`,
+    `GET /watchlist/news`, partials `_watch_card.html`, `_watch_news.html`).
+  - **Clicked through 2026-10-19** in Chrome (headless, DevTools protocol) against a copy of
+    the database, a scratch scanner that only served scans (Telegram off) and real Google
+    News, NSE and Yahoo: light, dark, phone, mouse, Enter, Escape, a click outside, Scan
+    again, the scanner stopped; 4 real LLM calls. It found the phone problem below.
+- **The masthead on a phone** (2026-10-19): it was one row that didn't wrap, so every page laid
+  out 710px wide on /watchlist (983px on the feed) on a 390px phone; the browser zoomed out
+  and a tap could land on another card. Under 700px the nav gets its own scrolling row and the
+  tools wrap.
+- **The watchlist page redrawn from the user's design** (2026-10-19):
+  - **Cards are tiles**: lighter than the page (white; the surface in dark), 8px corners, a soft
+    shadow, a 20px gutter; four to a row, three at 901-1200px, two to 900px, one under 600px.
+    Still a 5-row subgrid, so names, prices, lines and notes line up across a row; the gutter
+    under a row is the card's bottom margin (a subgrid's margins size its edge tracks).
+  - **Green for up on this page only**: `base.html` has a `body_class` block; `watchlist.html`
+    sets `page-watchlist`, which scopes `--color-up` to green (#1b7a3f, #5cc488 in dark) and the
+    tile tokens (`--watch-tile*`). The ticker on this page is green too; the rest of the app
+    keeps its ink-up.
+  - **The card**: kicker, then Remove and a "⋮" menu (`<details class="watch-card-menu">`: Scan
+    for its latest news (stocks), Open the latest story, Price page; above the stretched
+    button, z-index 2; `watch-add.js` closes it on a click elsewhere and on Escape); the price,
+    the move in green or red, a thin rule, "since the last close"; the week's line over a
+    filled area tinted by whether the week rose; the note.
+  - **The note** is `WatchCard.driver`, a `Driver(title, detail, tone, href)` from
+    `watch_queries._drivers`: for a stock, among the stories first reported this week with a
+    non-passing call on it, the one first reported most recently (not the newest call row) -
+    the story's headline (`short_headline`) in bold, the call's reason under it when
+    `adds_information`; for a commodity its latest impact - the story's headline, the
+    mechanism under it. A document mark beside it. "No calls in the last week." otherwise.
+  - **The head**: the note and "+ Add a stock" side by side; under it on a narrow window. The
+    add/remove message is a banner (`data-flash`) with a × that is a link to `/watchlist`
+    without JS; with it, the banner goes and `added=`/`removed=`/`error=` leave the address.
+  - **Everywhere**: the nav's current page is underlined; the theme button shows a mark for
+    its choice (half-moon auto, sun, moon) - `theme.js` writes the label span and
+    `data-choice`, not the button's text.
+- **The tests read `tests/fixtures/watchlist.yaml`** (8 stocks, 4 commodities), never the live
+  config/watchlist.yaml, which the page edits: `app.config.WATCHLIST_FILE` is the one default
+  path, and an autouse fixture in conftest points it at the copy.
+- **Old news stays old (2026-10-19).** Google News returns old pages whatever `when:`/`after:`
+  window it is asked for, and the scanner stored them with `first_seen_at` = the day they
+  turned up: Apollo's card and Latest tab showed a 5 August order win as "new", and a 2020
+  price page read "16 Dec". 11 such articles were stored by 2026-10-19, all through Google News.
+  **When a story happened is `first_reported`, never `first_seen_at`** (user); `first_seen_at`
+  keeps its own jobs (what a pass or a scan found, lead times, scoring's reference time,
+  backlog detection).
+  - **Intake** (`Watcher._store_articles`): a new article published more than
+    `watch.catch_up_max_days` (7) before BASIS first sees it is not stored - every source and
+    path: the feeds, the Google News job, catch-ups, scans of one stock. Counted once per
+    article and source (all searches are "Google News") in the pass's `watch_runs.details`
+    (`stale_skipped`), the log line, `watch_scans.skipped_stale` and the scan's footer.
+    Filings are not affected. Not stored rather than stored and marked: nothing downstream
+    wants them, and every reader would have had to remember to skip them.
+  - **Dating** (`app/watch/analyse.py`, the one place): `stale_article` (published more than
+    the window before it was first seen), `reporting_articles` (a story's kept articles that
+    were news when seen; old pages count only when the story has nothing else - no current
+    article, no filing), `first_reported` (the earliest of those and its filings, never later
+    than first seen; it takes the window), `stale_story` (first reported more than the window
+    before first seen). An old page stored before the fix and grouped into a current story
+    (#101 Zen/Cogknit, #131, #147) no longer dates it, nor goes into its call; the story dates
+    from its own news, as it would have under the new intake.
+  - **Where it applies**: a stale story is never called (`stories_to_call`), never scored
+    (`scoring.scorable_calls`), never "a story since the last close" for the price-move alert
+    (`alerts.stories_since`: an item first *reported* since then). The watchlist pages' "this
+    week" is
+    by first report (`watch_queries._reported_since`): the news list, the card notes, Latest;
+    Headlines by `published_at`. The Telegram status line dates the first media report from
+    `reporting_articles`. Already on `first_reported`, unchanged: the news alert's 6-hour rule,
+    the digest section's since-22:00 window, the away summary.
+  - **Dates carry their year when it isn't this year** (`main.with_year`): the `ist` filter
+    ("16 Dec 2020 02:47"), the new `day` filter (the runs table, new listings), the "prices as
+    of" stamps. Telegram's own formats are unchanged.
+  - **Existing data: cleaned so it reads as if the intake rule had always been there** (user,
+    2026-10-19: "nothing written later has to know about the exception").
+    `scripts/cleanup_stale_news.py` (dry run by default; `--apply`; `--database` for a copy)
+    deletes the stale stories #194, #196, #204 and the drop-only #195 with their calls (140,
+    141, 151), call 140's score rows (123, 124), their articles and those articles' matches
+    and sightings, and the four old pages inside current stories (593 in #101; 588 and 586 in
+    #131; 618 in #147). **Call 149 stays** (user). It checks before deleting (each story holds
+    only stale articles and no filing, the calls and scores are the expected ones, each old
+    page is stale and in the expected story), backs up through SQLite's backup API to
+    `data/backups/newsdesk.<time>.before-stale-cleanup.db` (a file copy would miss the WAL),
+    deletes dependents first in one transaction with `foreign_keys` on, and ends with
+    `integrity_check` and `foreign_key_check`. 42 rows; a second run finds nothing. Run it with
+    the scanner stopped.
+- **analyse looks at the stories the grouper keeps open** (2026-10-19, `analyse.open_since`).
+  The grouper keeps a story open while any of its articles or filings was first seen within
+  `story_window_hours` (72); `stories_to_call` used to require the story's *own* `first_seen_at`
+  in that window. Zen's Cogknit acquisition (NSE filing 17 Oct 14:24, 12 reports) joined #101,
+  a share-price note from 13 Oct, so its filing and articles were attached but never called -
+  no verdict, no alert. Seven stories were behind this way on 2026-10-19 (#3, #19, #25, #66,
+  #93, #101, #131); a scanner already running the fix called them that day at 14:38 IST
+  (calls 153-160, #101's call 153 high positive on Cogknit). They were scored by
+  `judged_from` (below), and sent nothing: no `news` alert has ever been sent by 2026-10-19 -
+  the 8 Oct high calls predate alerts, and every later one came through a catch-up and was in
+  its away summary.
+- **News in a story BASIS already had** (built 2026-10-19, user approved the proposal;
+  `alerts.new_news`). A story stays open while news keeps joining it, so a call can rise on
+  news days after the story began, and judged by when the story began it reached nobody:
+  #59, Astra Microwave's Q1 results and its MD stepping down, rated high and negative on 10
+  Oct 09:28, three hours after they came out, inside a 9 Oct multibagger list - no alert, not
+  in the digest.
+  - **The test** (`new_news`, one function for the three uses): a call made since a moment
+    rates a stock above every call on it before that moment (`raised_calls`; a first call
+    always does; a passing mention never), and the news behind it - the kept articles and
+    filings that arrived since the story's previous call, all of them for its first - came out
+    in a period: for a re-call, at least one item; for a story's first call, its earliest
+    (the old "first reported in the last 6 hours" for a new story).
+  - **The alert**: stories with a call made in the last 6 hours (not stories first seen in
+    them); raised to high; news out in those 6 hours, never an item read in a catch-up long
+    after it came out nor a late filing (the away summary has those). Once per story
+    (`news:{id}`), as before. A story first reported before the window is led by the news
+    itself: the first report's headline and link (the filing's, with none), and a status line
+    from those items alone (`render._parts`, `story_item(items=...)`), never the story's old
+    headline.
+  - **The digest**: after today's stories, those with a call made today that rose on news out
+    since the day began (22:00), under that news's headline and time, in the section of the
+    call that rose.
+  - **The away summary**: stories BASIS already had that the catch-up added articles to,
+    listed when the call made after the pass rose on what the pass read (came out between the
+    gap's start and an hour before the pass). Late filings keep their own branch: every one
+    is listed, as before.
+  - Not built (proposal): an alert when a media-only report raises a story already alerted.
+    Follow-ups cover filings, and nothing stored needs it.
+  - The price-move alert counts it too (user, 2026-10-19): "a story since the last close" is
+    a story with any kept article or filing first reported since the close, not only one that
+    began then (`alerts.news_since`, used by `stories_since` and by the catch-up replay
+    `moves_in_period`, where the item must also have been first seen by the moment replayed).
+    Before, news that joined an older story still let "moved, no story yet" fire.
+- **A story begun by share-price commentary takes no event** (built 2026-10-19, user
+  approved; `events.is_commentary`, `events.is_event`, `StoryGrouper.match(event=...)`,
+  `Watcher._group`). Everything about one company looks alike to the embedding model, so
+  "Zen Technologies Share Price Rises 5.39% on Valuation View" (13 Oct) took in the Cogknit
+  acquisition. Commentary is a headline about the price itself (a move with its size, the
+  price page, valuation, targets, VWAP, 52-week, stocks to buy or watch, multibagger lists)
+  with no event of its own; an event is any filing, or an article with an amount, order news
+  or an event word (`EVENT_WORDS`: acquisitions, stakes, results, raids, appointments,
+  pledges, fires, launches...; market chatter like "losses" and "profit booking" left out).
+  Whether a story is commentary is read from its headline, which is its first item's. The
+  rule closes the story to events through similarity and through the order rule; commentary
+  may still join an event's story. Of all stored stories it changes exactly #59, #93, #101 and
+  #170, all rightly; the 62 stored titles it calls commentary are all commentary. Fixture:
+  `tests/fixtures/watch_grouping_commentary.json` (29 real articles, 2 filings, each
+  labelled with what it is about), replayed pass by pass with the window as stored.
+  - Rejected after a survey: matching event kinds by keyword (it split Tejas's results from
+    their own "order book" headlines and a fire from its loss estimate).
+  - Left alone (user): #25, Aequs, begun by an event (an AmanSA stake sale) that took the
+    Ajna JV, the Safran supply deals and a pledge.
+  - `_window_members`, `_quoted_story` and `_story_named_in` read nothing first seen after
+    `now`: a live pass has nothing newer, and the split below replays past passes.
+- **The four mixed stories were split** (user, 2026-10-19: "as if the rule had always been
+  there"; `scripts/split_commentary_stories.py`, dry run by default on a copy, `--apply` backs
+  up and splits in one transaction, then `integrity_check` and `foreign_key_check`; a second
+  run finds nothing). Each event item is taken out and replayed through `Watcher._group`
+  pass by pass with the rule in force; each call goes with the news its reason describes
+  (`CALLS`); a moved call's score rows are deleted and `newsdesk score` judges it again from
+  its new story. Rehearsed on a copy after the cleanup:
+  - #59: the Q1 results to a new story, with call 47 (scores 34, 35, 81, 82 deleted; judged
+    again from 10 Oct 14:58 IST, the same first bar, Mon 12 Oct 09:15).
+  - #93: the six torpedo-order reports to #139, the torpedo story; calls 92 and 157 with them
+    (92's scores 100, 101, 114, 115 deleted; #139 is judged on its own first call, 89). The
+    Rs 56.8 crore tender report to #137, the tender story.
+  - #101: NSE's acquisition filing, the press release and 13 reports to a new story ("Zen
+    Technologies Limited: Acquisition"), with call 153 (not scored yet; judged from the
+    filing, 17 Oct 20:01 IST). Calls 91 and 154 stay.
+  - #170: the $9.4 billion aerospace-metals piece to #130, an aerospace-stocks story.
+  - No alert, follow-up or away summary from it. #137 gains a report and is called again
+    once. Today's digest section loses the Cogknit item (dated by this morning's re-report
+    before the split, by its 17 Oct filing after); the 19:30 digest had already gone.
+  - Not touched: #181 (BSE's copies of the acquisition filing and NSE's XBRL) and #210 (a
+    19 Oct Cogknit report), two more stories about the same acquisition.
+
 ## Commands
 
 ```
@@ -554,6 +796,8 @@ uv run newsdesk lead-times [--days 30]         # which source had each watchlist
 uv run newsdesk watch-test-message [--run ID] [--send]   # a stored "while you were away" in the current format, headed TEST
 uv run newsdesk companies [QUERY] [--refresh] [--new]   # NSE + BSE lists behind "Add a stock"
 uv run python scripts/watch_gate.py [--limit 20] [ids]   # the watchlist call, live, on stored stories -> data/watch_gate.md
+uv run python scripts/cleanup_stale_news.py [--apply] [--database PATH]   # one-off: delete the pre-2026-10-19 stale news (scanner stopped)
+uv run python scripts/split_commentary_stories.py [--apply] [--database PATH]   # one-off, after the cleanup: split the stories commentary began and events joined
 powershell -ExecutionPolicy Bypass -File scripts/install_tasks.ps1 [-Remove]   # Windows tasks
 ```
 
@@ -565,6 +809,8 @@ powershell -ExecutionPolicy Bypass -File scripts/install_tasks.ps1 [-Remove]   #
 - `config/watchlist.yaml` the one watchlist (stocks with aliases; commodities by symbol) ·
   `config/watch_feeds.yaml` market feeds for the watchlist scan (header lists those left out)
 - `app/watch/match.py` which watchlist stocks a headline is about: keep / mention / drop
+- `app/watch/ondemand.py` scanning one stock from its card: the request inbox, the heartbeat,
+  the steps, and `scan_state` (what the dialog shows)
 - `app/watch/scan.py` the scanner (`Watcher`: feeds, google_news and prices jobs, storing,
   grouping) · `sources.py` conditional GETs, Google News queries, NSE announcements ·
   `group.py` the cross-stock story grouper · `prices.py` intraday polls, market hours ·
@@ -683,9 +929,12 @@ powershell -ExecutionPolicy Bypass -File scripts/install_tasks.ps1 [-Remove]   #
 - Colours are the export's, including the primary button (3.76:1 light, 4.18:1 dark - below
   AA, kept on the user's instruction and reported on `/design`). Muted text is ink at 70%, as
   the mockup writes it, not the system's 55%.
-- The web app never writes: `make_read_only_engine` sets `query_only` and deliberately not
-  `journal_mode` (that takes a write lock). It never calls `init_db`, so restart the server
-  after a schema change. No request touches the network.
+- The web app never writes the database: `make_read_only_engine` sets `query_only` and
+  deliberately not `journal_mode` (that takes a write lock). It never calls `init_db`, so
+  restart the server after a schema change. No request touches the network except the
+  user-asked preview. The only files it writes, for a request from its own page, are
+  config/watchlist.yaml (Add, Remove) and a scan request in data/scan_requests (a stock's
+  card).
 - Search is SQLite FTS5 (`db.SEARCH_TABLE`), created and kept current by `init_db` and its
   triggers, never by the web app. Typed words are quoted before they reach FTS5 so its own
   operators can't break a query. A database it can't index logs a warning and carries on.

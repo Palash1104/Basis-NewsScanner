@@ -3,6 +3,7 @@
 {# Full width like the feed (user, 2026-10-17): under a full-bleed masthead, the 1280px canvas
    left the page stranded on the left of a wide window. #}
 {% block screen_class %}screen-wide{% endblock %}
+{% block body_class %} class="page-watchlist"{% endblock %}
 
 {% block content %}
 {# The design's watchlist screen (design/NOTES.md 2.4). Its "Add a commodity" button is "Add a
@@ -21,16 +22,27 @@
   </div>
   <div class="watch-head-side">
     <p class="watch-page-note">The list is config/watchlist.yaml.<br />Prices as of {{ prices_as_of }}.</p>
-    {% if version %}<a class="btn btn-primary" href="#watch-add">Add a stock</a>{% endif %}
+    {% if version %}
+      <a class="btn btn-primary watch-head-add" href="#watch-add">
+        <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M8 2.5v11M2.5 8h11" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" /></svg>
+        Add a stock</a>
+    {% endif %}
   </div>
 </div>
 
-{% if added %}
-  <p class="watch-page-flash" role="status">Added {{ added }}. The scanner picks it up within a
-    minute; its first news comes with the next Google News search.</p>
-{% endif %}
-{% if removed %}<p class="watch-page-flash" role="status">Removed {{ removed }}.</p>{% endif %}
-{% if error %}<p class="watch-page-flash watch-flash-error" role="alert">Not changed: {{ error }}</p>{% endif %}
+{# What the last add or remove did, as a banner with a × (user's design, 2026-10-19). #}
+{% macro flash(kind, role, message) %}
+  <div class="watch-page-flash{% if kind == 'error' %} watch-flash-error{% endif %}" data-flash>
+    <svg class="watch-flash-icon" viewBox="0 0 16 18" width="16" height="18" aria-hidden="true">
+      <path d="M2 1.5h8l4 4v11H2z" /><path d="M10 1.5v4h4M5 9h6M5 12h6M5 15h4" />
+    </svg>
+    <p role="{{ role }}">{{ message }}</p>
+    <a class="watch-flash-close" href="/watchlist" data-flash-close aria-label="Dismiss" title="Dismiss">×</a>
+  </div>
+{% endmacro %}
+{% if added %}{{ flash("ok", "status", "Added " ~ added ~ ". The scanner picks it up within a minute; its first news comes with the next Google News search.") }}{% endif %}
+{% if removed %}{{ flash("ok", "status", "Removed " ~ removed ~ ".") }}{% endif %}
+{% if error %}{{ flash("error", "alert", "Not changed: " ~ error) }}{% endif %}
 
 {# "Add a stock" is a dialog over the page (user's design, 2026-10-17): the search and the
    newest listings on the left; on the right a designed wait while a preview is asked for,
@@ -102,48 +114,53 @@
   </div>
 </section>
 
-<div class="watch-cards">
-  {% for card in cards %}
-    {# Five rows, laid on the grid's own rows (subgrid), so names, prices, lines and notes
-       line up across a row of cards however long a name or a note runs. #}
-    <div class="watch-card">
-      <div class="watch-card-head">
-        <span class="kicker">{{ card.kicker or ("Stock" if card.stock else "Commodity") }}</span>
-        {% if version %}
-          <form method="post" action="/watchlist/remove" class="watch-card-remove"
-            onsubmit='return confirm({{ ("Remove " ~ card.name ~ " from the watchlist?") | tojson }})'>
-            <input type="hidden" name="token" value="{{ token }}" />
-            <input type="hidden" name="version" value="{{ version }}" />
-            <input type="hidden" name="symbol" value="{{ card.symbol }}" />
-            <button class="btn btn-ghost" type="submit" aria-label="Remove {{ card.name }}">Remove</button>
-          </form>
-        {% endif %}
+{# A stock's dialog (user, 2026-10-18): opened from its card, it asks the scanner to scan
+   that one stock now (POST /watchlist/scan writes a request file; the scanner, the one process
+   that writes the database, runs it - app/watch/ondemand.py) and shows the scan as it goes,
+   then what is stored. Laid out like "Add a stock": the same dialog, wait and tabs, one
+   column. static/js/watch-add.js opens it, sends the hidden form below, and on closing empties
+   the body - so no poll outlives the dialog - and redraws the card and the news list. #}
+<section id="watch-stock" class="watch-add watch-stock" role="dialog" aria-modal="true"
+  aria-labelledby="watch-stock-title">
+  <div class="watch-add-dialog">
+    <div class="watch-add-head">
+      <div>
+        <h2 id="watch-stock-title" class="watch-add-title" data-stock-title>Stock</h2>
+        <p class="watch-add-sub">Its latest news, filings and price, fetched now.</p>
       </div>
-      <div class="watch-card-name">
-        {% if card.href %}<a href="{{ card.href }}">{{ card.name }}</a>{% else %}{{ card.name }}{% endif %}
-      </div>
-      <div class="watch-card-price">
-        <span>{{ card.price or "no price yet" }}</span>
-        {% if card.change %}
-          <span class="watch-card-change {{ 'up' if card.up else 'down' }}">{{ card.change }}</span>
-          <span class="cell-note">{{ {"today": "since the last close", "last": "last session"}.get(card.change_label, "24h") }}</span>
-        {% endif %}
-      </div>
-      {% if card.series.points %}
-        <svg class="spark-card" viewBox="0 0 300 72" width="100%" height="72"
-          preserveAspectRatio="none" aria-hidden="true">
-          <polyline points="{{ card_points(card.series) }}" fill="none" stroke-width="2"
-            vector-effect="non-scaling-stroke" stroke-linejoin="round"
-            class="{{ 'up' if card.series.rose else 'down' }}" />
-        </svg>
-      {% else %}
-        <div class="spark-card spark-empty">no prices cached yet</div>
-      {% endif %}
-      <div class="watch-card-driver">
-        {% if card.driver %}{{ card.driver_mark }} {{ card.driver }}{% else %}No calls in the last week.{% endif %}
+      <a class="watch-add-close" href="#" data-watch-close>Close</a>
+    </div>
+    <div class="watch-add-detail watch-stock-detail">
+      <div class="watch-add-body">
+        <div id="watch-scan-body" class="watch-pv watch-scan"></div>
       </div>
     </div>
-  {% endfor %}
+  </div>
+  <form id="watch-scan-form" hx-post="/watchlist/scan" hx-target="#watch-scan-body"
+    hx-swap="outerHTML" hidden>
+    <input type="hidden" name="token" value="{{ token }}" />
+    <input type="hidden" name="symbol" value="" />
+  </form>
+  {# Shown the moment a card is opened, until the first answer replaces it. #}
+  <template id="watch-scan-opening">
+    <div id="watch-scan-body" class="watch-pv watch-scan" data-scan-kind="opening">
+      <div class="watch-wait watch-scan-wait" role="status" aria-live="polite">
+        <div class="watch-wait-bar" aria-hidden="true"><span></span></div>
+        <p class="kicker">Scan</p>
+        <h3 class="watch-wait-title">Scanning <span data-wait-name>the company</span>…</h3>
+        <ul class="watch-wait-steps watch-scan-steps">
+          {% for key, label in scan_steps %}
+            <li class="watch-scan-step is-pending"><span class="watch-scan-mark" aria-hidden="true"></span><span class="watch-scan-label">{{ label }}</span></li>
+          {% endfor %}
+        </ul>
+        <p class="watch-note">Asking the scanner…</p>
+      </div>
+    </div>
+  </template>
+</section>
+
+<div class="watch-cards">
+  {% for card in cards %}{% include "_watch_card.html" %}{% endfor %}
 </div>
 
 <div class="watch-split">
@@ -153,34 +170,7 @@
       Newest first, by when it was first reported. Names in bold are on your watchlist; a
       "playbook" row is a story from the main feed whose calls touch one of them.
     </p>
-    {% for row in news %}
-      <a class="watch-news" href="{{ row.href }}">
-        <span class="watch-news-time">{{ row.at | ist }}</span>
-        <span class="watch-news-body">
-          <span class="watch-news-headline">{{ row.headline }}</span>
-          <span class="watch-news-hits">
-            {%- for hit in row.hits -%}
-              {%- if hit.followed %}<b>{{ hit.mark }} {{ hit.name }}</b>{% else %}{{ hit.mark }} {{ hit.name }}{% endif -%}
-              {%- if not loop.last %} · {% endif -%}
-            {%- endfor %}
-            <span class="tag tag-neutral">{{ row.tag }}</span>
-          </span>
-        </span>
-        <span class="watch-news-lead">
-          {% if row.lead_series and row.lead_series.points %}
-            <svg viewBox="0 0 68 22" width="68" height="22" aria-hidden="true" class="spark">
-              <polyline points="{{ points(row.lead_series) }}" fill="none" stroke-width="1.6"
-                stroke-linejoin="round" class="{{ 'up' if row.lead_series.rose else 'down' }}" />
-            </svg>
-          {% endif %}
-          {% if row.lead_change %}
-            <span class="watch-news-change {{ 'up' if row.lead_up else 'down' }}">{{ row.lead_change }}</span>
-          {% endif %}
-        </span>
-      </a>
-    {% else %}
-      <p class="rail-empty">Nothing touched the watchlist in the last {{ news_days }} days.</p>
-    {% endfor %}
+    {% include "_watch_news.html" %}
   </div>
 
   <aside class="watch-side">

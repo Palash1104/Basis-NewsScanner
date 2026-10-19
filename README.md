@@ -239,10 +239,10 @@ uv run newsdesk serve      # then open http://127.0.0.1:8787
 
 Localhost only, no login, light and dark (the theme button follows your OS by default). It
 reads the database and never writes to it, so leaving it open while the scheduled pipeline
-runs is fine; restart it after a schema change. The one thing it writes is
-`config/watchlist.yaml`, from the watchlist page's Add and Remove, and only for a request from
-its own page (checked by host, origin and a token). Each edit keeps the previous file in
-`data/backups/`.
+runs is fine; restart it after a schema change. It writes two things, only for a request
+from its own page (checked by host, origin and a token): `config/watchlist.yaml`, from the
+watchlist page's Add and Remove (each edit keeps the previous file in `data/backups/`), and a
+small request file in `data/scan_requests/` when you open a stock's card (below).
 
 | Page | What it answers |
 |---|---|
@@ -250,7 +250,7 @@ its own page (checked by host, origin and a token). Each edit keeps the previous
 | `/story/{id}` | One story: the summary, every asset it calls with the mechanism and the move since news, every score as it comes in, any rule the model disputed, the extracted event, and all source articles. |
 | `/track-record` | Whether the calls are worth anything: hit rates by rule, event type, origin, confidence and horizon, gated so a thin record can't look like a measurement. |
 | `/assets`, `/asset/{symbol}` | Which assets get called, what keeps moving them, and how those calls turned out. |
-| `/watchlist` | Your stocks and commodities, the week's news touching them, and what was sent to Telegram. **Add a stock** searches NSE's and BSE's lists as you type (with the last 30 days' new listings shown before you type), previews what its names would catch among real headlines (and checks Yahoo has its prices) before you add it, and **Remove** takes an entry off. Both edit `config/watchlist.yaml`; the scanner picks the change up within a minute, no restart. |
+| `/watchlist` | Your stocks and commodities, the week's news touching them, and what was sent to Telegram. **Add a stock** searches NSE's and BSE's lists as you type (with the last 30 days' new listings shown before you type), previews what its names would catch among real headlines (and checks Yahoo has its prices) before you add it, and **Remove** takes an entry off. Both edit `config/watchlist.yaml`; the scanner picks the change up within a minute, no restart. **Click a stock's card** (or focus it and press Enter) to open it: BASIS scans that one company now - Google News over the last 3 days, its NSE filings, the BSE filings the PEAD tool has written, a fresh price - stores and analyses what it finds as the scanner always does, and shows it: Latest (stories first reported this week, newest first; "new" marks what its last scan stored that came out in the last 3 days), Headlines, Filings, Price History. A result published more than a week before BASIS sees it is old news and isn't stored; the footer says how many were skipped. Opening it again within 2 minutes shows that scan; **Scan again** asks for a new one. The scan is the scanner's job, so it needs `newsdesk watch` running; if it isn't, the dialog says so and shows what is already stored. |
 | `/runs` | Whether the schedule is being kept, what the LLM cost, what broke, and feed health: which feeds are failing or stale. Feed health is shown only here, never sent to Telegram. |
 | `/design` | The style guide: tokens, both themes, and their measured contrast. Not in the nav. |
 

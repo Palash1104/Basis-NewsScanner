@@ -6,7 +6,8 @@ claim to judge.
 
 From when: the first hourly bar at or after BASIS *first saw* the story, priced at the close
 of the bar before it (Phase 3's reference rule). So "it had already moved" means already
-moved when BASIS knew, not when the publisher stamped it.
+moved when BASIS knew, not when the publisher stamped it. A call that came on a re-call is
+judged from when BASIS first saw the items that set it off (`judged_from`).
 
 Against what: the Nifty for every stock, and also the stock's group index for a defence name
 (NIFTY_IND_DEFENCE.NS), so a sector rally can't make every positive call look right (user,
@@ -55,6 +56,7 @@ from app.pipeline.scoring import (
     session_on_or_after,
     volatility_before,
 )
+from app.watch.analyse import kept_articles, stale_after, stale_story
 
 log = logging.getLogger(__name__)
 
@@ -71,8 +73,10 @@ def daily_sessions(bars: Sequence[Bar], zone: ZoneInfo = NSE) -> list[TradingSes
     return [TradingSession(day, close) for day, close in sorted(closes.items())]
 
 
-def scorable_calls(session: Session) -> list[WatchCall]:
-    """The first directional call on each stock in each story."""
+def scorable_calls(session: Session, max_age: timedelta) -> list[WatchCall]:
+    """The first directional call on each stock in each story - never on a story that was
+    old news when BASIS first saw it (first reported more than `max_age` before): a move after
+    an August order win was turned up in October says nothing about the call."""
     first: dict[tuple[int, str], WatchCall] = {}
     for call in session.scalars(
         select(WatchCall)
@@ -80,7 +84,42 @@ def scorable_calls(session: Session) -> list[WatchCall]:
         .order_by(WatchCall.created_at, WatchCall.id)
     ):
         first.setdefault((call.story_id, call.symbol), call)
-    return list(first.values())
+    stories = session.scalars(
+        select(WatchStory)
+        .where(WatchStory.id.in_({story_id for story_id, _ in first}))
+        .options(
+            selectinload(WatchStory.articles).selectinload(WatchArticle.matches),
+            selectinload(WatchStory.filings),
+        )
+    ).all()
+    stale = {story.id for story in stories if stale_story(story, max_age)}
+    return [call for call in first.values() if call.story_id not in stale]
+
+
+def judged_from(call: WatchCall, story: WatchStory, calls: Sequence[WatchCall]) -> datetime:
+    """When BASIS first saw the news a call is about (user, 2026-10-19).
+
+    The story's first call: when BASIS first saw the story. A re-call (the first call was
+    neutral or passing, or didn't name this stock): when BASIS first saw the earliest of the
+    kept articles and filings added since the story's previous call - the items that set it
+    off - not when the call was made, as a first call made late is judged from when BASIS
+    first saw the story. A re-call can come days after its story began: judged from the
+    story's start, a call on a 13 October share-price note about the Cogknit acquisition of
+    17 October would count a move from before the news; judged from when it was made, the
+    calls a restart makes on news that waited would count none of it. One set off by reading
+    the company's reply: when the reply was first seen. Nothing to go by: when it was made."""
+    earlier = [c.created_at for c in calls if c.created_at < call.created_at]
+    if not earlier:
+        return story.first_seen_at
+    previous = max(earlier)
+    added = [
+        item.first_seen_at
+        for item in [*kept_articles(story), *story.filings]
+        if previous < item.first_seen_at <= call.created_at
+    ]
+    if not added and call.trigger == "reply":
+        added = [f.first_seen_at for f in story.filings if f.kind == "company_reply"]
+    return min(added) if added else call.created_at
 
 
 @dataclass
@@ -116,7 +155,7 @@ def score_watch_calls(
     """Judge every watchlist call whose horizon is complete. Idempotent: a (call, horizon,
     benchmark) already scored is skipped unless `rescore`."""
     report = WatchScoreReport()
-    calls = scorable_calls(session)
+    calls = scorable_calls(session, stale_after(settings))
     report.calls = len(calls)
     if not calls:
         return report
@@ -129,13 +168,24 @@ def score_watch_calls(
             ).all()
         )
     )
-    seen_at = dict(
-        session.execute(
-            select(WatchStory.id, WatchStory.first_seen_at).where(
-                WatchStory.id.in_({c.story_id for c in calls})
+    story_ids = {c.story_id for c in calls}
+    stories = {
+        story.id: story
+        for story in session.scalars(
+            select(WatchStory)
+            .where(WatchStory.id.in_(story_ids))
+            .options(
+                selectinload(WatchStory.articles).selectinload(WatchArticle.matches),
+                selectinload(WatchStory.filings),
             )
-        ).all()
-    )
+        )
+    }
+    history: dict[int, list[WatchCall]] = {}
+    for earlier in session.scalars(select(WatchCall).where(WatchCall.story_id.in_(story_ids))):
+        history.setdefault(earlier.story_id, []).append(earlier)
+    seen_at = {
+        call.id: judged_from(call, stories[call.story_id], history[call.story_id]) for call in calls
+    }
     horizons = settings.scoring.horizons_trading_days
     wanted = [
         call
@@ -148,7 +198,7 @@ def score_watch_calls(
     ]
     if not wanted:
         return report
-    earliest = min(seen_at[call.story_id] for call in wanted) - HISTORY
+    earliest = min(seen_at[call.id] for call in wanted) - HISTORY
     symbols = sorted(
         {c.symbol for c in wanted}
         | {b for c in wanted for b in benchmarks_for(c.symbol, watchlist, settings)}
@@ -164,7 +214,7 @@ def score_watch_calls(
     trading = {symbol: daily_sessions(series) for symbol, series in bars.items()}
 
     for call in wanted:
-        seen = seen_at[call.story_id]
+        seen = seen_at[call.id]
         point = reference_point(bars.get(call.symbol, []), seen)
         for benchmark in benchmarks_for(call.symbol, watchlist, settings):
             for horizon in horizons:
@@ -384,8 +434,9 @@ class LeadRow:
 
 
 def backlog_times(session: Session, settings: Settings, since: datetime) -> set[datetime]:
-    """Pass times that read a backlog (the first after a start or a gap, and catch-ups):
-    what they "first saw" had been out for a while, so it says nothing about who was first."""
+    """Pass times that read a backlog (the first after a start or a gap, catch-ups, and
+    scans of one stock from its card): what they "first saw" had been out for a while, so it
+    says nothing about who was first."""
     runs = session.scalars(
         select(WatchRun)
         .where(WatchRun.started_at >= since - timedelta(days=1))
@@ -398,7 +449,7 @@ def backlog_times(session: Session, settings: Settings, since: datetime) -> set[
     found: set[datetime] = set()
     last: dict[str, datetime] = {}
     for run in runs:
-        if run.job == "catchup":
+        if run.job in ("catchup", "on_demand"):
             found.add(run.started_at)
         if run.job not in every:
             continue

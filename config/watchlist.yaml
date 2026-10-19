@@ -239,6 +239,15 @@ watchlist:
       strong: ["Bharat Electronics"]
       weak: ["BEL"]
 
+  - type: stock
+    symbol: "VEERHEALTH.BO"
+    name: "Veerhealth Care"
+    isin: "INE882C01035"
+    bse_code: "511523"
+    # Added from the BASIS page on 2026-10-19; aliases checked in its preview.
+    aliases:
+      strong: ["Veerhealth Care", "VEERHEALTH"]
+
   # Commodities: the four the web rail's watchlist held by default, moved here so there is
   # one watchlist. A browser's own edited list was never sent to the server, so anything
   # added in the old "Edit watchlist" dialog has to be added here by hand.

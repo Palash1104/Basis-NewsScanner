@@ -357,6 +357,14 @@ class WatchSettings(_Strict):
     # The PEAD tool's shared file of every BSE and NSE announcement it reads (BSE comes to
     # BASIS only this way). None turns BSE off.
     bse_announcements_db: str | None = None
+    # Scanning one stock when its card is opened on /watchlist (app/watch/ondemand.py): the web
+    # server leaves a request in this folder and the scanner runs it between its jobs.
+    scan_requests_dir: str = "data/scan_requests"
+    on_demand_days: int = Field(default=3, gt=0, le=30)  # Google News and NSE reach back this far
+    scan_reuse_seconds: int = Field(default=120, ge=0)  # a click this soon reuses the last scan
+    scan_pickup_seconds: int = Field(default=20, gt=0)  # then the dialog says why it waits
+    scan_give_up_seconds: int = Field(default=180, gt=0)  # then it stops asking
+    scan_request_max_age_minutes: int = Field(default=10, gt=0)  # an older request is dropped
     benchmark: str = "^NSEI"  # polled with the watch stocks, for the price-move alert later
     # Feed health: a feed is failing after this many failed checks in a row, and stale when
     # it has brought nothing new for this many hours inside the daytime window.

@@ -1,0 +1,88 @@
+{# One watchlist card (the page draws one per entry; GET /watchlist/card redraws one after its
+   dialog closes). Five rows, laid on the grid's own rows (subgrid), so names, prices, lines and
+   notes line up across a row of cards however long a name or a note runs.
+
+   A stock's card opens its dialog and scans it (user, 2026-10-18): a button stretched over
+   the whole card takes the click and the keyboard (Enter, Space), and Remove sits above it, so
+   it stays a separate control. The button ships `hidden` and static/js/watch-add.js reveals
+   it: without JavaScript there is no dead control. A commodity's name still links to its
+   price page; a stock's name no longer does - the dialog's header carries that link.
+
+   Laid out from the user's design (2026-10-19): a card of its own, Remove and a "⋮" menu at
+   the top, the move in green or red beside "since the last close", the week's line over a
+   filled area, and the latest story's headline in bold with the reason under it. #}
+<div class="watch-card{% if card.stock %} watch-card-stock{% endif %}" data-card-symbol="{{ card.symbol }}">
+  {% if card.stock %}
+    <button type="button" class="watch-card-open" data-scan-open="{{ card.symbol }}"
+      data-scan-name="{{ card.name }}" aria-haspopup="dialog" aria-controls="watch-stock" hidden>
+      <span class="visually-hidden">{{ card.name }}: open it and scan for its latest news</span>
+    </button>
+  {% endif %}
+  <div class="watch-card-head">
+    <span class="kicker">{{ card.kicker or ("Stock" if card.stock else "Commodity") }}</span>
+    <div class="watch-card-tools">
+      {% if version %}
+        <form method="post" action="/watchlist/remove" class="watch-card-remove"
+          onsubmit='return confirm({{ ("Remove " ~ card.name ~ " from the watchlist?") | tojson }})'>
+          <input type="hidden" name="token" value="{{ token }}" />
+          <input type="hidden" name="version" value="{{ version }}" />
+          <input type="hidden" name="symbol" value="{{ card.symbol }}" />
+          <button class="btn btn-ghost" type="submit" aria-label="Remove {{ card.name }}">Remove</button>
+        </form>
+      {% endif %}
+      {# The design's "⋮": what else there is to do with this entry. A <details>, so it opens
+         without JavaScript too; watch-add.js closes it on a click outside or Escape. #}
+      <details class="watch-card-menu">
+        <summary aria-label="More for {{ card.name }}" title="More">
+          <svg viewBox="0 0 4 16" width="4" height="16" aria-hidden="true"><circle cx="2" cy="2" r="1.6" /><circle cx="2" cy="8" r="1.6" /><circle cx="2" cy="14" r="1.6" /></svg>
+        </summary>
+        <div class="watch-card-menu-list">
+          {% if card.stock %}
+            <button type="button" data-scan-open="{{ card.symbol }}" data-scan-name="{{ card.name }}"
+              aria-haspopup="dialog" aria-controls="watch-stock">Scan for its latest news</button>
+          {% endif %}
+          {% if card.driver and card.driver.href %}<a href="{{ card.driver.href }}">Open the latest story</a>{% endif %}
+          {% if card.href %}<a href="{{ card.href }}">Price page</a>{% endif %}
+          {% if not card.stock and not card.href and not (card.driver and card.driver.href) %}
+            <span class="watch-card-menu-empty">Nothing more for this one yet</span>
+          {% endif %}
+        </div>
+      </details>
+    </div>
+  </div>
+  <div class="watch-card-name">
+    {% if card.href and not card.stock %}<a href="{{ card.href }}">{{ card.name }}</a>{% else %}{{ card.name }}{% endif %}
+  </div>
+  <div class="watch-card-price">
+    <span class="watch-card-now">{{ card.price or "no price yet" }}</span>
+    {% if card.change %}
+      <span class="watch-card-change {{ 'up' if card.up else 'down' }}">{{ card.change }}</span>
+      <span class="watch-card-since">{{ {"today": "since the last close", "last": "last session"}.get(card.change_label, "24h") }}</span>
+    {% endif %}
+  </div>
+  {% if card.series.points %}
+    {% set points = card_points(card.series) %}
+    {% set xs = points.split(" ") %}
+    <svg class="spark-card {{ 'up' if card.series.rose else 'down' }}" viewBox="0 0 300 72"
+      width="100%" height="72" preserveAspectRatio="none" aria-hidden="true">
+      <polygon class="spark-card-area" points="{{ xs[0].split(',')[0] }},72 {{ points }} {{ xs[-1].split(',')[0] }},72" />
+      <polyline class="spark-card-line" points="{{ points }}" fill="none" stroke-width="2"
+        vector-effect="non-scaling-stroke" stroke-linejoin="round" />
+    </svg>
+  {% else %}
+    <div class="spark-card spark-empty">no prices cached yet</div>
+  {% endif %}
+  {% if card.driver %}
+    <div class="watch-card-driver watch-tone-{{ card.driver.tone }}">
+      <svg class="watch-card-driver-icon" viewBox="0 0 16 18" width="16" height="18" aria-hidden="true">
+        <path d="M2 1.5h8l4 4v11H2z" /><path d="M10 1.5v4h4M5 9h6M5 12h6M5 15h4" />
+      </svg>
+      <div class="watch-card-driver-text">
+        <p class="watch-card-driver-title">{{ card.driver.title }}</p>
+        {% if card.driver.detail %}<p class="watch-card-driver-detail">{{ card.driver.detail }}</p>{% endif %}
+      </div>
+    </div>
+  {% else %}
+    <div class="watch-card-driver watch-card-driver-none">No calls in the last week.</div>
+  {% endif %}
+</div>

@@ -204,6 +204,63 @@ def test_a_story_is_called_again_on_a_filing_or_two_more_articles(
     assert triggers == ["new", "filing"]
 
 
+def test_a_story_begun_days_ago_that_gains_a_filing_today_is_called_again(
+    db: sessionmaker[Session], settings: Settings, stocks: dict
+) -> None:
+    """#101's shape: a share-price story begun on 13 Oct, called on 15 Oct, then took Zen's
+    Cogknit acquisition filing and its reports on 17-19 Oct - past the 72-hour window from
+    when it began, but still open to the grouper, since its newest item is recent."""
+    begun = NOW - timedelta(days=4)
+    with db() as session:
+        story = add_story(
+            session,
+            "Zen Technologies Share Price Rises 5.39% on Valuation View",
+            ["ZENTEC.NS"],
+            first_seen=begun,
+        )
+        session.commit()
+    llm = client(settings, FakeProvider(responder=answer))
+    assert analyse(db, llm, settings, stocks, begun).called == [story.id]
+    with db() as session:
+        session.add(
+            WatchFiling(
+                key="zen-acquisition",
+                exchange="NSE",
+                symbol="ZENTEC.NS",
+                company="Zen Technologies Limited",
+                subject="Acquisition",
+                description="Zen Technologies Limited has informed the Exchange about Acquisition",
+                filed_at=NOW - timedelta(minutes=27),
+                first_seen_at=NOW,
+                kind="filing",
+                story_id=story.id,
+            )
+        )
+        session.commit()
+    assert analyse(db, llm, settings, stocks, NOW).called == [story.id]
+    with db() as session:
+        triggers = [c.trigger for c in session.scalars(select(WatchCall).order_by(WatchCall.id))]
+    assert triggers == ["new", "filing"]
+    # And a story nothing has joined for longer than the window is left alone.
+    with db() as session:
+        session.add(
+            WatchFiling(
+                key="zen-old",
+                exchange="NSE",
+                symbol="ZENTEC.NS",
+                company="Zen Technologies Limited",
+                subject="Press Release",
+                description="Zen Technologies Limited: press release",
+                filed_at=NOW,
+                first_seen_at=NOW,
+                kind="filing",
+                story_id=story.id,
+            )
+        )
+        session.commit()
+    assert analyse(db, llm, settings, stocks, NOW + timedelta(days=4)).called == []
+
+
 def test_a_spent_watch_lane_stops_the_pass_and_leaves_the_main_lane_alone(
     db: sessionmaker[Session], settings: Settings, stocks: dict
 ) -> None:

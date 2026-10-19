@@ -26,7 +26,7 @@ from app.config import load_env, load_settings, load_watchlist_file
 from app.db import init_db, make_engine, make_session_factory
 from app.llm.client import LLMError, make_llm_client
 from app.models import WatchArticle, WatchStory
-from app.watch.analyse import matched_assessments, request_watch_call, story_input
+from app.watch.analyse import matched_assessments, request_watch_call, stale_after, story_input
 
 sys.stdout.reconfigure(encoding="utf-8")
 FIXTURES = Path("tests/fixtures/watch_calls.json")
@@ -61,7 +61,7 @@ def main() -> None:
         inputs = [
             given
             for story in session.scalars(query)
-            if (given := story_input(story, stocks, "gate")) is not None
+            if (given := story_input(story, stocks, "gate", stale_after(settings))) is not None
         ][: args.limit]
 
     report = ["# Watchlist call: quality gate", ""]

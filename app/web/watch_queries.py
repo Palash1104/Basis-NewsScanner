@@ -5,6 +5,11 @@ The watchlist is config/watchlist.yaml, one list for stocks and commodities (use
 prices from `price_cache` (the pipeline caches 60-minute bars for the universe and the
 watchlist) and the scanner's own polls (`watch_prices`), calls from `watch_calls`, and the
 playbook's impacts for anything the universe also prices.
+
+When a story happened is when it was first reported (`analyse.first_reported`), never when
+BASIS first saw it (user, 2026-10-19): every "this week" here - the news list, the card notes,
+a stock's Latest and Headlines - is about when the news came out. `first_seen_at` keeps its
+own jobs: what a scan found that was new, lead times, scoring's reference.
 """
 
 from collections.abc import Sequence
@@ -23,12 +28,15 @@ from app.models import (
     WatchAlert,
     WatchArticle,
     WatchCall,
+    WatchFiling,
+    WatchMatch,
     WatchPrice,
     WatchStory,
 )
 from app.pipeline.prices import INTRADAY, format_move, move_pct
-from app.watch.alerts import MARK, current_calls, first_reported, shown, story_state
-from app.watch.analyse import kept_symbols
+from app.watch.alerts import MARK, current_calls, shown, story_state
+from app.watch.analyse import first_reported, kept_symbols, stale_after
+from app.watch.render import adds_information, short_headline
 from app.web.queries import (
     MOVER_HOURS,
     RAIL_WINDOW,
@@ -55,10 +63,20 @@ class WatchCard:
     change_label: str  # "today" from the scanner's own poll, else "24h" from the cache
     up: bool
     series: Series
-    driver: str | None  # the latest call's reason, or the playbook's mechanism
-    driver_mark: str | None
+    driver: "Driver | None"  # what last moved it: a story's headline and why
     href: str | None  # the asset page, for anything the universe prices
     stock: bool
+
+
+@dataclass(frozen=True)
+class Driver:
+    """The note under a card (the user's design, 2026-10-19): the story's headline in bold,
+    the call's reason or the playbook's mechanism under it, and where the story is."""
+
+    title: str
+    detail: str | None
+    tone: str  # up | down | flat
+    href: str | None
 
 
 @dataclass(frozen=True)
@@ -151,32 +169,57 @@ def _poll_series(session: Session, symbol: str, now: datetime) -> Series:
 
 
 def _drivers(
-    session: Session, watchlist: WatchlistFile, now: datetime
-) -> dict[str, tuple[str, str]]:
-    """What last moved each entry: a stock's latest real call (never a passing mention), a
-    commodity's latest playbook mechanism."""
+    session: Session, watchlist: WatchlistFile, now: datetime, max_age: timedelta
+) -> dict[str, Driver]:
+    """What last moved each entry. For a stock: among this week's stories with a real call on
+    it (never a passing mention), the one first reported most recently - not the newest call,
+    which can be on old news a search has just turned up. For a commodity: its latest playbook
+    mechanism. The headline is the story's, without the company's name when it opens with it;
+    the reason shows under it only when it adds something."""
     since = now - timedelta(days=DRIVER_DAYS)
-    found: dict[str, tuple[str, str]] = {}
-    stocks = [s.symbol for s in watchlist.stocks]
-    for call in session.scalars(
-        select(WatchCall)
-        .where(
-            WatchCall.symbol.in_(stocks),
-            WatchCall.created_at >= since,
-            WatchCall.relevance != "passing",
+    found: dict[str, Driver] = {}
+    names = {
+        item.symbol: [n for n in (item.name, item.nse_name, *item.aliases.strong) if n]
+        for item in watchlist.stocks
+    }
+    stories = _reported_since(session, since, max_age)
+    calls = current_calls(session, [story.id for story, _ in stories])
+    best: dict[str, tuple[datetime, int, WatchStory, WatchCall]] = {}
+    for story, reported in stories:
+        for symbol, call in calls.get(story.id, {}).items():
+            if symbol not in names or call.relevance == "passing":
+                continue
+            key = (reported, call.id)
+            if symbol not in best or key > best[symbol][:2]:
+                best[symbol] = (reported, call.id, story, call)
+    tones = {"positive": "up", "negative": "down"}
+    for symbol, (_, _, story, call) in best.items():
+        headline = story.headline or ""
+        title = short_headline(headline, names.get(symbol, [])) if headline else call.reason
+        detail = call.reason if headline and adds_information(call.reason, headline) else None
+        found[symbol] = Driver(
+            title, detail, tones.get(call.sentiment, "flat"), f"/watchlist/story/{story.id}"
         )
-        .order_by(WatchCall.created_at, WatchCall.id)
-    ):
-        found[call.symbol] = (call.reason, MARK[call.sentiment])
     others = [i.symbol for i in watchlist.watchlist if i.symbol not in found]
-    for impact in session.scalars(
-        select(Impact)
-        .where(Impact.symbol.in_(others), Impact.created_at >= since)
-        .order_by(Impact.created_at, Impact.id)
-    ):
-        found[impact.symbol] = (
-            impact.mechanism,
-            MARK["positive" if impact.direction == "up" else "negative"],
+    impacts = list(
+        session.scalars(
+            select(Impact)
+            .where(Impact.symbol.in_(others), Impact.created_at >= since)
+            .order_by(Impact.created_at, Impact.id)
+        )
+    )
+    titles = dict(
+        session.execute(
+            select(Story.id, Story.headline).where(Story.id.in_({i.story_id for i in impacts}))
+        ).all()
+    )
+    for impact in impacts:
+        title = titles.get(impact.story_id)
+        found[impact.symbol] = Driver(
+            title or impact.mechanism,
+            impact.mechanism if title else None,
+            "up" if impact.direction == "up" else "down",
+            f"/story/{impact.story_id}",
         )
     return found
 
@@ -219,7 +262,7 @@ def watch_cards(
     moves = window_moves(session, now, MOVER_HOURS)
     series = series_for(session, symbols, RAIL_WINDOW, now)
     live = _live(session, symbols, now, settings)
-    drivers = _drivers(session, watchlist, now)
+    drivers = _drivers(session, watchlist, now, stale_after(settings))
     cards = []
     for item in watchlist.watchlist:
         asset = assets.get(item.symbol)
@@ -255,8 +298,7 @@ def watch_cards(
                 change_label=label,
                 up=up,
                 series=line,
-                driver=driver[0] if driver else None,
-                driver_mark=driver[1] if driver else None,
+                driver=driver,
                 href=f"/asset/{item.symbol}" if asset else None,
                 stock=item.type == "stock",
             )
@@ -321,6 +363,20 @@ def _stories(session: Session, since: datetime) -> list[WatchStory]:
     )
 
 
+def _reported_since(
+    session: Session, since: datetime, max_age: timedelta
+) -> list[tuple[WatchStory, datetime]]:
+    """Stories first *reported* since `since`, each with that time. A story is first seen no
+    earlier than it is first reported, so those first seen since then are the ones to read;
+    one first seen today from an August article is left out."""
+    found = []
+    for story in _stories(session, since):
+        reported = first_reported(story, max_age)
+        if reported >= since:
+            found.append((story, reported))
+    return found
+
+
 def short_state(story: WatchStory) -> str:
     kinds = {f.kind for f in story.filings}
     if "company_reply" in kinds:
@@ -348,13 +404,12 @@ def watch_news(
     rows: list[NewsRow] = []
     leads: dict[int, str] = {}  # id(row) -> the symbol its line is drawn for
 
-    stories = _stories(session, since)
-    calls = current_calls(session, [s.id for s in stories])
-    for story in stories:
+    stories = _reported_since(session, since, stale_after(settings))
+    calls = current_calls(session, [s.id for s, _ in stories])
+    for story, reported in stories:
         visible = shown(calls.get(story.id, {}), order)
         if not visible:
             continue
-        reported = first_reported(story)
         lead = visible[0].symbol
         move = _move_since(session, lead, reported)
         row = NewsRow(
@@ -489,7 +544,7 @@ def watch_story(
     timeline.sort(key=lambda item: item.at)
     symbols = [s for s in order if s in kept_symbols(story)]
     series = series_for(session, symbols, RAIL_WINDOW, now)
-    reported = first_reported(story)
+    reported = first_reported(story, stale_after(settings))
     prices = []
     for symbol in symbols:
         move = _move_since(session, symbol, reported)
@@ -560,3 +615,148 @@ def benchmark_names(
         if group.index:
             names[group.index] = f"{group.name} index"
     return names
+
+
+# ---------------------------------------------------------------- one stock's dialog
+# Opening a stock's card scans it (app/watch/ondemand.py); the dialog shows what is stored
+# about it, read here like every other page.
+
+STOCK_DAYS = 7  # the dialog's Latest and Headlines reach back this far
+FILING_DAYS = 30
+FILING_ROWS = 60
+
+
+@dataclass(frozen=True)
+class LatestRow:
+    story_id: int
+    headline: str
+    reported: datetime
+    state: str
+    sources: tuple[str, ...]
+    call: WatchCall | None
+    new: bool
+
+
+@dataclass(frozen=True)
+class StockHeadline:
+    verdict: str
+    title: str
+    source: str
+    published: datetime
+    where: str  # "Google News" | "Market feeds", for the source filter
+    reason: str
+    alias: str | None
+    url: str
+
+
+def stock_card(
+    session: Session,
+    watchlist: WatchlistFile,
+    symbol: str,
+    assets: dict[str, AssetConfig],
+    settings: Settings,
+    now: datetime,
+) -> WatchCard | None:
+    """One card, priced exactly as the page prices it."""
+    entries = [item for item in watchlist.watchlist if item.symbol == symbol]
+    if not entries:
+        return None
+    one = watchlist.model_copy(update={"watchlist": entries})
+    return watch_cards(session, one, assets, settings, now)[0]
+
+
+def stock_latest(
+    session: Session,
+    symbol: str,
+    now: datetime,
+    new_since: datetime | None,
+    settings: Settings,
+) -> list[LatestRow]:
+    """The stories about one stock first reported this week - kept for it, never a passing
+    mention - each with its call for that stock, newest report first. "New" is what was stored
+    since `new_since` (its previous scan) *and* first reported within the scan's own reach
+    (`watch.on_demand_days`): an older report a search has only now turned up is not news."""
+    max_age = stale_after(settings)
+    fresh = now - timedelta(days=settings.watch.on_demand_days)
+    stories = [
+        (story, reported)
+        for story, reported in _reported_since(session, now - timedelta(days=STOCK_DAYS), max_age)
+        if symbol in kept_symbols(story)
+    ]
+    calls = current_calls(session, [s.id for s, _ in stories])
+    rows = []
+    for story, reported in stories:
+        call = calls.get(story.id, {}).get(symbol)
+        if call is not None and call.relevance == "passing":
+            continue
+        sources = tuple(
+            dict.fromkeys(
+                a.source_name for a in sorted(story.articles, key=lambda a: a.first_seen_at)
+            )
+        ) + tuple(dict.fromkeys(f"{f.exchange} filing" for f in story.filings))
+        rows.append(
+            LatestRow(
+                story_id=story.id,
+                headline=story.headline,
+                reported=reported,
+                state=short_state(story),
+                sources=sources,
+                call=call,
+                new=new_since is not None
+                and story.first_seen_at >= new_since
+                and reported >= fresh,
+            )
+        )
+    rows.sort(key=lambda row: row.reported, reverse=True)
+    return rows
+
+
+def stock_headlines(
+    session: Session, symbol: str, now: datetime
+) -> tuple[list[StockHeadline], dict[str, int]]:
+    """Every stored headline published this week that named the stock - keep, mention or
+    drop - newest first, with how many of each. By publication, not by when BASIS stored it:
+    an old page a search turned up is not this week's headline."""
+    matches = session.execute(
+        select(WatchMatch, WatchArticle)
+        .join(WatchArticle, WatchMatch.article_id == WatchArticle.id)
+        .where(
+            WatchMatch.symbol == symbol,
+            WatchArticle.published_at >= now - timedelta(days=STOCK_DAYS),
+        )
+        .options(selectinload(WatchArticle.sightings))
+        .order_by(WatchArticle.published_at.desc())
+    ).all()
+    rows = []
+    counts = {"keep": 0, "mention": 0, "drop": 0}
+    for match, article in matches:
+        counts[match.verdict] = counts.get(match.verdict, 0) + 1
+        google = any(s.via == "google_news" for s in article.sightings)
+        rows.append(
+            StockHeadline(
+                verdict=match.verdict,
+                title=article.title,
+                source=article.source_name,
+                published=article.published_at,
+                where="Google News" if google else "Market feeds",
+                reason=match.reason,
+                alias=match.alias,
+                url=article.url,
+            )
+        )
+    return rows, counts
+
+
+def stock_filings(session: Session, symbol: str, now: datetime) -> list[WatchFiling]:
+    """NSE and BSE filings by the company over the last month, newest first."""
+    return list(
+        session.scalars(
+            select(WatchFiling)
+            .where(
+                WatchFiling.symbol == symbol,
+                WatchFiling.filed_at >= now - timedelta(days=FILING_DAYS),
+            )
+            .order_by(WatchFiling.filed_at.desc())
+            .limit(FILING_ROWS)
+        )
+    )

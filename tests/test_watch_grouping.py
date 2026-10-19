@@ -1,6 +1,7 @@
-"""The scanner's grouping on real items (tests/fixtures/watch_grouping_bdl.json): what went
-wrong on 2026-10-15, and the two rules that fix it (app/watch/events.py).
+"""The scanner's grouping on real items: what went wrong, and the rules that fix it
+(app/watch/events.py).
 
+tests/fixtures/watch_grouping_bdl.json, 2026-10-15:
 1. Story 137 mixed two events, a Rs 56.8 crore tender and an unrelated Rs 810 crore contract.
    The call summarized both, and the "while you were away" item showed the tender headline
    with the contract's reason, rated high positive. Different amounts are now different
@@ -9,6 +10,13 @@ wrong on 2026-10-15, and the two rules that fix it (app/watch/events.py).
    came out as two items. An NSE order filing says nothing but "Bagging/Receiving of
    orders/contracts", so it now joins the stock's order story reported closest to it, and
    a vague order headline joins one when similarity finds it nothing.
+
+tests/fixtures/watch_grouping_commentary.json, 9-19 Oct:
+3. Stories begun by share-price commentary took in events: Zen's Cogknit acquisition (NSE's
+   filing, the press release, 12 reports) joined "Zen Technologies Share Price Rises 5.39% on
+   Valuation View" and was never called on its own; BDL's torpedo order and a tender joined a
+   "rise streak" note; Astra Microwave's Q1 results joined a multibagger list. Such a story now
+   takes no event.
 """
 
 import json
@@ -21,15 +29,16 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.config import Settings, WatchlistFile, load_watchlist_file
 from app.db import init_db, make_engine, make_session_factory
-from app.models import WatchArticle, WatchFiling, WatchMatch
+from app.models import WatchArticle, WatchFiling, WatchMatch, WatchStory
 from app.pipeline.embed import article_text
 from app.pipeline.fetch import SourceResolver
-from app.watch.events import amounts, amounts_conflict, is_order_news
+from app.watch.events import amounts, amounts_conflict, is_commentary, is_event, is_order_news
 from app.watch.scan import Watcher
 
-FIXTURE = json.loads(
-    (Path(__file__).parent / "fixtures" / "watch_grouping_bdl.json").read_text(encoding="utf-8")
-)
+FIXTURES = Path(__file__).parent / "fixtures"
+FIXTURE = json.loads((FIXTURES / "watch_grouping_bdl.json").read_text(encoding="utf-8"))
+COMMENTARY = json.loads((FIXTURES / "watch_grouping_commentary.json").read_text(encoding="utf-8"))
+SHARE_PRICE = "share-price commentary"
 
 
 class SameEmbedder:
@@ -183,3 +192,146 @@ def test_order_news_is_recognised() -> None:
     assert is_order_news("Bharat Dynamics Expands Defense Order Book Following Recent Contracts")
     assert not is_order_news("BDL’s ₹56.8 Crore Missile-Sight Tender Raises Questions")
     assert not is_order_news("HAL to Raise AL-31FP Engine Output to 50 a Year")
+
+
+# ---------------------------------------------------------------- commentary takes no event
+
+
+class NearlyAlike:
+    """The model as it behaves on one company's headlines: everything about the stock looks
+    alike (0.8, past both thresholds), one event's reports a little more alike (1.0)."""
+
+    name = "nearly-alike"
+
+    def __init__(self) -> None:
+        labels = sorted(
+            {i["event"] for i in COMMENTARY["articles"]}
+            | {i["event"] for i in COMMENTARY["filings"]}
+        )
+        self.axis = {label: n + 1 for n, label in enumerate(labels)}
+        articles = COMMENTARY["articles"]
+        filings = COMMENTARY["filings"]
+        self.label = {article_text(i["title"], i["snippet"]): i["event"] for i in articles} | {
+            article_text(i["subject"], i["description"]): i["event"] for i in filings
+        }
+
+    def embed(self, texts: list[str]) -> np.ndarray:
+        vectors = np.zeros((len(texts), len(self.axis) + 1), dtype=np.float32)
+        for row, text in enumerate(texts):
+            vectors[row, 0] = 2.0  # cos = 4 / (4 + 1) between two events
+            vectors[row, self.axis[self.label[text]]] = 1.0
+        return vectors / np.linalg.norm(vectors, axis=1, keepdims=True)
+
+
+def replay(
+    settings: Settings, db: sessionmaker[Session], watchlist: WatchlistFile, embedder: object
+) -> tuple[dict[int, str], list[tuple[str, int]]]:
+    """The fixture through the scanner's grouping as it arrived: each first_seen_at is one
+    pass, whose window is what the earlier passes stored. Returns each story's headline and
+    each item's (event, story)."""
+    watcher = Watcher(settings, db, watchlist, [], SourceResolver([]), embedder, None)  # type: ignore[arg-type]
+    passes: dict[datetime, list[tuple[WatchArticle | WatchFiling, str]]] = {}
+    for n, item in enumerate(COMMENTARY["articles"]):
+        article = WatchArticle(
+            url=f"https://news.example.com/{n}",
+            source_name=item["source"],
+            title=item["title"],
+            snippet=item["snippet"],
+            published_at=datetime.fromisoformat(item["published_at"]),
+            first_seen_at=datetime.fromisoformat(item["first_seen_at"]),
+        )
+        article.matches = [
+            WatchMatch(symbol=symbol, verdict=verdict, reason="named")
+            for symbol, verdict in item["matches"].items()
+        ]
+        passes.setdefault(article.first_seen_at, []).append((article, item["event"]))
+    for item in COMMENTARY["filings"]:
+        filing = WatchFiling(
+            key=item["key"],
+            exchange=item["exchange"],
+            symbol=item["symbol"],
+            company=item["company"],
+            subject=item["subject"],
+            description=item["description"],
+            link=item["link"],
+            filed_at=datetime.fromisoformat(item["filed_at"]),
+            first_seen_at=datetime.fromisoformat(item["first_seen_at"]),
+            kind=item["kind"],
+            quoted_headline=item["quoted_headline"],
+        )
+        passes.setdefault(filing.first_seen_at, []).append((filing, item["event"]))
+    placed: list[tuple[str, int]] = []
+    for now in sorted(passes):
+        with db() as session:
+            items = passes[now]
+            session.add_all([item for item, _ in items])
+            session.flush()
+            window = watcher._window_members(session, now)
+            articles = [i for i, _ in items if isinstance(i, WatchArticle)]
+            filings = [i for i, _ in items if isinstance(i, WatchFiling)]
+            watcher._warm(
+                [m.text for m in window]
+                + [article_text(a.title, a.snippet) for a in articles]
+                + [article_text(f.subject, f.description) for f in filings]
+            )
+            watcher._group(session, window, articles, filings, now)
+            session.commit()
+            placed += [(event, item.story_id) for item, event in items]  # type: ignore[misc]
+    with db() as session:
+        headlines = {s.id: s.headline for s in session.query(WatchStory)}
+    return headlines, placed
+
+
+def test_the_commentary_fixture_is_the_real_mix_up() -> None:
+    stories: dict[int, set[str]] = {}
+    for item in [*COMMENTARY["articles"], *COMMENTARY["filings"]]:
+        stories.setdefault(item["stored_story"], set()).add(item["event"])
+    assert stories == {
+        59: {SHARE_PRICE, "Q1 results"},
+        93: {SHARE_PRICE, "torpedo order", "56.8 tender"},
+        101: {SHARE_PRICE, "Cogknit acquisition"},
+    }
+
+
+def test_the_commentary_and_event_tests_on_the_real_headlines() -> None:
+    seeds = [
+        "Zen Technologies Share Price Rises 5.39% on Valuation View",
+        "Bharat Dynamics Ltd. Share Price Rise Streak, BDL gains",
+        "Astra Microwave Products - 6 Defence stocks turn multibaggers in H1 FY27, rally up",
+    ]
+    assert all(is_commentary(seed) for seed in seeds)
+    for item in COMMENTARY["articles"]:
+        if item["event"] != SHARE_PRICE:
+            assert is_event(item["title"]), item["title"]
+            assert not is_commentary(item["title"]), item["title"]
+    assert not is_commentary("Bharat Dynamics Wins ₹1,307 Crore Navy Order; Shares Rise 0.13%")
+    assert is_commentary("Buzzing stocks: Watch out for these 16 stocks including BEL")
+    # Market chatter is no event: these may sit in a commentary story.
+    assert not is_event("Zen Technologies extends losses for a third session")
+    assert not is_event("Better Drone Stock: Zen Technologies vs Ideaforge Technology")
+
+
+@pytest.mark.parametrize("embedder", [NearlyAlike(), SameEmbedder()], ids=["nearly", "same"])
+def test_a_story_begun_by_share_price_commentary_takes_no_event(
+    settings: Settings, db: sessionmaker[Session], watchlist: WatchlistFile, embedder: object
+) -> None:
+    headlines, placed = replay(settings, db, watchlist, embedder)
+    for event, story_id in placed:
+        if is_commentary(headlines[story_id]):
+            assert event == SHARE_PRICE, f"{event} joined {headlines[story_id]!r}"
+
+
+def test_each_event_in_a_commentary_story_gets_its_own(
+    settings: Settings, db: sessionmaker[Session], watchlist: WatchlistFile
+) -> None:
+    """The Cogknit filing, its press release and the 12 reports are one story, as are the
+    torpedo order's reports; the tender and the Q1 results are a story each."""
+    headlines, placed = replay(settings, db, watchlist, NearlyAlike())
+    stories: dict[str, set[int]] = {}
+    for event, story_id in placed:
+        stories.setdefault(event, set()).add(story_id)
+    events = ["Cogknit acquisition", "torpedo order", "56.8 tender", "Q1 results"]
+    assert all(len(stories[event]) == 1 for event in events)
+    assert len(set().union(*(stories[event] for event in events))) == 4
+    # Commentary may still join an event's story, but the commentary story stands alone.
+    assert stories[SHARE_PRICE] - set().union(*(stories[e] for e in events))

@@ -22,7 +22,15 @@
     } else {
       document.documentElement.setAttribute("data-theme", choice);
     }
-    button.textContent = "Theme: " + choice;
+    // The label only: the button also holds a mark for each choice, and data-choice picks
+    // which one shows (app.css).
+    var label = button.querySelector("[data-theme-label]");
+    if (label) {
+      label.textContent = "Theme: " + choice;
+    } else {
+      button.textContent = "Theme: " + choice;
+    }
+    button.dataset.choice = choice;
     button.setAttribute("aria-label", "Colour theme: " + choice + ". Click to change.");
   }
 

@@ -1,0 +1,19 @@
+{# Why a stock's scan hasn't started (GET /watchlist/scan?part=status): the scanner isn't
+   running, or is busy with its regular pass, or nothing came back in time. While there is still
+   a chance of an answer it asks again every few seconds - and only then: a note with nothing
+   left to wait for carries no hx-trigger, so no request keeps running behind the page. When
+   the scan does start, the answer is the whole body instead (HX-Retarget). #}
+<div id="watch-scan-status" class="watch-scan-notice{% if state.kind in ('not_running', 'gave_up', 'stopped', 'unavailable', 'failed') %} is-problem{% endif %}"
+  role="status" aria-live="polite"
+  {% if state.polling == "slow" %}hx-get="{{ scan_url }}&amp;part=status" hx-trigger="every {{ poll_slow }}" hx-swap="outerHTML"{% endif %}>
+  <p class="watch-scan-message">{{ state.message }}</p>
+  {% if state.kind in ("not_running", "gave_up") and not alive %}
+    <p class="watch-scan-start">Start it with
+      <code>{{ start_commands[0] }}</code> (the scheduled task) or <code>{{ start_commands[1] }}</code>
+      in the project folder. What is already stored is below.</p>
+  {% endif %}
+  {% if state.kind == "gave_up" %}
+    <button type="button" class="btn btn-secondary" hx-get="{{ scan_url }}"
+      hx-target="#watch-scan-body" hx-swap="outerHTML">Check again</button>
+  {% endif %}
+</div>

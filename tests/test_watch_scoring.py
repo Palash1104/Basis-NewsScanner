@@ -21,6 +21,7 @@ from app.models import (
 from app.pipeline.prices import Bar
 from app.watch.scoring import (
     daily_sessions,
+    judged_from,
     lead_times,
     scorable_calls,
     score_watch_calls,
@@ -73,6 +74,7 @@ def add_call(
     relevance: str = "primary",
     created: datetime = SEEN,
     story: WatchStory | None = None,
+    trigger: str = "new",
 ) -> WatchCall:
     if story is None:
         story = WatchStory(first_seen_at=SEEN, headline=f"{symbol} news")
@@ -87,7 +89,7 @@ def add_call(
         event_type="order_win",
         reason="It won an order.",
         summary="It won an order.",
-        trigger="new",
+        trigger=trigger,
         model="m",
         prompt_version="watch-v1",
         created_at=created,
@@ -114,7 +116,60 @@ def test_only_the_first_directional_call_per_story_and_stock_is_scored(
         add_call(session, "HAL.NS", created=SEEN + timedelta(hours=2), story=story)  # a re-call
         add_call(session, "BDL.NS", sentiment="neutral")
         add_call(session, "ZENTEC.NS", relevance="passing")
-        assert [c.id for c in scorable_calls(session)] == [first.id]
+        assert [c.id for c in scorable_calls(session, timedelta(days=7))] == [first.id]
+
+
+def filing_at(seen: datetime, story: WatchStory | None = None) -> WatchFiling:
+    return WatchFiling(
+        key=f"f{seen.timestamp()}",
+        exchange="NSE",
+        symbol="PFOCUS.NS",
+        company="Prime Focus Limited",
+        subject="Acquisition",
+        description="Prime Focus Limited has informed the Exchange about Acquisition",
+        link="",
+        filed_at=seen,
+        first_seen_at=seen,
+        kind="filing",
+        story=story,
+    )
+
+
+def test_a_re_call_is_judged_from_when_basis_first_saw_what_set_it_off(
+    db: sessionmaker[Session], settings: Settings, watchlist: WatchlistFile
+) -> None:
+    """The story's first call was neutral; a filing came at 16:00 IST, after the day's jump;
+    the positive call on it was made a day late (the scanner was off, or analyse didn't look).
+    It is judged from the filing - Thursday's 10:00 IST bar, priced at Wednesday's close - as
+    it would have been had it been made on time: not from the story's start, which would make
+    the jump before the filing its own, nor from the late call, Thursday 15:00."""
+    prices = FakePrices({"PFOCUS.NS": {"60m": hourly(0.05)}, "^NSEI": {"60m": hourly(0.0)}})
+    with db() as session:
+        first = add_call(session, "PFOCUS.NS", sentiment="neutral")
+        story = session.get(WatchStory, first.story_id)
+        session.add(filing_at(SEEN + timedelta(hours=5), story))
+        session.commit()
+        recall = add_call(
+            session, "PFOCUS.NS", created=SEEN + timedelta(hours=26), story=story, trigger="filing"
+        )
+        score_watch_calls(session, prices, watchlist, settings, NOW)
+        scored = session.scalars(select(WatchScore).where(WatchScore.call_id == recall.id)).one()
+    assert scored.reference_time == datetime(2026, 10, 8, 4, 30, tzinfo=UTC)
+    assert scored.outcome != "hit"  # the 5% jump came before the filing
+
+
+def test_where_each_call_is_judged_from() -> None:
+    story = WatchStory(first_seen_at=SEEN, headline="Prime Focus news")
+    story.filings = [filing_at(SEEN + timedelta(hours=3)), filing_at(SEEN + timedelta(hours=5))]
+
+    def call(hours: float, trigger: str) -> WatchCall:
+        return WatchCall(created_at=SEEN + timedelta(hours=hours), trigger=trigger)
+
+    first, recall, nothing_new = call(0.1, "new"), call(30, "filing"), call(40, "articles")
+    calls = [first, recall, nothing_new]
+    assert judged_from(first, story, calls) == SEEN  # when BASIS first saw the story
+    assert judged_from(recall, story, calls) == SEEN + timedelta(hours=3)  # the first new item
+    assert judged_from(nothing_new, story, calls) == SEEN + timedelta(hours=40)  # when made
 
 
 def test_a_sector_rally_is_a_hit_against_the_nifty_but_not_against_the_index(

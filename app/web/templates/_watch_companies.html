@@ -46,7 +46,7 @@
                 {%- if company.nse_symbol %}<span>NSE {{ company.nse_symbol }}</span>{% endif -%}
                 {%- if company.bse_code %}<span>BSE {{ company.bse_code }}{% if not company.nse_symbol and company.bse_id %} · {{ company.bse_id }}{% endif %}</span>{% endif -%}
                 {%- if company.sme %}<span class="tag tag-neutral">SME</span>{% endif -%}
-                {%- if company.is_new(today) %}<span class="tag tag-accent">New · {{ "listed" if company.listed else "on BSE" }} {{ company.added_on.strftime("%d %b") }}</span>{% endif -%}
+                {%- if company.is_new(today) %}<span class="tag tag-accent">New · {{ "listed" if company.listed else "on BSE" }} {{ company.added_on | day }}</span>{% endif -%}
                 {%- if listed %}<span class="tag tag-neutral">on the watchlist</span>{% endif -%}
               </span>
             </span>

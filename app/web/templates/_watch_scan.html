@@ -1,0 +1,225 @@
+{# One stock, opened from its card on /watchlist (user, 2026-10-18): the body of the stock
+   dialog, from POST /watchlist/scan (the click, which asks the scanner for a scan) and GET
+   /watchlist/scan (where it stands). Laid out like "Add a stock"'s preview: codes, sector and
+   market cap with the price and "Scan again" at the top, then tabs.
+
+   While the scan is on its way the designed wait takes the body, its steps ticking off as the
+   scanner reports them, and the body asks again every 1.5 s. Once it is done - or can't start
+   - the body carries no hx-trigger at all, so no request keeps running behind the page; the
+   dialog's script also empties the body when it closes. #}
+{% set busy = state.kind in ("queued", "running") %}
+{% set reused = fresh_ago is not none %}
+<div id="watch-scan-body" class="watch-pv watch-scan" data-scan-symbol="{{ item.symbol }}"
+  data-scan-kind="{{ state.kind }}"
+  {% if state.polling == "fast" %}hx-get="{{ scan_url }}" hx-trigger="every {{ poll_fast }}" hx-swap="outerHTML"{% endif %}>
+  <div class="watch-pv-head">
+    <div class="watch-pv-title">
+      <p class="kicker watch-pv-codes">
+        {%- if item.nse_symbol %}<span>NSE · {{ item.nse_symbol }}</span>{% endif -%}
+        {%- if item.bse_code %}<span>BSE · {{ item.bse_code }}</span>{% endif -%}
+        {%- if item.isin %}<span>{{ item.isin }}</span>{% endif -%}
+      </p>
+      <p class="watch-pv-sub">
+        {%- if facts.sector %}<span>{{ facts.sector }}</span>{% endif -%}
+        {%- if facts.market_cap %}<span>{{ facts.market_cap }}</span>{% endif -%}
+        {%- if not facts.sector and not facts.market_cap %}<span>Sector and market cap come with a scan</span>{% endif -%}
+        {%- if asset_href %}<a class="watch-scan-asset" href="{{ asset_href }}">Price page →</a>{% endif -%}
+      </p>
+    </div>
+    <div class="watch-pv-side">
+      <form class="watch-scan-again" hx-post="/watchlist/scan" hx-target="#watch-scan-body" hx-swap="outerHTML">
+        <input type="hidden" name="token" value="{{ token }}" />
+        <input type="hidden" name="symbol" value="{{ item.symbol }}" />
+        <input type="hidden" name="again" value="1" />
+        <button class="btn btn-primary watch-pv-add" type="submit"
+          {% if busy or state.kind in ("waiting", "not_running", "unavailable") %}disabled{% endif %}>
+          {{- "Scanning…" if busy else "Scan again" -}}</button>
+      </form>
+      {% if card and card.price %}
+        <p class="watch-pv-price">
+          <b>{{ card.price }}</b>
+          {% if card.change %}<span class="watch-pv-move {{ 'up' if card.up else 'down' }}">{{ card.change }}</span>
+            <span class="tag tag-neutral">{{ {"today": "today", "last": "last session"}.get(card.change_label, "24h") }}</span>{% endif %}
+        </p>
+      {% endif %}
+      <p class="watch-scan-when">
+        {%- if reused %}Scanned {{ fresh_ago }}
+        {%- elif state.finished %}Last scanned {{ state.finished.finished_at | ist }}
+        {%- else %}Not scanned yet{% endif -%}
+      </p>
+    </div>
+  </div>
+
+  {% if busy %}
+    {# The designed wait, the steps as the scanner reports them. #}
+    <div class="watch-wait watch-scan-wait" role="status" aria-live="polite">
+      <div class="watch-wait-bar" aria-hidden="true"><span></span></div>
+      <p class="kicker">Scan</p>
+      <h3 class="watch-wait-title">Scanning {{ name }}…</h3>
+      <ul class="watch-wait-steps watch-scan-steps">
+        {% for step in state.steps %}
+          <li class="watch-scan-step is-{{ step.state }}">
+            <span class="watch-scan-mark" aria-hidden="true"></span>
+            <span class="watch-scan-label">{{ step.label }}</span>
+            <span class="visually-hidden">: {{ step_words[step.state] }}</span>
+            {% if step.detail %}<span class="watch-scan-detail">{{ step.detail }}</span>{% endif %}
+          </li>
+        {% endfor %}
+      </ul>
+      <div class="watch-wait-sketch" aria-hidden="true">
+        <span class="watch-wait-tabs"></span>
+        <span class="watch-wait-line"></span><span class="watch-wait-line"></span><span class="watch-wait-line short"></span>
+      </div>
+      <p class="watch-note">
+        {%- if state.kind == "queued" %}Waiting for the scanner to pick it up…
+        {%- else %}The scanner started {{ ago(state.latest.started_at, now) }}.{% endif -%}
+      </p>
+    </div>
+  {% else %}
+    {% if state.message %}{% include "_watch_scan_status.html" %}{% endif %}
+
+    <div class="watch-tabs" role="tablist" aria-label="{{ name }}">
+      <button type="button" role="tab" class="watch-tab" data-tab="latest" aria-selected="true">Latest ({{ latest | length }})</button>
+      <button type="button" role="tab" class="watch-tab" data-tab="headlines" aria-selected="false">Headlines ({{ headlines | length }})</button>
+      <button type="button" role="tab" class="watch-tab" data-tab="filings" aria-selected="false">Filings ({{ filings | length }})</button>
+      <button type="button" role="tab" class="watch-tab" data-tab="history" aria-selected="false">Price History</button>
+    </div>
+
+    {# ---------------------------------------------------------------- latest #}
+    <section class="watch-panel" data-panel="latest" role="tabpanel">
+      <p class="watch-note">Stories about it first reported in the last {{ stock_days }} days,
+        never a passing mention, newest first; <b>new</b> ones were stored since its previous
+        scan and first reported in the last {{ new_days }} days.</p>
+      {% if latest %}
+        <ul class="watch-latest">
+          {% for row in latest %}
+            <li>
+              <a class="watch-latest-row" href="/watchlist/story/{{ row.story_id }}">
+                <span class="watch-latest-meta">
+                  {%- if row.new %}<span class="tag tag-accent watch-new">new</span>{% endif -%}
+                  <span>{{ row.reported | ist }}</span><span>{{ row.state }}</span>
+                </span>
+                <span class="watch-latest-headline">{{ row.headline }}</span>
+                {% if row.call %}
+                  <span class="watch-latest-call watch-call-{{ row.call.sentiment }}">
+                    <b>{{ marks[row.call.sentiment] }} {{ row.call.sentiment }} · {{ row.call.materiality }}</b>
+                    · {{ row.call.event_type | replace("_", " ") }} — {{ row.call.reason }}</span>
+                {% else %}
+                  <span class="watch-latest-call">Not called yet</span>
+                {% endif %}
+                {% if row.sources %}<span class="watch-latest-sources">{{ row.sources | join(" · ") }}</span>{% endif %}
+              </a>
+            </li>
+          {% endfor %}
+        </ul>
+      {% else %}
+        <p class="watch-note">No story about it in the last {{ stock_days }} days.</p>
+      {% endif %}
+    </section>
+
+    {# ---------------------------------------------------------------- headlines #}
+    <section class="watch-panel" data-panel="headlines" role="tabpanel" hidden>
+      <div class="watch-hl-head">
+        <p class="watch-counts">
+          <b>{{ counts.keep or 0 }}</b> keep · <b>{{ counts.mention or 0 }}</b> mention ·
+          <b>{{ counts.drop or 0 }}</b> drop
+        </p>
+        <label class="watch-hl-filter">
+          <span class="visually-hidden">Show headlines from</span>
+          <select class="input" data-headline-filter>
+            <option value="">All sources</option>
+            <option value="Google News">Google News</option>
+            <option value="Market feeds">Market feeds</option>
+          </select>
+        </label>
+      </div>
+      <p class="watch-note">Every stored headline published in the last {{ stock_days }} days that named it.
+        <b>Keep</b> is about the company: analysed and alerted. <b>Mention</b> is one name in a
+        list: shown, never alerted. <b>Drop</b> is not about it.</p>
+      {% if headlines %}
+        <ul class="watch-hl-list">
+          {% for row in headlines %}
+            <li class="watch-hl" data-where="{{ row.where }}">
+              <span class="watch-verdict watch-verdict-{{ row.verdict }}">{{ row.verdict }}</span>
+              <span class="watch-hl-text">
+                <span class="watch-hl-title">{{ row.title }}</span>
+                <span class="watch-hl-meta">{{ row.source }} · {{ row.published | ist }} · {{ row.where }}
+                  <span class="watch-hl-why">· {{ row.reason }}{% if row.alias %} (“{{ row.alias }}”){% endif %}</span></span>
+              </span>
+              <a class="watch-hl-open" href="{{ row.url }}" target="_blank" rel="noopener noreferrer"
+                aria-label="Open the article" title="Open the article">
+                <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M9 2.5h4.5V7M13.5 2.5 7.5 8.5M12 9.5v4H2.5V4h4" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" /></svg>
+              </a>
+            </li>
+          {% endfor %}
+        </ul>
+      {% else %}
+        <p class="watch-note">No stored headline named it in that time.</p>
+      {% endif %}
+    </section>
+
+    {# ---------------------------------------------------------------- filings #}
+    <section class="watch-panel" data-panel="filings" role="tabpanel" hidden>
+      <p class="watch-note">Its NSE and BSE filings of the last {{ filing_days }} days, newest
+        first, by when the exchange published them.</p>
+      {% if filings %}
+        <ul class="watch-filings">
+          {% for filing in filings %}
+            <li class="watch-filing">
+              <span class="watch-filing-meta"><span class="tag tag-neutral">{{ filing.exchange }}</span>
+                <span>{{ filing.filed_at | ist }}</span>{% if filing.kind != "filing" %}<span>{{ filing.kind | replace("_", " ") }}</span>{% endif %}</span>
+              <span class="watch-filing-subject">{{ filing.subject }}</span>
+              {% if filing.description %}<span class="watch-filing-text">{{ filing.description | truncate(240) }}</span>{% endif %}
+              {% if filing.link %}<a class="watch-filing-link" href="{{ filing.link }}" target="_blank" rel="noopener noreferrer">The filing</a>{% endif %}
+            </li>
+          {% endfor %}
+        </ul>
+      {% else %}
+        <p class="watch-note">No filing in that time.</p>
+      {% endif %}
+    </section>
+
+    {# ---------------------------------------------------------------- price history #}
+    <section class="watch-panel" data-panel="history" role="tabpanel" hidden>
+      {% if facts.history | length > 1 %}
+        <div class="watch-pv-history">
+          <svg viewBox="0 0 600 200" preserveAspectRatio="none" role="img"
+            aria-label="Daily closes over the last year">
+            <polygon class="watch-chart-area" points="4,196 {{ chart_points(facts.history, 600, 200, 8) }} 596,196" />
+            <polyline class="watch-chart-line" points="{{ chart_points(facts.history, 600, 200, 8) }}" />
+          </svg>
+          <p class="watch-pv-history-axis">
+            <span>{{ facts.first_day.strftime("%d %b %Y") }}</span>
+            <span>High {{ facts.high }} · Low {{ facts.low }}</span>
+            <span>{{ facts.last_day.strftime("%d %b %Y") }}</span>
+          </p>
+        </div>
+        {% if facts.returns %}
+          <dl class="watch-pv-returns">
+            {% for label, move, up in facts.returns %}
+              <div><dt>{{ label }}</dt><dd class="{{ 'up' if up else 'down' }}">{{ move }}</dd></div>
+            {% endfor %}
+          </dl>
+        {% endif %}
+        <p class="watch-note">Daily closes from Yahoo ({{ item.symbol }}), the last year, as of
+          its last scan.</p>
+      {% else %}
+        <p class="watch-note">The year's prices come with a scan: the scanner asks Yahoo for
+          them, so this page never does.</p>
+      {% endif %}
+    </section>
+
+    <div class="watch-add-foot watch-scan-foot">
+      <p class="watch-scan-found{% if state.finished and state.finished.status == 'failed' %} is-problem{% endif %}">
+        {%- if state.finished %}{{ footer }}{% if state.finished.note %} {{ state.finished.note }}{% endif %}
+        {%- else %}Not scanned yet.{% endif -%}
+      </p>
+      {% if state.finished and state.finished.errors and state.finished.status != "failed" %}
+        <details class="watch-scan-errors">
+          <summary>{{ state.finished.errors | length }} {{ "problem" if state.finished.errors | length == 1 else "problems" }}</summary>
+          <ul>{% for error in state.finished.errors %}<li>{{ error.stage or error.feed or "" }}{% if error.symbol %} {{ error.symbol }}{% endif %}: {{ error.error }}</li>{% endfor %}</ul>
+        </details>
+      {% endif %}
+    </div>
+  {% endif %}
+</div>

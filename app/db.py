@@ -121,6 +121,10 @@ ADDED_COLUMNS: dict[str, dict[str, str]] = {
         # Added 2026-10-08 with the catch-up: prices filled in from 1-minute bars.
         "backfill": "BOOLEAN NOT NULL DEFAULT 0",
     },
+    "watch_scans": {
+        # Added 2026-10-19: results a scan didn't store because they were old news.
+        "skipped_stale": "INTEGER NOT NULL DEFAULT 0",
+    },
 }
 
 

@@ -13,6 +13,13 @@ grouping (app/watch/group.py, app/watch/scan.py):
   vague "Expands Defense Order Book" headline resembles a "Bags ₹1,307 Crore Navy Contract"
   one less than it resembles nothing. Order news about one stock within a few hours of
   itself is one event unless the amounts disagree (user, 2026-10-16).
+
+* Whether it is share-price commentary or an event. To the embedding model every headline
+  about Zen Technologies resembles every other, so "Zen Technologies Share Price Rises 5.39% on
+  Valuation View" (13 Oct) took in the Cogknit acquisition four days later - NSE's filing, its
+  press release and 12 reports - and the acquisition was never called on its own. A story
+  begun by commentary takes no event (user, 2026-10-19); commentary may still join an event's
+  story ("Zen shares rise after Cogknit deal" belongs with the deal).
 """
 
 import re
@@ -103,3 +110,43 @@ def amounts_conflict(first: Iterable[Amount], second: Iterable[Amount]) -> bool:
 def is_order_news(text: str) -> bool:
     """A headline or filing about an order or contract won."""
     return ORDER_WORDS.search(text) is not None
+
+
+# Something the company did or that happened to it. Words that also turn up in market chatter
+# are left out on purpose: "losses" ("extends losses"), "profit booking", "under fire".
+EVENT_WORDS = re.compile(
+    r"(?<!\w)(acquir\w*|acquisition|takeover|merger|amalgamat\w*|demerger|stake|"
+    r"joint venture|JV|subsidiary|invests?|investment|tie-?up|partner(s|ship|ed)?|MoU|"
+    r"agreements?|deal|results?|earnings|net profit|net loss|profit (rises|falls|jumps|drops|"
+    r"declines|surges|up|down)|revenue|EBITDA|Q[1-4]|Q[1-4]\s?FY\d*|FY\d+ results|guidance|"
+    r"dividend|bonus|buyback|split|rights issue|fund ?rais\w*|QIP|IPO|NCDs?|allot\w*|pledg\w*|"
+    r"warrants?|preferential|appoint\w*|resign\w*|steps? down|CEO|CFO|MD|chairman|director|"
+    r"raids?|searches|income tax|GST|penalty|show cause|notice|SEBI|NCLT|tribunal|court|"
+    r"fire at|fire in|blaze|explosion|accident|strike|launch\w*|unveil\w*|deliver\w*|"
+    r"commission\w*|tender|plant|facility)(?!\w)",
+    re.I,
+)
+# The share price itself: a move with its size, the price page, the valuation, a list of
+# stocks to buy or watch.
+COMMENTARY_WORDS = re.compile(
+    r"(share|stock) price|price today|prices? and data|historical prices|price targets?|"
+    r"target price|(?<!\w)(rises?|rose|jumps?|surges?|soars?|gains?|falls?|fell|slips?|"
+    r"drops?|tanks?|declines?|plunges?|rall(y|ies)|climbs?)(?!\w).{0,30}\d+(\.\d+)?\s?%|"
+    r"VWAP|52-week|all-time high|top (gainers|losers)|valuation|best stock|"
+    r"stocks? to (buy|watch)|buzzing stocks|rise streak|multibaggers?|look at the numbers|"
+    r"key financial ratios|peer comparison",
+    re.I,
+)
+
+
+def is_event(text: str) -> bool:
+    """A headline reporting an event of its own: a money amount, an order, or an event word.
+    A filing is always one, whatever its words (the scanner decides that, not this)."""
+    return bool(amounts(text)) or is_order_news(text) or EVENT_WORDS.search(text) is not None
+
+
+def is_commentary(text: str) -> bool:
+    """A headline about the share price itself, with no event of its own: "Share Price Rises
+    5.39% on Valuation View", "6 Defence stocks turn multibaggers", "Buzzing stocks: ...".
+    "Wins ₹1,307 Crore Navy Order; Shares Rise 0.13%" is an event."""
+    return COMMENTARY_WORDS.search(text) is not None and not is_event(text)

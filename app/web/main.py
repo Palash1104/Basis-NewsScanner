@@ -14,17 +14,22 @@ Two exceptions, both on /watchlist and both the user's own action (2026-10-16):
 * `newsdesk serve` keeps the NSE and BSE company lists behind "Add a stock" a day fresh, in a
   background thread, never inside a request (app/watch/companies.py `ListRefresher`).
 * "Add to watchlist" and "Remove" write config/watchlist.yaml (app/watch/watchlist_edit.py) -
-  never the database. They are the only POST routes, and each checks that the request came
-  from this app's own page: the Host is localhost, the Origin (or Referer) is this app, and
-  the form carries a token only this app's pages hold. Another website open in the same
-  browser can't change the watchlist by posting to localhost.
+  never the database.
+* Opening a stock's card (user, 2026-10-18) writes one small request file into the scanner's
+  inbox, data/scan_requests (app/watch/ondemand.py) - never the database. The scanner runs the
+  scan and records it in `watch_scans`, which the dialog reads like any other table.
+
+Those three are the only POST routes, and each checks that the request came from this app's
+own page: the Host is localhost, the Origin (or Referer) is this app, and the form carries a
+token only this app's pages hold. Another website open in the same browser can't change the
+watchlist, or start scans, by posting to localhost.
 """
 
 import logging
 import secrets
 from collections.abc import Awaitable, Callable, Iterator
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from html import escape as html_escape
 from pathlib import Path
 from typing import Annotated
@@ -44,6 +49,7 @@ from app.config import (
     AssetConfig,
     Settings,
     WatchAliases,
+    WatchItem,
     WatchlistFile,
     load_assets,
     load_settings,
@@ -57,7 +63,7 @@ from app.pipeline.scoring import track_record
 from app.presentation import ORDER_WORDS, ORIGIN_LABEL, story_age
 from app.schedule import pipeline_hours, start_of_news_day
 from app.watch import companies as company_list
-from app.watch import watchlist_edit
+from app.watch import ondemand, watchlist_edit
 from app.watch.preview import chart_points as preview_chart_points
 from app.watch.preview import facts as preview_facts
 from app.watch.preview import preview as preview_headlines
@@ -194,7 +200,9 @@ def base_context(
     now = now or utcnow()
     finished = last_pipeline_finish(session)
     as_of = (
-        finished.astimezone(settings.tz).strftime("%d %b %H:%M %Z")
+        finished.astimezone(settings.tz).strftime(
+            with_year("%d %b %H:%M %Z", finished.astimezone(settings.tz).date(), now.date())
+        )
         if finished
         else "no pipeline run yet"
     )
@@ -226,17 +234,38 @@ def sample_track_rows(session: Session, limit: int = 4) -> list[dict[str, str]]:
     return rows
 
 
+def with_year(fmt: str, when: date, today: date) -> str:
+    """A day-and-month format, with the year after the month when `when` isn't this year:
+    "16 Dec 2020", never a "16 Dec" that reads as two months ago (user, 2026-10-19)."""
+    return fmt.replace("%b", "%b %Y") if when.year != today.year else fmt
+
+
 def _in_zone(value: datetime | None, settings: Settings) -> str:
     """Times are stored UTC and shown in settings.timezone (SPEC 0).
 
     Today's times are bare, as in the mockup ("06:20"); anything older carries its date,
-    because a page can hold a story from last week next to one from this morning.
+    because a page can hold a story from last week next to one from this morning, and the
+    year too when it isn't this year's.
     """
     if value is None:
         return ""
     local = value.astimezone(settings.tz)
     today = datetime.now(settings.tz).date()
-    return local.strftime("%H:%M" if local.date() == today else "%d %b %H:%M")
+    if local.date() == today:
+        return local.strftime("%H:%M")
+    return local.strftime(with_year("%d %b %H:%M", local.date(), today))
+
+
+def _day(value: date | datetime | None, settings: Settings, fmt: str = "%d %b") -> str:
+    """A day, as the pages write one ("16 Oct", "Fri 16 Oct"), with the year when it isn't
+    this year's."""
+    if value is None:
+        return ""
+    if isinstance(value, datetime):
+        value = value.astimezone(settings.tz)
+    today = datetime.now(settings.tz).date()
+    day = value.date() if isinstance(value, datetime) else value
+    return value.strftime(with_year(fmt, day, today))
 
 
 def _day_start(settings: Settings, now: datetime) -> datetime:
@@ -255,7 +284,9 @@ def _stamp(value: datetime | None, settings: Settings) -> str:
         return "never"
     local = value.astimezone(settings.tz)
     today = datetime.now(settings.tz).date()
-    return local.strftime("%H:%M %Z" if local.date() == today else "%d %b %H:%M %Z")
+    if local.date() == today:
+        return local.strftime("%H:%M %Z")
+    return local.strftime(with_year("%d %b %H:%M %Z", local.date(), today))
 
 
 def _rail_watchlist(
@@ -379,6 +410,7 @@ def create_app(
     ticker_fetch: Callable | None = None,
     refresh_lists: bool = False,
     profile_fetch: Callable | None = None,
+    scan_inbox: Path | None = None,
 ) -> FastAPI:
     """Build the app. `init_db` is never called: the web UI does not migrate anything."""
     settings = settings or load_settings()
@@ -403,6 +435,8 @@ def create_app(
         pead_master=company_list.pead_master_path(settings.watch.bse_announcements_db),
     )
     web.state.backup_dir = backup_dir or watchlist_edit.BACKUP_DIR
+    # Where opening a stock's card leaves its scan request for the scanner.
+    web.state.scan_inbox = scan_inbox or settings.resolve_path(settings.watch.scan_requests_dir)
     web.state.allowed_hosts = allowed_hosts
     # Tests stand in for Google News and Yahoo here; None means the real ones.
     web.state.preview_transport = preview_transport
@@ -416,6 +450,7 @@ def create_app(
     web.mount("/static", StaticFiles(directory=WEB_DIR / "static"), name="static")
     templates = Jinja2Templates(directory=WEB_DIR / "templates")
     templates.env.filters["ist"] = lambda value: _in_zone(value, settings)
+    templates.env.filters["day"] = lambda value, fmt="%d %b": _day(value, settings, fmt)
 
     @web.middleware("http")
     async def always_revalidate(
@@ -530,6 +565,7 @@ def create_app(
                 item, SPARK_WIDTH, SPARK_HEIGHT, SPARK_PAD
             ),
             "prices_as_of": _stamp(last_pipeline_finish(session), settings),
+            "scan_steps": ondemand.STEPS,
         }
         context |= _editor_context(request, now) | {
             "added": added,
@@ -752,6 +788,169 @@ def create_app(
             return _back(error=str(exc))
         log.info("watchlist: removed %s from the page", symbol)
         return _back(removed=names.get(symbol, symbol))
+
+    # ------------------------------------------------------------ one stock, scanned now
+
+    def _watched_stock(request: Request, symbol: str) -> WatchItem:
+        item = next((s for s in current_watchlist(request).stocks if s.symbol == symbol), None)
+        if item is None:
+            raise HTTPException(
+                status_code=404, detail=f"{symbol or 'that'} is not a stock on the watchlist"
+            )
+        return item
+
+    def _scan_body(
+        request: Request,
+        session: Session,
+        item: WatchItem,
+        state: ondemand.ScanState,
+        now: datetime,
+    ) -> HTMLResponse:
+        """The stock dialog's body for where its scan stands. Its tabs read what is stored;
+        while the scan is on its way only the wait is drawn, so they aren't read for nothing."""
+        assets: dict[str, AssetConfig] = request.app.state.assets
+        watched = current_watchlist(request)
+        card = watch_queries.stock_card(session, watched, item.symbol, assets, settings, now)
+        latest: list[watch_queries.LatestRow] = []
+        headlines: list[watch_queries.StockHeadline] = []
+        counts: dict[str, int] = {}
+        filings: list = []
+        if state.kind not in ("queued", "running"):
+            latest = watch_queries.stock_latest(
+                session, item.symbol, now, state.new_since(), settings
+            )
+            headlines, counts = watch_queries.stock_headlines(session, item.symbol, now)
+            filings = watch_queries.stock_filings(session, item.symbol, now)
+        finished = state.finished
+        reuse = timedelta(seconds=settings.watch.scan_reuse_seconds)
+        fresh = (
+            finished is not None
+            and finished.finished_at is not None
+            and now - finished.finished_at <= reuse
+        )
+        heartbeat = state.heartbeat
+        context = {
+            "item": item,
+            "name": card.name if card else item.name or item.symbol,
+            "card": card,
+            "asset_href": f"/asset/{item.symbol}" if item.symbol in assets else None,
+            "state": state,
+            "facts": preview_facts(state.profile),
+            "chart_points": preview_chart_points,
+            "latest": latest,
+            "headlines": headlines,
+            "counts": counts,
+            "filings": filings,
+            "stock_days": watch_queries.STOCK_DAYS,
+            "new_days": settings.watch.on_demand_days,
+            "filing_days": watch_queries.FILING_DAYS,
+            "marks": watch_queries.MARK,
+            "fresh_ago": ondemand.ago(finished.finished_at, now)  # type: ignore[union-attr,arg-type]
+            if fresh
+            else None,
+            "footer": ondemand.footer_line(finished) if finished else None,
+            "token": request.app.state.write_token,
+            "scan_url": f"/watchlist/scan?symbol={quote(item.symbol)}",
+            "poll_fast": ondemand.POLL_FAST,
+            "poll_slow": ondemand.POLL_SLOW,
+            "start_commands": ondemand.START_SCANNER,
+            "alive": heartbeat is not None and heartbeat.alive(now),
+            "ago": ondemand.ago,
+            "now": now,
+            "step_words": {
+                "pending": "to do",
+                "running": "in progress",
+                "done": "done",
+                "failed": "failed",
+                "skipped": "skipped",
+            },
+        }
+        return templates.TemplateResponse(request, "_watch_scan.html", context)
+
+    @web.post("/watchlist/scan", response_class=HTMLResponse)
+    async def watch_scan(request: Request, session: ReadSession) -> HTMLResponse:
+        """Ask the scanner to scan one stock now, from its card (user, 2026-10-18). Writes
+        one request file into the scanner's inbox and nothing else: the database is the
+        scanner's. A scan already asked for, or on its way, is not asked for twice, and one
+        finished in the last two minutes is shown again unless "Scan again" asked for a new
+        one. Only from this app's page."""
+        form = await read_form(request)
+        if why := write_refused(request, form):
+            raise HTTPException(status_code=403, detail=why)
+        item = _watched_stock(request, form.get("symbol", ""))
+        now = utcnow()
+        inbox: Path = request.app.state.scan_inbox
+        state = ondemand.scan_state(session, inbox, item.symbol, now, settings)
+        if ondemand.should_ask(state, now, settings, again=form.get("again") == "1"):
+            ondemand.write_request(inbox, item.symbol, now)
+            log.info("watchlist: scan of %s asked for from the page", item.symbol)
+            state = ondemand.scan_state(session, inbox, item.symbol, now, settings)
+        return _scan_body(request, session, item, state, now)
+
+    @web.get("/watchlist/scan", response_class=HTMLResponse)
+    def watch_scan_state(
+        request: Request, session: ReadSession, symbol: str, part: str = ""
+    ) -> HTMLResponse:
+        """Where one stock's scan stands. Reads only. The dialog asks every 1.5 s while the
+        scan is on its way, every 5 s (`part=status`, the note alone) while it only waits for
+        the scanner, and not at all once there is nothing left to wait for."""
+        item = _watched_stock(request, symbol)
+        now = utcnow()
+        state = ondemand.scan_state(session, request.app.state.scan_inbox, symbol, now, settings)
+        if part == "status" and state.kind in ("waiting", "not_running"):
+            heartbeat = state.heartbeat
+            context = {
+                "state": state,
+                "scan_url": f"/watchlist/scan?symbol={quote(item.symbol)}",
+                "poll_slow": ondemand.POLL_SLOW,
+                "start_commands": ondemand.START_SCANNER,
+                "alive": heartbeat is not None and heartbeat.alive(now),
+            }
+            return templates.TemplateResponse(request, "_watch_scan_status.html", context)
+        response = _scan_body(request, session, item, state, now)
+        if part == "status":
+            # It has moved on: the whole body, in place of the waiting note.
+            response.headers["HX-Retarget"] = "#watch-scan-body"
+            response.headers["HX-Reswap"] = "outerHTML"
+        return response
+
+    @web.get("/watchlist/card", response_class=HTMLResponse)
+    def watch_card(request: Request, session: ReadSession, symbol: str) -> HTMLResponse:
+        """One card, redrawn when its dialog closes, so what the scan found shows on it."""
+        now = utcnow()
+        card = watch_queries.stock_card(
+            session, current_watchlist(request), symbol, request.app.state.assets, settings, now
+        )
+        if card is None:
+            raise HTTPException(status_code=404, detail=f"{symbol} is not on the watchlist")
+        try:
+            version: str | None = watchlist_edit.read(request.app.state.watchlist_path).version
+        except Exception:  # a broken file is shown, never edited
+            version = None
+        context = {
+            "card": card,
+            "token": request.app.state.write_token,
+            "version": version,
+            "card_points": lambda item: queries.sparkline_points(
+                item, CARD_SPARK_WIDTH, CARD_SPARK_HEIGHT, CARD_SPARK_PAD
+            ),
+        }
+        return templates.TemplateResponse(request, "_watch_card.html", context)
+
+    @web.get("/watchlist/news", response_class=HTMLResponse)
+    def watch_news_list(request: Request, session: ReadSession) -> HTMLResponse:
+        """ "News touching your watchlist", redrawn when a stock's dialog closes."""
+        now = utcnow()
+        context = {
+            "news": watch_queries.watch_news(
+                session, current_watchlist(request), request.app.state.assets, settings, now
+            ),
+            "news_days": watch_queries.NEWS_DAYS,
+            "points": lambda item: queries.sparkline_points(
+                item, SPARK_WIDTH, SPARK_HEIGHT, SPARK_PAD
+            ),
+        }
+        return templates.TemplateResponse(request, "_watch_news.html", context)
 
     @web.get("/watchlist/story/{story_id}", response_class=HTMLResponse)
     def watch_story(request: Request, session: ReadSession, story_id: int) -> HTMLResponse:

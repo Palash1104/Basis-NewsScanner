@@ -340,6 +340,7 @@ class SharedRead:
     found: list[tuple[str, "Announcement"]]  # (watchlist symbol, announcement), write order
     position: int | None  # the last seq this read covered; None leaves the cursor alone
     error: str | None = None
+    last_write: datetime | None = None  # when the PEAD tool last wrote a row (UTC)
 
 
 def read_bse_announcements(
@@ -370,6 +371,7 @@ def read_bse_announcements(
         try:
             conn.execute("BEGIN")  # one snapshot for both reads
             top = conn.execute("SELECT MAX(rowid) FROM announcements").fetchone()[0] or 0
+            newest = conn.execute("SELECT MAX(fetched_at) FROM announcements").fetchone()[0]
             # No cursor, or one past the end: a first read. Any real cursor - 0 included,
             # left by a read of an empty file - keeps every row behind it, however old.
             first_read = after is None or after > top
@@ -415,7 +417,18 @@ def read_bse_announcements(
                 ),
             )
         )
-    return SharedRead(found, top)
+    return SharedRead(found, top, last_write=_shared_time(newest))
+
+
+def _shared_time(stamp: str | None) -> datetime | None:
+    """A time the PEAD tool wrote: with its offset since 2026-10-08, IST before that."""
+    try:
+        moment = datetime.fromisoformat(stamp) if stamp else None
+    except ValueError:
+        return None
+    if moment is None:
+        return None
+    return (moment if moment.tzinfo else moment.replace(tzinfo=NSE_TIMEZONE)).astimezone(UTC)
 
 
 def watched_announcements(

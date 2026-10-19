@@ -597,6 +597,36 @@ class WatchRun(Base):
     details: Mapped[dict[str, Any] | None] = mapped_column(JSON)
 
 
+class WatchScan(Base):
+    """One scan of one stock, asked for by opening its card on /watchlist
+    (app/watch/ondemand.py). The scanner writes it as the scan goes - each step as it ends -
+    and the page only reads it. `profile` is Yahoo's, fetched by the scanner, so the page
+    makes no Yahoo call when a card opens. Not in SPEC section 6."""
+
+    __tablename__ = "watch_scans"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    request_id: Mapped[str] = mapped_column(String(40), unique=True)
+    symbol: Mapped[str] = mapped_column(String(32), index=True)
+    requested_at: Mapped[datetime] = mapped_column(UTCDateTime)
+    started_at: Mapped[datetime] = mapped_column(UTCDateTime, index=True)
+    updated_at: Mapped[datetime] = mapped_column(UTCDateTime)
+    finished_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    status: Mapped[str] = mapped_column(String(16))  # running | done | failed
+    # [{"key", "label", "state": pending|running|done|failed|skipped, "detail"}], in order.
+    steps: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
+    new_articles: Mapped[int] = mapped_column(Integer, default=0)
+    new_filings: Mapped[int] = mapped_column(Integer, default=0)
+    new_stories: Mapped[int] = mapped_column(Integer, default=0)
+    calls: Mapped[int] = mapped_column(Integer, default=0)
+    # Results the scan didn't store because they were old news (published more than
+    # watch.catch_up_max_days before it saw them).
+    skipped_stale: Mapped[int] = mapped_column(Integer, default=0)
+    errors: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
+    note: Mapped[str | None] = mapped_column(Text)  # e.g. the watch lane's budget is spent
+    profile: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+
+
 class WatchCursor(Base):
     """How far the scanner has read a source it reads in order: for the PEAD tool's shared
     file, the last `seq` processed. Written in the same transaction as what was read from it,
